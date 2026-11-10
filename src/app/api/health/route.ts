@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
   if (!targetUrl) {
     return NextResponse.json({
       status: "ok",
-      service: "PANTAU NUSANTARA Health Engine",
+      service: "SCC - EAGLE EYES Health Engine",
       stats: store.getStats()
     });
   }

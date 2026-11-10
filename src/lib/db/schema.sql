@@ -1,4 +1,4 @@
--- PANTAU NUSANTARA — Modular SQLite / Cloudflare D1 Schema
+-- SCC - EAGLE EYES — Modular SQLite / Cloudflare D1 Schema
 -- Copyright: Developed by Ganesha Ladesta
 
 CREATE TABLE IF NOT EXISTS provinces (

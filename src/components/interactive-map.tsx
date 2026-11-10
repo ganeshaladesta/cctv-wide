@@ -191,7 +191,24 @@ export default function InteractiveMap({
     clusterGroupRef.current = clusterGroup;
     plainLayerGroupRef.current = plainGroup;
 
+    // Automatically invalidate map size when container or navigation resizes
+    const containerEl = mapContainerRef.current;
+    let resizeObs: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined" && containerEl) {
+      resizeObs = new ResizeObserver(() => {
+        map.invalidateSize({ animate: false });
+      });
+      resizeObs.observe(containerEl);
+    }
+
+    const handleWinResize = () => {
+      map.invalidateSize({ animate: false });
+    };
+    window.addEventListener("resize", handleWinResize);
+
     return () => {
+      window.removeEventListener("resize", handleWinResize);
+      resizeObs?.disconnect();
       clusterGroup.clearLayers();
       plainGroup.clearLayers();
       map.remove();
@@ -335,119 +352,126 @@ export default function InteractiveMap({
   };
 
   const previewProvinceSlug = previewCam
-    ? previewCam.province_id.replace(/^prov-/, "")
+    ? provinces.find((p) => p.id === previewCam.province_id)?.slug ||
+      previewCam.province_id.replace(/^prov-/, "")
     : "dki-jakarta";
 
   return (
     <div
       ref={wrapRef}
-      className={`relative w-full h-full min-h-[540px] bg-zinc-950 rounded-xl overflow-hidden border border-zinc-800 ${
+      className={`relative w-full h-full min-h-[420px] sm:min-h-[540px] bg-zinc-950 rounded-xl overflow-hidden border border-zinc-800 ${
         darkFilter ? "osm-dark-tiles" : ""
       }`}
     >
       {/* Map Canvas */}
-      <div ref={mapContainerRef} className="w-full h-full min-h-[540px] z-0" />
+      <div
+        ref={mapContainerRef}
+        className="w-full h-full min-h-[420px] sm:min-h-[540px] z-0"
+      />
 
-      {/* Top-Left Map Status Pill (Synchronized with Valid Filtered Markers) */}
-      <div className="absolute top-3 left-3 z-[400] flex flex-wrap items-center gap-2 pointer-events-auto">
-        <div
-          data-testid="map-camera-counter"
-          className="px-3 py-1.5 rounded-lg bg-zinc-950/90 backdrop-blur-md border border-zinc-800 text-xs flex items-center gap-2 shadow-lg"
-        >
-          <span
-            className={`w-2 h-2 rounded-full ${
-              loadingMarkers
-                ? "bg-amber-400 animate-ping"
-                : "bg-emerald-400 animate-pulse"
-            }`}
-          />
-          <span className="font-semibold text-zinc-100 font-mono">
-            {validMarkers.length.toLocaleString("id-ID")}
-          </span>
-          <span className="text-zinc-400">kamera di peta</span>
-          <span className="hidden sm:inline text-[11px] text-emerald-400 font-mono border-l border-zinc-800 pl-2">
-            {onlineValidCount.toLocaleString("id-ID")} Online
-          </span>
-        </div>
+      {/* Responsive Top Overlay Controls (Wraps cleanly on 320px mobile without collision) */}
+      <div className="absolute top-2.5 inset-x-2.5 z-[400] flex flex-wrap items-center justify-between gap-1.5 pointer-events-none">
+        {/* Left: Map Status Pill & Cluster Toggle */}
+        <div className="flex flex-wrap items-center gap-1.5 pointer-events-auto max-w-full">
+          <div
+            data-testid="map-camera-counter"
+            className="px-2.5 sm:px-3 py-1.5 rounded-lg bg-zinc-950/90 backdrop-blur-md border border-zinc-800 text-[11px] sm:text-xs flex items-center gap-1.5 sm:gap-2 shadow-lg"
+          >
+            <span
+              className={`w-2 h-2 rounded-full shrink-0 ${
+                loadingMarkers
+                  ? "bg-amber-400 animate-ping"
+                  : "bg-emerald-400 animate-pulse"
+              }`}
+            />
+            <span className="font-semibold text-zinc-100 font-mono">
+              {validMarkers.length.toLocaleString("id-ID")}
+            </span>
+            <span className="text-zinc-400">kamera di peta</span>
+            <span className="hidden sm:inline text-[11px] text-emerald-400 font-mono border-l border-zinc-800 pl-2">
+              {onlineValidCount.toLocaleString("id-ID")} Online
+            </span>
+          </div>
 
-        <button
-          type="button"
-          onClick={() => setClustering((c) => !c)}
-          className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border backdrop-blur-md transition shadow-lg ${
-            clustering
-              ? "bg-emerald-950/90 border-emerald-500/50 text-emerald-300"
-              : "bg-zinc-950/90 border-zinc-800 text-zinc-300 hover:text-white"
-          }`}
-        >
-          Cluster: {clustering ? "AKTIF" : "NONAKTIF"}
-        </button>
-      </div>
-
-      {/* Top-Right OSM Theme & Fullscreen Controls */}
-      <div className="absolute top-3 right-3 z-[400] flex items-center gap-1.5 pointer-events-auto">
-        <div className="flex items-center bg-zinc-950/90 backdrop-blur-md border border-zinc-800 rounded-lg p-1 shadow-lg">
-          <Layers className="w-3.5 h-3.5 text-zinc-400 ml-1.5 mr-1" />
           <button
             type="button"
-            onClick={() => setDarkFilter(true)}
-            className={`px-2 py-1 rounded text-[11px] font-medium transition ${
-              darkFilter
-                ? "bg-emerald-600 text-white"
-                : "text-zinc-400 hover:text-zinc-200"
+            onClick={() => setClustering((c) => !c)}
+            className={`px-2 sm:px-2.5 py-1.5 rounded-lg text-[11px] sm:text-xs font-medium border backdrop-blur-md transition shadow-lg ${
+              clustering
+                ? "bg-sky-950/90 border-sky-500/50 text-sky-300"
+                : "bg-zinc-950/90 border-zinc-800 text-zinc-300 hover:text-white"
             }`}
           >
-            OSM Gelap
-          </button>
-          <button
-            type="button"
-            onClick={() => setDarkFilter(false)}
-            className={`px-2 py-1 rounded text-[11px] font-medium transition ${
-              !darkFilter
-                ? "bg-emerald-600 text-white"
-                : "text-zinc-400 hover:text-zinc-200"
-            }`}
-          >
-            OSM Standar
+            Cluster: {clustering ? "AKTIF" : "NONAKTIF"}
           </button>
         </div>
 
-        <button
-          type="button"
-          onClick={handleLocateMe}
-          title="Lokasi Saya"
-          className="p-2 rounded-lg bg-zinc-950/90 backdrop-blur-md border border-zinc-800 text-zinc-300 hover:text-white shadow-lg transition"
-        >
-          <Navigation className="w-4 h-4" />
-        </button>
+        {/* Right: OSM Theme & Fullscreen Controls */}
+        <div className="flex flex-wrap items-center gap-1 sm:gap-1.5 pointer-events-auto">
+          <div className="flex items-center bg-zinc-950/90 backdrop-blur-md border border-zinc-800 rounded-lg p-1 shadow-lg">
+            <Layers className="w-3.5 h-3.5 text-amber-400 ml-1 mr-1 hidden xs:inline" />
+            <button
+              type="button"
+              onClick={() => setDarkFilter(true)}
+              className={`px-1.5 sm:px-2 py-1 rounded text-[10px] sm:text-[11px] font-medium transition ${
+                darkFilter
+                  ? "bg-sky-600 text-white"
+                  : "text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              OSM Gelap
+            </button>
+            <button
+              type="button"
+              onClick={() => setDarkFilter(false)}
+              className={`px-1.5 sm:px-2 py-1 rounded text-[10px] sm:text-[11px] font-medium transition ${
+                !darkFilter
+                  ? "bg-sky-600 text-white"
+                  : "text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              OSM Standar
+            </button>
+          </div>
 
-        <button
-          type="button"
-          onClick={handleResetView}
-          title="Reset Peta Nusantara"
-          className="p-2 rounded-lg bg-zinc-950/90 backdrop-blur-md border border-zinc-800 text-zinc-300 hover:text-white shadow-lg transition"
-        >
-          <RotateCcw className="w-4 h-4" />
-        </button>
+          <button
+            type="button"
+            onClick={handleLocateMe}
+            title="Lokasi Saya"
+            className="p-1.5 sm:p-2 rounded-lg bg-zinc-950/90 backdrop-blur-md border border-zinc-800 text-zinc-300 hover:text-white shadow-lg transition"
+          >
+            <Navigation className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+          </button>
 
-        <button
-          type="button"
-          onClick={toggleFullscreen}
-          title="Peta Layar Penuh"
-          className="p-2 rounded-lg bg-zinc-950/90 backdrop-blur-md border border-zinc-800 text-zinc-300 hover:text-white shadow-lg transition"
-        >
-          {isFullscreen ? (
-            <Minimize2 className="w-4 h-4" />
-          ) : (
-            <Maximize2 className="w-4 h-4" />
-          )}
-        </button>
+          <button
+            type="button"
+            onClick={handleResetView}
+            title="Reset Peta Indonesia"
+            className="p-1.5 sm:p-2 rounded-lg bg-zinc-950/90 backdrop-blur-md border border-zinc-800 text-zinc-300 hover:text-white shadow-lg transition"
+          >
+            <RotateCcw className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+          </button>
+
+          <button
+            type="button"
+            onClick={toggleFullscreen}
+            title="Peta Layar Penuh"
+            className="p-1.5 sm:p-2 rounded-lg bg-zinc-950/90 backdrop-blur-md border border-zinc-800 text-zinc-300 hover:text-white shadow-lg transition"
+          >
+            {isFullscreen ? (
+              <Minimize2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            ) : (
+              <Maximize2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Floating Camera Information & Live Preview Card when Marker is Clicked */}
       {previewCam && (
         <div
           data-testid="map-camera-popup"
-          className="absolute bottom-4 left-4 z-[450] w-[340px] sm:w-[390px] max-w-[calc(100vw-2rem)] rounded-xl bg-zinc-950/95 backdrop-blur-xl border border-zinc-700/80 shadow-2xl overflow-hidden pointer-events-auto"
+          className="absolute bottom-3 left-2.5 right-2.5 sm:left-4 sm:right-auto z-[450] sm:w-[380px] rounded-xl bg-zinc-950/95 backdrop-blur-xl border border-zinc-700/80 shadow-2xl overflow-hidden pointer-events-auto"
         >
           {/* Header: Name, Status Badge, Close Button */}
           <div className="flex items-start justify-between gap-2 px-3.5 py-2.5 bg-zinc-900 border-b border-zinc-800">

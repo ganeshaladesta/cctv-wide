@@ -1,19 +1,43 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { APP_CONFIG } from "@/lib/branding";
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  themeColor: "#09090b"
+};
 
 export const metadata: Metadata = {
-  title:
-    "PANTAU NUSANTARA — Pemantauan CCTV Lalu Lintas & Publik 38 Provinsi Indonesia",
-  description:
-    "Platform pemantauan 23.355+ kamera CCTV lalu lintas (ATCS Dishub, Diskominfo, Bina Marga, Jasa Marga) di seluruh 38 Provinsi Indonesia. Gratis, tanpa batas waktu, dilengkapi Multi-View & Peta Interaktif. Developed by Ganesha Ladesta.",
+  title: APP_CONFIG.title,
+  applicationName: APP_CONFIG.name,
+  description: APP_CONFIG.description,
   authors: [{ name: "Ganesha Ladesta" }],
+  manifest: "/manifest.webmanifest",
+  icons: {
+    icon: [
+      {
+        url: APP_CONFIG.primaryIcon,
+        type: "image/webp"
+      }
+    ],
+    shortcut: [APP_CONFIG.primaryIcon],
+    apple: [
+      {
+        url: APP_CONFIG.primaryIcon,
+        type: "image/webp"
+      }
+    ]
+  },
   keywords: [
+    "SCC - EAGLE EYES",
+    "Eagle Eyes",
+    "Bank Indonesia",
+    "DLAF",
+    "PAMBI",
     "CCTV Indonesia",
     "ATCS Indonesia",
-    "Pantau Nusantara",
-    "CCTV Lalu Lintas",
-    "Dishub ATCS",
-    "CCTV Jalan Tol",
+    "Integrated Monitoring System",
     "Ganesha Ladesta"
   ]
 };
@@ -25,10 +49,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="id" className="dark">
-      <body className="min-h-screen bg-zinc-950 text-zinc-100 antialiased">
+      <body className="min-h-screen bg-zinc-950 text-zinc-100 antialiased overflow-x-hidden">
         {children}
       </body>
     </html>
   );
 }
-

@@ -1,8 +1,8 @@
 {
-  "name": "pantau-nusantara",
+  "name": "scc-eagle-eyes",
   "version": "1.0.0",
   "private": true,
-  "description": "PANTAU NUSANTARA — Indonesia Public CCTV Aggregator across all 38 Provinces. Developed by Ganesha Ladesta.",
+  "description": "SCC - EAGLE EYES — Sistem pemantauan CCTV lalu lintas dan infrastruktur secara terintegrasi untuk mendukung monitoring situasi secara real-time. Developed by Ganesha Ladesta.",
   "author": "Ganesha Ladesta",
   "license": "MIT",
   "scripts": {

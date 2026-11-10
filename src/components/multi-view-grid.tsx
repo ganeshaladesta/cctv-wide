@@ -135,18 +135,18 @@ export default function MultiViewGrid({
   return (
     <div className="space-y-4">
       {/* Control Header */}
-      <div className="p-4 rounded-xl bg-zinc-900/90 border border-zinc-800 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2.5">
-          <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
+      <div className="p-3 sm:p-4 rounded-xl bg-zinc-900/90 border border-zinc-800 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+        <div className="flex items-start sm:items-center gap-2.5 min-w-0">
+          <div className="p-2 rounded-lg bg-sky-500/15 border border-sky-500/30 text-sky-400 shrink-0">
             <Grid className="w-5 h-5" />
           </div>
-          <div>
-            <div className="flex items-center gap-2">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-sm font-bold text-zinc-100">
                 Multi-View Command Wall
               </h2>
-              <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-semibold">
-                100% GRATIS • TANPA BATAS WAKTU
+              <span className="px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 text-[10px] font-semibold">
+                REAL-TIME • MULTI-STREAM
               </span>
             </div>
             <p className="text-xs text-zinc-400">
@@ -162,9 +162,9 @@ export default function MultiViewGrid({
               key={opt.size}
               type="button"
               onClick={() => setLayoutSize(opt.size)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition ${
+              className={`px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold border transition ${
                 layoutSize === opt.size
-                  ? "bg-emerald-600 border-emerald-500 text-white shadow"
+                  ? "bg-sky-600 border-sky-500 text-white shadow"
                   : "bg-zinc-950 border-zinc-800 text-zinc-300 hover:border-zinc-700"
               }`}
             >
@@ -226,12 +226,12 @@ export default function MultiViewGrid({
         {slots.map((cam, idx) => (
           <div
             key={cam ? `${cam.id}-${idx}` : `empty-slot-${idx}`}
-            className={`relative rounded-xl overflow-hidden bg-zinc-900/60 border border-zinc-800 flex flex-col ${
+            className={`relative rounded-xl overflow-hidden bg-zinc-900/60 border border-zinc-800 flex flex-col min-w-0 ${
               layoutSize === 1
-                ? "h-[540px]"
+                ? "h-[320px] sm:h-[520px]"
                 : layoutSize === 2
-                ? "h-[380px]"
-                : "h-[270px]"
+                ? "h-[250px] sm:h-[360px]"
+                : "h-[230px] sm:h-[270px]"
             }`}
           >
             {cam ? (

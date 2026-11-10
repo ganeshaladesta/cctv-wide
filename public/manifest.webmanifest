@@ -1,0 +1,30 @@
+{
+  "name": "SCC - EAGLE EYES | Integrated Monitoring System",
+  "short_name": "SCC - EAGLE EYES",
+  "description": "Sistem pemantauan CCTV lalu lintas dan infrastruktur secara terintegrasi untuk mendukung monitoring situasi secara real-time.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#09090b",
+  "theme_color": "#09090b",
+  "icons": [
+    {
+      "src": "/assets/logo-bank-indonesia.webp",
+      "sizes": "any",
+      "type": "image/webp",
+      "purpose": "any"
+    },
+    {
+      "src": "/assets/logo-bank-indonesia.webp",
+      "sizes": "192x192",
+      "type": "image/webp",
+      "purpose": "any"
+    },
+    {
+      "src": "/assets/logo-bank-indonesia.webp",
+      "sizes": "512x512",
+      "type": "image/webp",
+      "purpose": "any"
+    }
+  ]
+}
+

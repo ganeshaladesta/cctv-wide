@@ -1,6 +1,7 @@
-# PANTAU NUSANTARA — Indonesia Public CCTV Aggregator
+# SCC - EAGLE EYES — Integrated Monitoring System
 
-**Copyright:** Developed by Ganesha Ladesta  
+**Description:** Sistem pemantauan CCTV lalu lintas dan infrastruktur secara terintegrasi untuk mendukung monitoring situasi secara real-time.  
+**Copyright:** Developed by Ganesha Ladesta.  
 **Coverage:** 23,355+ Public Traffic & Municipal CCTV Cameras across all **38 Indonesian Provinces**, **557 Cities/Regencies**, and **610+ Government Sources** (`Dishub ATCS`, `Diskominfo`, `Bina Marga`, `Jasa Marga`, `Hutama Karya`, `Jakarta Smart City / BaliTower`, `Pemprov DIY`, `Badilag ACO`).
 
 ---

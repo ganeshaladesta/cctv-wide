@@ -2,8 +2,6 @@ import React from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
-  ChevronRight,
-  Radio,
   MapPin,
   Shield,
   ExternalLink,
@@ -11,6 +9,7 @@ import {
 } from "lucide-react";
 import { getDataStore } from "@/lib/data-store";
 import CCTVPlayer from "@/components/cctv-player";
+import { ResponsiveHeader, AppFooter } from "@/components/branding";
 
 export default async function CameraDetailPage(props: {
   params: Promise<{ province: string; id: string }>;
@@ -27,42 +26,15 @@ export default async function CameraDetailPage(props: {
   const nearby = store.getNearbyCameras(camera, 8);
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col">
-      <header className="border-b border-zinc-800 bg-zinc-900/80 px-4 lg:px-6 py-4">
-        <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <Link
-              href="/"
-              className="w-9 h-9 rounded-lg bg-emerald-600 flex items-center justify-center text-white"
-            >
-              <Radio className="w-5 h-5" />
-            </Link>
-            <div>
-              <div className="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400">
-                <Link href="/" className="hover:text-emerald-400">
-                  Indonesia
-                </Link>
-                <ChevronRight className="w-3.5 h-3.5" />
-                <Link
-                  href={`/kamera/${province}`}
-                  className="hover:text-emerald-400"
-                >
-                  {camera.province_name}
-                </Link>
-                <ChevronRight className="w-3.5 h-3.5" />
-                <span className="text-zinc-300">{camera.city_name}</span>
-                <ChevronRight className="w-3.5 h-3.5" />
-                <span className="text-emerald-400 font-medium truncate max-w-[220px]">
-                  {camera.name}
-                </span>
-              </div>
-              <h1 className="text-lg font-extrabold text-white mt-0.5">
-                {camera.name}
-              </h1>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
+    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-zinc-950 text-zinc-100 flex flex-col">
+      <ResponsiveHeader
+        breadcrumbs={[
+          { label: "Direktori 38 Provinsi", href: "/kamera" },
+          { label: camera.province_name, href: `/kamera/${province}` },
+          { label: camera.name }
+        ]}
+        rightActions={
+          <>
             <Link
               href={`/kamera/${province}`}
               className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs font-medium text-zinc-200"
@@ -71,24 +43,24 @@ export default async function CameraDetailPage(props: {
             </Link>
             <Link
               href={`/?view=multiview&multi=${encodeURIComponent(camera.id)}`}
-              className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-semibold text-white"
+              className="px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-xs font-semibold text-white"
             >
               Buka di Multi-View
             </Link>
-          </div>
-        </div>
-      </header>
+          </>
+        }
+      />
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 lg:px-6 py-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
-        <div className="lg:col-span-8 space-y-4">
-          <div className="h-[420px] sm:h-[500px] rounded-xl overflow-hidden">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-4 lg:px-6 py-5 sm:py-6 grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-6">
+        <div className="lg:col-span-8 space-y-4 min-w-0">
+          <div className="h-[260px] sm:h-[420px] md:h-[500px] rounded-xl overflow-hidden">
             <CCTVPlayer camera={camera} />
           </div>
 
-          <div className="p-4 rounded-xl bg-zinc-900/80 border border-zinc-800 flex flex-wrap items-center justify-between gap-3 text-xs">
-            <div className="flex items-center gap-2 text-zinc-300">
-              <Shield className="w-4 h-4 text-emerald-400" />
-              <span>
+          <div className="p-3.5 sm:p-4 rounded-xl bg-zinc-900/80 border border-zinc-800 flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2 text-zinc-300 min-w-0">
+              <Shield className="w-4 h-4 text-sky-400 shrink-0" />
+              <span className="truncate">
                 Sumber Resmi:{" "}
                 <strong className="text-white">{camera.source_name}</strong>
               </span>
@@ -97,7 +69,7 @@ export default async function CameraDetailPage(props: {
               href={camera.source_url}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 text-emerald-400 hover:text-emerald-300 font-medium"
+              className="inline-flex items-center gap-1.5 text-amber-400 hover:text-amber-300 font-medium shrink-0"
             >
               <span>Buka Website Resmi Instansi</span>
               <ExternalLink className="w-3.5 h-3.5" />
@@ -105,45 +77,45 @@ export default async function CameraDetailPage(props: {
           </div>
         </div>
 
-        <div className="lg:col-span-4 space-y-4">
+        <div className="lg:col-span-4 space-y-4 min-w-0">
           <div className="p-4 rounded-xl bg-zinc-900 border border-zinc-800 space-y-2.5 text-xs">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-300 border-b border-zinc-800 pb-2">
-              Metadata & Spesifikasi Kamera
-            </h2>
-            <div className="flex justify-between py-1 border-b border-zinc-800/60">
-              <span className="text-zinc-400">ID Kamera</span>
-              <span className="font-mono text-zinc-200">{camera.id}</span>
+            <h1 className="text-sm font-extrabold text-white border-b border-zinc-800 pb-2 truncate">
+              {camera.name}
+            </h1>
+            <div className="flex justify-between gap-2 py-1 border-b border-zinc-800/60">
+              <span className="text-zinc-400 shrink-0">ID Kamera</span>
+              <span className="font-mono text-zinc-200 truncate">{camera.id}</span>
             </div>
-            <div className="flex justify-between py-1 border-b border-zinc-800/60">
-              <span className="text-zinc-400">Lokasi / Jalan</span>
-              <span className="text-zinc-100 font-medium text-right">
+            <div className="flex justify-between gap-2 py-1 border-b border-zinc-800/60">
+              <span className="text-zinc-400 shrink-0">Lokasi / Jalan</span>
+              <span className="text-zinc-100 font-medium text-right truncate">
                 {camera.location}
               </span>
             </div>
-            <div className="flex justify-between py-1 border-b border-zinc-800/60">
-              <span className="text-zinc-400">Kota / Kabupaten</span>
-              <span className="text-zinc-100 font-medium">
+            <div className="flex justify-between gap-2 py-1 border-b border-zinc-800/60">
+              <span className="text-zinc-400 shrink-0">Kota / Kabupaten</span>
+              <span className="text-zinc-100 font-medium text-right truncate">
                 {camera.city_name}
               </span>
             </div>
-            <div className="flex justify-between py-1 border-b border-zinc-800/60">
-              <span className="text-zinc-400">Provinsi</span>
-              <span className="text-zinc-100 font-medium">
+            <div className="flex justify-between gap-2 py-1 border-b border-zinc-800/60">
+              <span className="text-zinc-400 shrink-0">Provinsi</span>
+              <span className="text-zinc-100 font-medium text-right truncate">
                 {camera.province_name}
               </span>
             </div>
-            <div className="flex justify-between py-1 border-b border-zinc-800/60">
-              <span className="text-zinc-400">Koordinat (Lat, Lng)</span>
-              <span className="font-mono text-emerald-400">
+            <div className="flex justify-between gap-2 py-1 border-b border-zinc-800/60">
+              <span className="text-zinc-400 shrink-0">Koordinat (Lat, Lng)</span>
+              <span className="font-mono text-sky-400 text-right">
                 {camera.latitude}, {camera.longitude}
               </span>
             </div>
-            <div className="flex justify-between py-1 border-b border-zinc-800/60">
-              <span className="text-zinc-400">Protokol Streaming</span>
+            <div className="flex justify-between gap-2 py-1 border-b border-zinc-800/60">
+              <span className="text-zinc-400 shrink-0">Protokol Streaming</span>
               <span className="font-mono text-zinc-200">{camera.protocol}</span>
             </div>
-            <div className="flex justify-between py-1 border-b border-zinc-800/60">
-              <span className="text-zinc-400">Status Saat Ini</span>
+            <div className="flex justify-between gap-2 py-1 border-b border-zinc-800/60">
+              <span className="text-zinc-400 shrink-0">Status Saat Ini</span>
               <span
                 className={`font-bold ${
                   camera.status === "ONLINE"
@@ -154,11 +126,11 @@ export default async function CameraDetailPage(props: {
                 {camera.status}
               </span>
             </div>
-            <div className="flex justify-between py-1">
-              <span className="text-zinc-400 flex items-center gap-1">
+            <div className="flex justify-between gap-2 py-1">
+              <span className="text-zinc-400 flex items-center gap-1 shrink-0">
                 <Clock className="w-3.5 h-3.5" /> Verifikasi Terakhir
               </span>
-              <span className="font-mono text-zinc-300">
+              <span className="font-mono text-zinc-300 text-right">
                 {new Date(camera.last_checked_at).toLocaleString("id-ID")}
               </span>
             </div>
@@ -174,15 +146,15 @@ export default async function CameraDetailPage(props: {
                   <Link
                     key={nc.id}
                     href={`/kamera/${province}/${encodeURIComponent(nc.id)}`}
-                    className="py-2 flex items-center justify-between gap-2 text-xs hover:text-emerald-400 transition"
+                    className="py-2 flex items-center justify-between gap-2 text-xs hover:text-sky-400 transition"
                   >
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <p className="font-medium truncate">{nc.name}</p>
-                      <p className="text-[11px] text-zinc-400 flex items-center gap-1">
-                        <MapPin className="w-3 h-3" /> {nc.city_name}
+                      <p className="text-[11px] text-zinc-400 flex items-center gap-1 truncate">
+                        <MapPin className="w-3 h-3 shrink-0" /> {nc.city_name}
                       </p>
                     </div>
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-zinc-800 text-emerald-400 shrink-0">
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-zinc-800 text-sky-400 shrink-0">
                       {nc.protocol}
                     </span>
                   </Link>
@@ -193,10 +165,7 @@ export default async function CameraDetailPage(props: {
         </div>
       </main>
 
-      <footer className="border-t border-zinc-800 px-4 lg:px-6 py-4 text-center text-xs text-zinc-400">
-        PANTAU NUSANTARA — Developed by Ganesha Ladesta.
-      </footer>
+      <AppFooter />
     </div>
   );
 }
-
