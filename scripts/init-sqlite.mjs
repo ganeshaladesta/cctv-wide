@@ -165,3 +165,4 @@ const counts = {
 
 console.log("[SQLite Seeded Successfully]:", counts);
 db.close();
+

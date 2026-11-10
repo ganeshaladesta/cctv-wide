@@ -75,7 +75,7 @@ export interface Camera {
 
 /**
  * Compact tuple for map markers:
- * [id, lat, lng, status (1=ONLINE,0=OFFLINE), protocol, name, city_name, province_id, source_name, stream_url]
+ * [0:id, 1:lat, 2:lng, 3:status(1=ONLINE,0=OFFLINE), 4:protocol, 5:name, 6:city_name, 7:province_id, 8:source_name, 9:stream_url, 10:province_name, 11:source_url]
  */
 export type CompactMarker = [
   string,
@@ -83,6 +83,8 @@ export type CompactMarker = [
   number,
   number,
   StreamProtocol,
+  string,
+  string,
   string,
   string,
   string,
@@ -130,4 +132,3 @@ export interface CCTVProviderAdapter {
   validateStream(streamUrl: string): Promise<StreamValidationResult>;
   getLastUpdated(): string;
 }
-

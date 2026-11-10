@@ -72,3 +72,4 @@ const stats = {
   ).length
 };
 console.log("[SYNC SUMMARY] Active Catalog:", stats);
+

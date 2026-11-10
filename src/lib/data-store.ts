@@ -11,6 +11,24 @@ import {
   StreamProtocol
 } from "@/lib/types";
 
+export function isValidCoordinate(lat: unknown, lng: unknown): boolean {
+  if (lat === null || lat === undefined || lng === null || lng === undefined) {
+    return false;
+  }
+  const latitude = Number(lat);
+  const longitude = Number(lng);
+  return (
+    !Number.isNaN(latitude) &&
+    !Number.isNaN(longitude) &&
+    Number.isFinite(latitude) &&
+    Number.isFinite(longitude) &&
+    latitude >= -90 &&
+    latitude <= 90 &&
+    longitude >= -180 &&
+    longitude <= 180
+  );
+}
+
 class CCTVDataStore {
   private provinces: Province[] = [];
   private cities: City[] = [];
@@ -39,9 +57,17 @@ class CCTVDataStore {
       this.sources = JSON.parse(
         fs.readFileSync(path.join(dataDir, "sources.json"), "utf8")
       );
-      this.cameras = JSON.parse(
+      const rawCameras: Camera[] = JSON.parse(
         fs.readFileSync(path.join(dataDir, "cameras.json"), "utf8")
       );
+
+      // Filter and normalize coordinates on load
+      this.cameras = rawCameras.filter((cam) => {
+        if (!isValidCoordinate(cam.latitude, cam.longitude)) return false;
+        cam.latitude = Number(cam.latitude);
+        cam.longitude = Number(cam.longitude);
+        return true;
+      });
 
       for (const p of this.provinces) {
         this.provinceByIdOrSlug.set(p.id.toLowerCase(), p);
@@ -288,18 +314,25 @@ class CCTVDataStore {
 
   getCompactMarkers(list?: Camera[]): CompactMarker[] {
     const target = list || this.cameras;
-    return target.map((c) => [
-      c.id,
-      c.latitude,
-      c.longitude,
-      c.status === "ONLINE" ? 1 : 0,
-      c.protocol,
-      c.name,
-      c.city_name,
-      c.province_id,
-      c.source_name,
-      c.stream_url
-    ]);
+    const out: CompactMarker[] = [];
+    for (const c of target) {
+      if (!isValidCoordinate(c.latitude, c.longitude)) continue;
+      out.push([
+        c.id,
+        Number(c.latitude),
+        Number(c.longitude),
+        c.status === "ONLINE" ? 1 : 0,
+        c.protocol,
+        c.name,
+        c.city_name,
+        c.province_id,
+        c.source_name,
+        c.stream_url,
+        c.province_name,
+        c.source_url
+      ]);
+    }
+    return out;
   }
 
   getStats(): DashboardStats {
@@ -355,4 +388,3 @@ export function getDataStore(): CCTVDataStore {
   }
   return globalStore;
 }
-

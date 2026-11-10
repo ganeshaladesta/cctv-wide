@@ -31,18 +31,23 @@ body {
   background: rgba(16, 185, 129, 0.7);
 }
 
-/* Leaflet Dark Theme Overrides */
+/* Leaflet Dark Theme Overrides for OpenStreetMap */
 .leaflet-container {
   background: #09090b !important;
   font-family: inherit;
 }
 
+/* Optional dark filter on standard OpenStreetMap tiles to match dark dashboard */
+.osm-dark-tiles .leaflet-tile-pane {
+  filter: invert(100%) hue-rotate(180deg) brightness(92%) contrast(90%);
+}
+
 .leaflet-popup-content-wrapper {
-  background: rgba(9, 9, 11, 0.95) !important;
+  background: rgba(9, 9, 11, 0.96) !important;
   color: #f4f4f5 !important;
-  border: 1px solid rgba(63, 63, 70, 0.8) !important;
+  border: 1px solid rgba(63, 63, 70, 0.85) !important;
   border-radius: 0.75rem !important;
-  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.7) !important;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.75) !important;
   backdrop-filter: blur(12px);
   padding: 0 !important;
 }
@@ -53,12 +58,12 @@ body {
 }
 
 .leaflet-popup-tip {
-  background: rgba(9, 9, 11, 0.95) !important;
-  border: 1px solid rgba(63, 63, 70, 0.8) !important;
+  background: rgba(9, 9, 11, 0.96) !important;
+  border: 1px solid rgba(63, 63, 70, 0.85) !important;
 }
 
 .leaflet-control-attribution {
-  background: rgba(9, 9, 11, 0.75) !important;
+  background: rgba(9, 9, 11, 0.8) !important;
   color: #a1a1aa !important;
   font-size: 10px !important;
   backdrop-filter: blur(4px);
@@ -68,3 +73,11 @@ body {
   color: #34d399 !important;
 }
 
+/* Custom MarkerCluster Styling */
+.cctv-cluster-icon {
+  background: transparent;
+}
+
+.cctv-marker-pin {
+  background: transparent;
+}

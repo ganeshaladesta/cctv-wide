@@ -82,6 +82,7 @@ export default function CommandCenter({
   const [loadingCameras, setLoadingCameras] = useState(false);
 
   const [markers, setMarkers] = useState<CompactMarker[]>([]);
+  const [loadingMarkers, setLoadingMarkers] = useState(true);
   const [multiViewCameras, setMultiViewCameras] = useState<Camera[]>(
     initialCameras.slice(0, 4)
   );
@@ -92,17 +93,8 @@ export default function CommandCenter({
     result?: string;
   }>({ loading: false });
 
-  // Load compact map markers & URL query hydration on mount
+  // URL query hydration on mount
   useEffect(() => {
-    fetch("/api/cameras?mode=markers")
-      .then((r) => r.json())
-      .then((json) => {
-        if (Array.isArray(json.markers)) {
-          setMarkers(json.markers);
-        }
-      })
-      .catch(() => {});
-
     if (typeof window !== "undefined") {
       const sp = new URLSearchParams(window.location.search);
       const view = sp.get("view");
@@ -135,6 +127,7 @@ export default function CommandCenter({
       setSelectedCity("");
       return;
     }
+    setSelectedCity("");
     fetch(`/api/cities?province_id=${encodeURIComponent(selectedProvince)}`)
       .then((r) => r.json())
       .then((j) => setCities(j.data || []))
@@ -151,10 +144,11 @@ export default function CommandCenter({
       .catch(() => {});
   }, [selectedProvince, selectedCity]);
 
-  // Fetch filtered cameras & markers
+  // Synchronized fetch for filtered cameras & map markers
   const fetchFilteredCameras = useCallback(
-    async (targetPage = 1) => {
+    async (targetPage = 1, signal?: AbortSignal) => {
       setLoadingCameras(true);
+      setLoadingMarkers(true);
       try {
         const params = new URLSearchParams();
         if (searchQuery.trim()) params.set("q", searchQuery.trim());
@@ -172,23 +166,34 @@ export default function CommandCenter({
         markerParams.set("mode", "markers");
 
         const [camRes, markerRes] = await Promise.all([
-          fetch(`/api/cameras?${listParams.toString()}`),
-          fetch(`/api/cameras?${markerParams.toString()}`)
+          fetch(`/api/cameras?${listParams.toString()}`, { signal }),
+          fetch(`/api/cameras?${markerParams.toString()}`, { signal })
         ]);
-        const camJson = await camRes.json();
-        const markerJson = await markerRes.json();
+        const [camJson, markerJson] = await Promise.all([
+          camRes.json(),
+          markerRes.json()
+        ]);
+
+        if (signal?.aborted) return;
 
         setCameras(camJson.data || []);
-        setTotalMatching(camJson.total || 0);
+        setTotalMatching(
+          typeof camJson.total === "number" ? camJson.total : 0
+        );
         setPage(camJson.page || 1);
         setTotalPages(camJson.total_pages || 1);
         if (Array.isArray(markerJson.markers)) {
           setMarkers(markerJson.markers);
         }
       } catch (err) {
-        console.error("Failed to fetch cameras:", err);
+        if ((err as Error)?.name !== "AbortError") {
+          console.error("Failed to fetch cameras:", err);
+        }
       } finally {
-        setLoadingCameras(false);
+        if (!signal?.aborted) {
+          setLoadingCameras(false);
+          setLoadingMarkers(false);
+        }
       }
     },
     [
@@ -202,11 +207,15 @@ export default function CommandCenter({
   );
 
   useEffect(() => {
+    const controller = new AbortController();
     const timer = setTimeout(() => {
-      fetchFilteredCameras(1);
-    }, 180);
-    return () => clearTimeout(timer);
-  }, [fetchFilteredCameras]);
+      fetchFilteredCameras(1, controller.signal);
+    }, searchQuery ? 180 : 0);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [fetchFilteredCameras, searchQuery]);
 
   const handleOpenCameraDetail = async (cam: Camera) => {
     setDetailCamera(cam);
@@ -514,7 +523,9 @@ export default function CommandCenter({
                 markers={markers}
                 provinces={provinces}
                 selectedProvince={selectedProvince}
+                selectedCity={selectedCity}
                 selectedCamera={detailCamera}
+                loadingMarkers={loadingMarkers}
                 onSelectCamera={handleOpenCameraDetail}
                 onAddToMultiView={handleAddToMultiView}
               />
