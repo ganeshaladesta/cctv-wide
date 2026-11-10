@@ -90,7 +90,7 @@ export default function RootLayout({
         <MotionProvider>
           <CodexRevealBackground />
           <LoadingOverlay durationMs={5000} />
-          <div className="relative z-[1] min-h-screen flex flex-col">
+          <div className="min-h-screen flex flex-col">
             {children}
           </div>
         </MotionProvider>

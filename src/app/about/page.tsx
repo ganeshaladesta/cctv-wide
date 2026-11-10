@@ -14,7 +14,7 @@ export default function AboutPage() {
     <div className="min-h-screen bg-transparent text-[#F3F6FB] flex flex-col">
       <ResponsiveHeader breadcrumbs={[{ label: "Tentang Sistem" }]} />
 
-      <main className="flex-1 max-w-5xl w-full mx-auto px-3 sm:px-4 lg:px-6 py-6 sm:py-10 space-y-6">
+      <main className="relative z-[1] flex-1 max-w-5xl w-full mx-auto px-3 sm:px-4 lg:px-6 py-6 sm:py-10 space-y-6">
         <div className="p-5 sm:p-8 rounded-2xl ee-surface space-y-6">
           <div className="flex flex-col sm:flex-row sm:items-center gap-5 border-b border-[var(--border-subtle)] pb-6">
             <EagleEyesLogo size="lg" animateHover={false} />

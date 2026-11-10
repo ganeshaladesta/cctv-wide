@@ -47,7 +47,7 @@ export default async function CameraDetailPage(props: {
         }
       />
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-4 lg:px-6 py-5 sm:py-6 grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-6">
+      <main className="relative z-[1] flex-1 max-w-7xl w-full mx-auto px-3 sm:px-4 lg:px-6 py-5 sm:py-6 grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-6">
         <div className="lg:col-span-8 space-y-4 min-w-0">
           <div className="h-[260px] sm:h-[420px] md:h-[500px] rounded-2xl overflow-hidden border border-[var(--border-default)] shadow-[var(--shadow-card)] bg-black">
             <CCTVPlayer camera={camera} />

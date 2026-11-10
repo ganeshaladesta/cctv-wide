@@ -358,7 +358,7 @@ export function ResponsiveHeader({
   ];
 
   return (
-    <header className="sticky top-0 z-[60] pointer-events-none px-2.5 sm:px-4 lg:px-6 pt-2 sm:pt-2.5">
+    <header className="sticky top-0 z-[500] pointer-events-none px-2.5 sm:px-4 lg:px-6 pt-2 sm:pt-2.5">
       <nav
         aria-label="Navigasi Utama"
         className="pointer-events-auto relative max-w-[1600px] mx-auto rounded-2xl ee-shell-surface overflow-x-clip"
@@ -580,7 +580,7 @@ export function AppFooter() {
         whileInView={{ opacity: 1, y: 0 }}
         viewport={{ once: true, amount: "some" }}
         transition={{ duration: 0.35, ease: EASE_STANDARD }}
-        className="relative max-w-[1600px] mx-auto rounded-2xl sm:rounded-3xl ee-shell-surface overflow-hidden"
+        className="relative z-[1] max-w-[1600px] mx-auto rounded-2xl sm:rounded-3xl ee-shell-surface overflow-hidden"
       >
         {/* Subtle Restrained Breathing Glows Inside Shell */}
         <div
@@ -741,7 +741,7 @@ export function AppFooter() {
           {/* Hairline Divider */}
           <div className="h-px w-full bg-[var(--border-subtle)]" />
 
-          {/* Bottom Copyright & Operational Attribution */}
+          {/* Bottom Copyright Section */}
           <div
             data-testid="footer-copyright-bar"
             className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-[11px] text-[#98A4B8]"
@@ -751,7 +751,7 @@ export function AppFooter() {
               <span className="text-[#E2E8F0] font-medium">
                 {APP_CONFIG.name}
               </span>
-              . {APP_CONFIG.copyright}
+              . All rights reserved.
             </p>
             <div className="inline-flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.12em] text-[#98A4B8]">
               <Radio className="w-3.5 h-3.5 text-[#10B981] shrink-0" />

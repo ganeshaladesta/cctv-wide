@@ -12,7 +12,7 @@ export default function FavoritesRoutePage() {
   return (
     <div className="min-h-screen bg-transparent text-[#F3F6FB] flex flex-col">
       <ResponsiveHeader breadcrumbs={[{ label: "Favorite CCTV" }]} />
-      <main className="max-w-[1600px] w-full mx-auto px-3 sm:px-4 lg:px-6 py-4 sm:py-6 flex-1">
+      <main className="relative z-[1] max-w-[1600px] w-full mx-auto px-3 sm:px-4 lg:px-6 py-4 sm:py-6 flex-1">
         <FavoritesPage />
       </main>
       <AppFooter />

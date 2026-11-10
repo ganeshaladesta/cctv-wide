@@ -36,7 +36,7 @@ export default async function ProvinceDirectoryPage(props: {
         ]}
       />
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-4 lg:px-6 py-5 sm:py-6 space-y-5 sm:space-y-6">
+      <main className="relative z-[1] flex-1 max-w-7xl w-full mx-auto px-3 sm:px-4 lg:px-6 py-5 sm:py-6 space-y-5 sm:space-y-6">
         <div className="p-4 sm:p-5 rounded-2xl ee-surface">
           <h1 className="text-base sm:text-lg font-extrabold text-[#F3F6FB]">
             CCTV Publik Provinsi {prov.name} (

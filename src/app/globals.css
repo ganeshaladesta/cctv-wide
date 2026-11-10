@@ -64,10 +64,10 @@
   --z-map-markers: 10;
   --z-map-controls: 20;
   --z-map-preview: 30;
-  --z-navbar: 60;
-  --z-dashboard-dropdown: 100;
+  --z-filter-toolbar: 40;
   --z-dropdown-trigger: 300;
   --z-dropdown-panel: 400;
+  --z-navbar: 500;
   --z-modal-backdrop: 900;
   --z-modal-content: 1000;
   --z-modal-tooltip: 1100;

@@ -16,7 +16,7 @@ export default function DirectoryRootPage() {
         breadcrumbs={[{ label: "Direktori 38 Provinsi" }]}
       />
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-4 lg:px-6 py-5 sm:py-6 space-y-5 sm:space-y-6">
+      <main className="relative z-[1] flex-1 max-w-7xl w-full mx-auto px-3 sm:px-4 lg:px-6 py-5 sm:py-6 space-y-5 sm:space-y-6">
         <div className="p-4 sm:p-5 rounded-2xl ee-surface flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-start sm:items-center gap-3 min-w-0">
             <Globe2 className="w-5 h-5 sm:w-6 sm:h-6 text-[#60A5FA] shrink-0 mt-0.5 sm:mt-0" />

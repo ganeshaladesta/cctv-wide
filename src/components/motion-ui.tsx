@@ -497,13 +497,32 @@ export function AnimatedDropdown({
       return;
     }
     updatePanelPosition();
+    const handleScroll = (event: Event) => {
+      if (
+        menuRef.current &&
+        event.target instanceof Node &&
+        menuRef.current.contains(event.target)
+      ) {
+        return;
+      }
+      const rect = containerRef.current?.getBoundingClientRect();
+      const headerNav = document.querySelector("header nav");
+      const headerBottom = headerNav
+        ? headerNav.getBoundingClientRect().bottom
+        : 0;
+      if (rect && rect.bottom <= headerBottom) {
+        close();
+        return;
+      }
+      updatePanelPosition();
+    };
     window.addEventListener("resize", updatePanelPosition);
-    window.addEventListener("scroll", updatePanelPosition, true);
+    window.addEventListener("scroll", handleScroll, true);
     return () => {
       window.removeEventListener("resize", updatePanelPosition);
-      window.removeEventListener("scroll", updatePanelPosition, true);
+      window.removeEventListener("scroll", handleScroll, true);
     };
-  }, [isOpen, updatePanelPosition]);
+  }, [isOpen, updatePanelPosition, containerRef, menuRef, close]);
 
   const selectedOption = useMemo(
     () => options.find((o) => o.value === value),
@@ -664,6 +683,7 @@ export function AnimatedDropdown({
         whileTap={disabled ? undefined : { scale: 0.985 }}
         onClick={() => {
           if (!disabled) {
+            if (!mounted) setMounted(true);
             updatePanelPosition();
             toggle();
           }
@@ -695,7 +715,7 @@ export function AnimatedDropdown({
       </motion.button>
 
       {/* Portaled Morphing Dropdown Panel (z-index: 400 in document.body) */}
-      {mounted && typeof document !== "undefined"
+      {(mounted || isOpen) && typeof document !== "undefined"
         ? createPortal(dropdownMenuContent, document.body)
         : dropdownMenuContent}
     </div>

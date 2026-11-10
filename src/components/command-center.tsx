@@ -533,7 +533,7 @@ export default function CommandCenter({
       {/* National Telemetry KPI Strip (Programs-inspired staggered cards) */}
       <section
         aria-label="Statistik Pemantauan Nasional"
-        className="px-2.5 sm:px-4 lg:px-6 pt-3 pb-2"
+        className="relative z-[1] px-2.5 sm:px-4 lg:px-6 pt-3 pb-2"
       >
         <div className="max-w-[1600px] mx-auto grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2 sm:gap-2.5">
           {kpiCards.map((kpi, idx) => (
@@ -557,10 +557,10 @@ export default function CommandCenter({
         </div>
       </section>
 
-      {/* Global Search & Animated Morph Dropdown Filter Bar (z-index: 100) */}
+      {/* Global Search & Animated Morph Dropdown Filter Bar (below Main Navbar) */}
       <section
-        style={{ position: "relative", zIndex: 100 }}
-        className="relative z-[100] px-2.5 sm:px-4 lg:px-6 py-2"
+        data-testid="filter-search-toolbar"
+        className="relative z-[40] px-2.5 sm:px-4 lg:px-6 py-2"
       >
         <div className="max-w-[1600px] mx-auto rounded-2xl ee-shell-surface px-3 py-2.5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 min-[1400px]:grid-cols-[minmax(195px,1.35fr)_minmax(160px,1.05fr)_minmax(186px,1.2fr)_minmax(186px,1.2fr)_minmax(130px,0.82fr)_minmax(144px,0.92fr)_auto] items-center gap-2">
           {/* Search Input */}
@@ -673,7 +673,7 @@ export default function CommandCenter({
       </section>
 
       {/* Main Workspace Area */}
-      <main className="relative z-0 flex-1 max-w-[1600px] w-full mx-auto px-2.5 sm:px-4 lg:px-6 py-2.5 sm:py-3.5">
+      <main className="relative z-[1] flex-1 max-w-[1600px] w-full mx-auto px-2.5 sm:px-4 lg:px-6 py-2.5 sm:py-3.5">
         {activeTab === "map" && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-3.5 sm:gap-4">
             {/* Left Interactive Map (8 cols on desktop, isolated at z-index: 0) */}
