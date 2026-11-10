@@ -2,7 +2,7 @@ export const APP_CONFIG = {
   name: "SCC - EAGLE EYES",
   shortName: "SCC - EAGLE EYES",
   title: "SCC - EAGLE EYES | Integrated Monitoring System",
-  subtitle: "Integrated Monitoring System",
+  subtitle: "Integrated Surveillance Command",
   description:
     "Sistem pemantauan CCTV lalu lintas dan infrastruktur secara terintegrasi untuk mendukung monitoring situasi secara real-time.",
   copyright: "Developed by Ganesha Ladesta.",
@@ -15,22 +15,5 @@ export const APP_CONFIG = {
     appleTouch: "/apple-touch-icon.png",
     icon192: "/icon-192.png",
     icon512: "/icon-512.png"
-  },
-  logos: {
-    bankIndonesia: {
-      src: "/assets/logo-bank-indonesia.webp",
-      alt: "Bank Indonesia",
-      name: "Bank Indonesia"
-    },
-    dlaf: {
-      src: "/assets/logo-dlaf.png",
-      alt: "DLAF",
-      name: "DLAF"
-    },
-    pambi: {
-      src: "/assets/logo-pambi.png",
-      alt: "PAMBI",
-      name: "PAMBI"
-    }
   }
 } as const;

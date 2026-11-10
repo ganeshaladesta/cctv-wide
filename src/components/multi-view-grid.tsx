@@ -1,6 +1,8 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   Grid,
   Plus,
@@ -13,7 +15,8 @@ import {
 } from "lucide-react";
 import { Camera } from "@/lib/types";
 import CCTVPlayer from "@/components/cctv-player";
-import { FavoritesButton } from "@/components/motion-ui";
+import { FavoritesButton, ProgramsCard } from "@/components/motion-ui";
+import { SPRINGS } from "@/lib/motion";
 
 export type GridLayoutSize = 1 | 2 | 4 | 6 | 9;
 
@@ -63,6 +66,28 @@ export default function MultiViewGrid({
   const [searchResults, setSearchResults] = useState<Camera[]>([]);
   const [searching, setSearching] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (pickerSlot === null || typeof document === "undefined") return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setPickerSlot(null);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [pickerSlot]);
 
   const currentLayout =
     LAYOUT_OPTIONS.find((l) => l.size === layoutSize) || LAYOUT_OPTIONS[2];
@@ -133,24 +158,134 @@ export default function MultiViewGrid({
 
   const slots = Array.from({ length: layoutSize }, (_, idx) => cameras[idx] || null);
 
+  const pickerModalContent = (
+    <AnimatePresence>
+      {pickerSlot !== null && (
+        <motion.div
+          key="multiview-slot-picker-backdrop"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.16 }}
+          style={{ zIndex: 900 }}
+          onClick={() => setPickerSlot(null)}
+          className="fixed inset-0 z-[900] bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4"
+        >
+          <motion.div
+            key="multiview-slot-picker-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Pilih Kamera untuk Slot #${pickerSlot + 1}`}
+            initial={{ opacity: 0, scale: 0.96, y: 10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.96, y: 10 }}
+            transition={SPRINGS.modal}
+            style={{ zIndex: 1000 }}
+            onClick={(e) => e.stopPropagation()}
+            className="relative z-[1000] w-full max-w-2xl rounded-2xl bg-[#090C12] border border-[var(--border-default)] shadow-[var(--shadow-elevated)] overflow-hidden flex flex-col max-h-[84dvh]"
+          >
+            <div className="px-4 py-3 bg-[#0C1018] border-b border-[var(--border-subtle)] flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <Tv className="w-4 h-4 text-[#60A5FA] shrink-0" />
+                <h3 className="text-sm font-bold text-[#F3F6FB] truncate">
+                  Pilih Kamera untuk Slot #{pickerSlot + 1}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPickerSlot(null)}
+                className="text-xs text-[#E2E8F0] hover:text-white px-2.5 py-1 rounded-lg bg-[#161C2B] hover:bg-[#1C2436] border border-[var(--border-subtle)] transition-colors"
+              >
+                Tutup
+              </button>
+            </div>
+
+            <div className="p-3 border-b border-[var(--border-subtle)]">
+              <div className="relative">
+                <Search className="w-4 h-4 text-[#98A4B8] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={(e) => handleSearchCameras(e.target.value)}
+                  placeholder="Cari nama kamera, jalan, kota, atau provinsi (contoh: Malioboro, Pasteur, Medan, Tol)..."
+                  className="w-full pl-9 pr-4 py-2 rounded-xl ee-input text-xs placeholder-[#657287]"
+                />
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {searching ? (
+                <div className="col-span-full py-10 text-center text-xs text-[#98A4B8]">
+                  Mencari kamera online...
+                </div>
+              ) : searchResults.length === 0 ? (
+                <div className="col-span-full py-10 text-center text-xs text-[#657287]">
+                  Tidak ada kamera yang cocok dengan pencarian.
+                </div>
+              ) : (
+                searchResults.map((cam) => (
+                  <div
+                    key={cam.id}
+                    onClick={() => assignCameraToSlot(cam)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        assignCameraToSlot(cam);
+                      }
+                    }}
+                    className="cursor-pointer text-left p-2.5 rounded-xl bg-[#111622] hover:bg-[#161C2B] border border-[var(--border-subtle)] hover:border-[var(--border-accent)] transition-colors flex items-start justify-between gap-2"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-[#F3F6FB] truncate">
+                        {cam.name}
+                      </p>
+                      <p className="text-[11px] text-[#98A4B8] truncate mt-0.5">
+                        {cam.city_name}, {cam.province_name}
+                      </p>
+                      <p className="text-[10px] text-[#60A5FA] truncate mt-0.5 font-mono">
+                        {cam.source_name} • {cam.protocol}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <FavoritesButton
+                        cameraId={cam.id}
+                        cameraName={cam.name}
+                        size="sm"
+                      />
+                      <span className="px-2 py-0.5 rounded-md bg-[#3B82F6]/20 border border-[#3B82F6]/40 text-[#E2E8F0] text-[10px] font-semibold">
+                        Pilih
+                      </span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+
   return (
     <div className="space-y-4">
       {/* Control Header */}
-      <div className="p-3 sm:p-4 rounded-xl bg-zinc-900/90 border border-zinc-800 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+      <div className="p-3.5 sm:p-4 rounded-2xl ee-surface flex flex-col lg:flex-row lg:items-center justify-between gap-3">
         <div className="flex items-start sm:items-center gap-2.5 min-w-0">
-          <div className="p-2 rounded-lg bg-sky-500/15 border border-sky-500/30 text-sky-400 shrink-0">
+          <div className="p-2 rounded-xl bg-[#3B82F6]/15 border border-[#3B82F6]/35 text-[#60A5FA] shrink-0">
             <Grid className="w-5 h-5" />
           </div>
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-sm font-bold text-zinc-100">
+              <h2 className="text-sm font-bold text-[#F3F6FB]">
                 Multi-View Command Wall
               </h2>
-              <span className="px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 text-[10px] font-semibold">
+              <span className="px-2 py-0.5 rounded-full bg-white/[0.04] text-[#E2E8F0] border border-[var(--border-subtle)] text-[10px] font-mono uppercase tracking-wider">
                 REAL-TIME • MULTI-STREAM
               </span>
             </div>
-            <p className="text-xs text-zinc-400">
+            <p className="text-xs text-[#98A4B8]">
               Pantau 1, 2, 4, 6, atau 9 kamera CCTV secara simultan dengan lazy-loading otomatis.
             </p>
           </div>
@@ -163,10 +298,10 @@ export default function MultiViewGrid({
               key={opt.size}
               type="button"
               onClick={() => setLayoutSize(opt.size)}
-              className={`px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold border transition ${
+              className={`px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-semibold border transition-colors ${
                 layoutSize === opt.size
-                  ? "bg-sky-600 border-sky-500 text-white shadow"
-                  : "bg-zinc-950 border-zinc-800 text-zinc-300 hover:border-zinc-700"
+                  ? "bg-[#3B82F6] border-[#3B82F6] text-white"
+                  : "bg-[#0C1018] border-[var(--border-default)] text-[#98A4B8] hover:text-white hover:border-[var(--border-strong)]"
               }`}
             >
               {opt.label}
@@ -176,11 +311,11 @@ export default function MultiViewGrid({
           <button
             type="button"
             onClick={handleShareMultiView}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs font-medium text-zinc-200 border border-zinc-700 transition"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#161C2B] hover:bg-[#1C2436] text-xs font-medium text-[#E2E8F0] border border-[var(--border-default)] transition-colors"
           >
             {copied ? (
               <>
-                <Check className="w-3.5 h-3.5 text-emerald-400" />
+                <Check className="w-3.5 h-3.5 text-[#10B981]" />
                 <span>Tersalin!</span>
               </>
             ) : (
@@ -195,7 +330,7 @@ export default function MultiViewGrid({
             <button
               type="button"
               onClick={() => onSetCameras([])}
-              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-red-950/60 hover:bg-red-900/60 text-red-300 border border-red-800/60 text-xs transition"
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-red-950/50 hover:bg-red-900/60 text-red-300 border border-red-800/50 text-xs transition-colors"
             >
               <Trash2 className="w-3.5 h-3.5" />
               <span>Kosongkan</span>
@@ -206,8 +341,8 @@ export default function MultiViewGrid({
 
       {/* Quick Presets Bar */}
       <div className="flex items-center gap-2 overflow-x-auto pb-1">
-        <span className="inline-flex items-center gap-1 text-xs font-medium text-zinc-400 shrink-0">
-          <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+        <span className="inline-flex items-center gap-1 text-xs font-medium text-[#98A4B8] shrink-0">
+          <Sparkles className="w-3.5 h-3.5 text-[#60A5FA]" />
           Preset Wilayah:
         </span>
         {REGIONAL_PRESETS.map((preset) => (
@@ -215,19 +350,22 @@ export default function MultiViewGrid({
             key={preset.label}
             type="button"
             onClick={() => loadPreset(preset.query)}
-            className="px-2.5 py-1 rounded-full bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-xs text-zinc-300 hover:text-emerald-300 shrink-0 transition"
+            className="px-3 py-1 rounded-full bg-[#111622] hover:bg-[#161C2B] border border-[var(--border-default)] hover:border-[var(--border-accent)] text-xs text-[#E2E8F0] hover:text-white shrink-0 transition-colors"
           >
             {preset.label}
           </button>
         ))}
       </div>
 
-      {/* Responsive Camera Grid */}
+      {/* Responsive Camera Grid (ProgramsCard entrance without transforming active video players) */}
       <div className={`grid gap-3 ${currentLayout.gridClass}`}>
         {slots.map((cam, idx) => (
-          <div
+          <ProgramsCard
             key={cam ? `${cam.id}-${idx}` : `empty-slot-${idx}`}
-            className={`relative rounded-xl overflow-hidden bg-zinc-900/60 border border-zinc-800 flex flex-col min-w-0 ${
+            index={idx}
+            enableHoverLift={!cam}
+            enableShimmer={!cam}
+            className={`relative rounded-2xl overflow-hidden ee-surface hover:border-[var(--border-strong)] flex flex-col min-w-0 ${
               layoutSize === 1
                 ? "h-[320px] sm:h-[520px]"
                 : layoutSize === 2
@@ -246,21 +384,22 @@ export default function MultiViewGrid({
                   <button
                     type="button"
                     onClick={() => onSelectDetail(cam)}
-                    className="px-2 py-0.5 rounded bg-zinc-900/90 hover:bg-zinc-800 text-[10px] font-medium text-zinc-200 border border-zinc-700"
+                    className="px-2 py-0.5 rounded-md bg-[#090C12]/90 hover:bg-[#161C2B] text-[10px] font-medium text-[#E2E8F0] border border-[var(--border-default)] transition-colors"
                   >
                     Detail
                   </button>
                   <button
                     type="button"
                     onClick={() => openPickerForSlot(idx)}
-                    className="px-2 py-0.5 rounded bg-zinc-900/90 hover:bg-zinc-800 text-[10px] font-medium text-emerald-300 border border-zinc-700"
+                    className="px-2 py-0.5 rounded-md bg-[#090C12]/90 hover:bg-[#161C2B] text-[10px] font-medium text-[#60A5FA] border border-[var(--border-default)] transition-colors"
                   >
                     Ganti
                   </button>
                   <button
                     type="button"
                     onClick={() => removeCameraAt(idx)}
-                    className="px-1.5 py-0.5 rounded bg-red-950/90 hover:bg-red-900 text-[10px] font-medium text-red-200 border border-red-800"
+                    aria-label={`Hapus slot ${idx + 1}`}
+                    className="px-1.5 py-0.5 rounded-md bg-red-950/90 hover:bg-red-900 text-[10px] font-medium text-red-200 border border-red-800/70 transition-colors"
                   >
                     ✕
                   </button>
@@ -271,108 +410,27 @@ export default function MultiViewGrid({
               <button
                 type="button"
                 onClick={() => openPickerForSlot(idx)}
-                className="w-full h-full flex flex-col items-center justify-center gap-2 text-zinc-400 hover:text-emerald-400 hover:bg-zinc-900/90 transition group"
+                className="w-full h-full flex flex-col items-center justify-center gap-2 text-[#98A4B8] hover:text-white hover:bg-[#161C2B]/70 transition-colors group"
               >
-                <div className="w-11 h-11 rounded-full bg-zinc-800/80 group-hover:bg-emerald-500/20 border border-zinc-700 group-hover:border-emerald-500/40 flex items-center justify-center transition">
+                <div className="w-11 h-11 rounded-full bg-[#161C2B] group-hover:bg-[#3B82F6]/20 border border-[var(--border-default)] group-hover:border-[#3B82F6]/50 flex items-center justify-center transition-colors">
                   <Plus className="w-5 h-5" />
                 </div>
-                <span className="text-xs font-medium">
+                <span className="text-xs font-semibold">
                   Tambah Kamera ke Slot #{idx + 1}
                 </span>
-                <span className="text-[11px] text-zinc-500">
+                <span className="text-[11px] text-[#657287]">
                   Pilih dari 23.355 kamera di 38 Provinsi
                 </span>
               </button>
             )}
-          </div>
+          </ProgramsCard>
         ))}
       </div>
 
-      {/* Camera Slot Picker Modal */}
-      {pickerSlot !== null && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-2xl rounded-2xl bg-zinc-950 border border-zinc-800 shadow-2xl overflow-hidden flex flex-col max-h-[82vh]">
-            <div className="px-4 py-3 bg-zinc-900 border-b border-zinc-800 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Tv className="w-4 h-4 text-emerald-400" />
-                <h3 className="text-sm font-bold text-zinc-100">
-                  Pilih Kamera untuk Slot #{pickerSlot + 1}
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setPickerSlot(null)}
-                className="text-xs text-zinc-400 hover:text-white px-2.5 py-1 rounded bg-zinc-800"
-              >
-                Tutup
-              </button>
-            </div>
-
-            <div className="p-3 border-b border-zinc-800">
-              <div className="relative">
-                <Search className="w-4 h-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  value={searchTerm}
-                  onChange={(e) => handleSearchCameras(e.target.value)}
-                  placeholder="Cari nama kamera, jalan, kota, atau provinsi (contoh: Malioboro, Pasteur, Medan, Tol)..."
-                  className="w-full pl-9 pr-4 py-2 rounded-lg bg-zinc-900 border border-zinc-700 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-emerald-500"
-                />
-              </div>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {searching ? (
-                <div className="col-span-full py-10 text-center text-xs text-zinc-400">
-                  Mencari kamera online...
-                </div>
-              ) : searchResults.length === 0 ? (
-                <div className="col-span-full py-10 text-center text-xs text-zinc-500">
-                  Tidak ada kamera yang cocok dengan pencarian.
-                </div>
-              ) : (
-                searchResults.map((cam) => (
-                  <div
-                    key={cam.id}
-                    onClick={() => assignCameraToSlot(cam)}
-                    role="button"
-                    tabIndex={0}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        assignCameraToSlot(cam);
-                      }
-                    }}
-                    className="cursor-pointer text-left p-2.5 rounded-lg bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-800 hover:border-emerald-500/50 transition flex items-start justify-between gap-2"
-                  >
-                    <div className="min-w-0">
-                      <p className="text-xs font-semibold text-zinc-100 truncate">
-                        {cam.name}
-                      </p>
-                      <p className="text-[11px] text-zinc-400 truncate mt-0.5">
-                        {cam.city_name}, {cam.province_name}
-                      </p>
-                      <p className="text-[10px] text-emerald-400 truncate mt-0.5">
-                        {cam.source_name} • {cam.protocol}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <FavoritesButton
-                        cameraId={cam.id}
-                        cameraName={cam.name}
-                        size="sm"
-                      />
-                      <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-semibold">
-                        Pilih
-                      </span>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Portaled Camera Slot Picker Modal (z-index: 900/1000 above Navbar & Map) */}
+      {mounted && typeof document !== "undefined"
+        ? createPortal(pickerModalContent, document.body)
+        : pickerModalContent}
     </div>
   );
 }
-

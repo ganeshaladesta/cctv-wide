@@ -147,7 +147,6 @@ export function CCTVPlayer({
   );
 
   // Verify actual live stream availability for EMBED cameras (such as AMG)
-  // Do NOT falsely mark ONLINE merely because an iframe HTML page loads
   useEffect(() => {
     if (!isVisible || activeProtocol !== "EMBED" || !amgChannelId) return;
     let cancelled = false;
@@ -260,7 +259,9 @@ export function CCTVPlayer({
             return;
           }
           setLoading(false);
-          setError("Stream tidak merespons (CORS / Offline pada server sumber)");
+          setError(
+            "Stream tidak merespons (CORS / Offline pada server sumber)"
+          );
         }
       });
     } else {
@@ -347,10 +348,10 @@ export function CCTVPlayer({
   return (
     <div
       ref={containerRef}
-      className="relative group w-full h-full min-h-[180px] aspect-video bg-zinc-950 rounded-lg overflow-hidden border border-zinc-800/80 flex flex-col justify-between select-none"
+      className="relative group w-full h-full min-h-[180px] aspect-video bg-[#07090D] rounded-xl overflow-hidden border border-[var(--border-default)] flex flex-col justify-between select-none"
     >
       {/* Top Status & Attribution Overlay */}
-      <div className="absolute top-0 inset-x-0 z-20 p-2.5 bg-gradient-to-b from-black/85 via-black/40 to-transparent flex items-start justify-between gap-2 pointer-events-none">
+      <div className="absolute top-0 inset-x-0 z-20 p-2.5 bg-gradient-to-b from-black/85 via-black/45 to-transparent flex items-start justify-between gap-2 pointer-events-none">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-1.5">
             <span
@@ -373,16 +374,16 @@ export function CCTVPlayer({
               />
               {error ? "GANGGUAN" : camera.status === "ONLINE" ? "LIVE" : "OFFLINE"}
             </span>
-            <span className="px-1.5 py-0.5 rounded bg-zinc-800/90 text-zinc-300 text-[10px] font-mono border border-zinc-700/70">
+            <span className="px-1.5 py-0.5 rounded bg-[#0C1018]/90 text-[#E2E8F0] text-[10px] font-mono border border-[var(--border-default)]">
               {activeProtocol}
               {usingProxy ? " • PROXY" : ""}
             </span>
           </div>
-          <h4 className="text-xs font-semibold text-zinc-100 truncate mt-1 drop-shadow">
+          <h4 className="text-xs font-semibold text-[#F3F6FB] truncate mt-1 drop-shadow">
             {camera.name}
           </h4>
           {!compact && (
-            <p className="text-[11px] text-zinc-400 truncate">
+            <p className="text-[11px] text-[#98A4B8] truncate">
               {camera.city_name}, {camera.province_name}
             </p>
           )}
@@ -392,17 +393,17 @@ export function CCTVPlayer({
         {amgChannelId && (
           <div
             data-testid="amg-playback-switcher"
-            className="pointer-events-auto flex items-center gap-1 bg-zinc-950/90 border border-zinc-700/80 rounded-md p-0.5"
+            className="pointer-events-auto flex items-center gap-1 bg-[#090C12]/92 border border-[var(--border-default)] rounded-lg p-0.5"
           >
             <button
               type="button"
               data-testid="amg-mode-hls"
               aria-pressed={amgMode === "hls"}
               onClick={() => setAmgMode("hls")}
-              className={`px-2 py-0.5 rounded text-[10px] font-semibold transition ${
+              className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-colors ${
                 amgMode === "hls"
-                  ? "bg-sky-600 text-white"
-                  : "text-zinc-400 hover:text-zinc-200"
+                  ? "bg-[#3B82F6] text-white"
+                  : "text-[#98A4B8] hover:text-[#F3F6FB]"
               }`}
             >
               Direct HLS
@@ -412,10 +413,10 @@ export function CCTVPlayer({
               data-testid="amg-mode-embed"
               aria-pressed={amgMode === "embed"}
               onClick={() => setAmgMode("embed")}
-              className={`px-2 py-0.5 rounded text-[10px] font-semibold transition ${
+              className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-colors ${
                 amgMode === "embed"
-                  ? "bg-sky-600 text-white"
-                  : "text-zinc-400 hover:text-zinc-200"
+                  ? "bg-[#3B82F6] text-white"
+                  : "text-[#98A4B8] hover:text-[#F3F6FB]"
               }`}
             >
               Embed Resmi
@@ -427,8 +428,8 @@ export function CCTVPlayer({
       {/* Main Media Surface */}
       <div className="relative flex-1 w-full h-full flex items-center justify-center bg-black overflow-hidden">
         {!isVisible ? (
-          <div className="text-xs text-zinc-500 flex flex-col items-center gap-1">
-            <Radio className="w-5 h-5 text-zinc-600 animate-pulse" />
+          <div className="text-xs text-[#98A4B8] flex flex-col items-center gap-1">
+            <Radio className="w-5 h-5 text-[#657287] animate-pulse" />
             <span>Menunggu di layar...</span>
           </div>
         ) : activeProtocol === "EMBED" ? (
@@ -473,18 +474,18 @@ export function CCTVPlayer({
           />
         ) : activeProtocol === "WEBSOCKET" ? (
           <div className="flex flex-col items-center justify-center p-4 text-center">
-            <Radio className="w-8 h-8 text-emerald-400 mb-2 animate-pulse" />
-            <p className="text-xs text-zinc-200 font-medium">
+            <Radio className="w-8 h-8 text-[#10B981] mb-2 animate-pulse" />
+            <p className="text-xs text-[#F3F6FB] font-medium">
               Stream WebSocket JSMpeg ({camera.city_name})
             </p>
-            <p className="text-[11px] text-zinc-400 mt-1 max-w-xs break-all font-mono">
+            <p className="text-[11px] text-[#98A4B8] mt-1 max-w-xs break-all font-mono">
               {camera.stream_url}
             </p>
             <a
               href={camera.source_url}
               target="_blank"
               rel="noopener noreferrer"
-              className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-sky-600 hover:bg-sky-500 text-xs font-medium text-white transition"
+              className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#3B82F6] hover:bg-[#60A5FA] text-xs font-semibold text-white transition-colors"
             >
               <span>Buka Portal Resmi</span>
               <ExternalLink className="w-3.5 h-3.5" />
@@ -504,9 +505,9 @@ export function CCTVPlayer({
 
         {/* Loading Spinner Overlay */}
         {loading && !error && (
-          <div className="absolute inset-0 z-10 bg-zinc-950/75 backdrop-blur-xs flex flex-col items-center justify-center gap-2">
-            <div className="w-7 h-7 border-2 border-sky-500 border-t-amber-400 rounded-full animate-spin" />
-            <span className="text-[11px] text-zinc-300 font-mono">
+          <div className="absolute inset-0 z-10 bg-[#07090D]/80 backdrop-blur-sm flex flex-col items-center justify-center gap-2">
+            <div className="w-7 h-7 border-2 border-[#3B82F6] border-t-white rounded-full animate-spin" />
+            <span className="text-[11px] text-[#E2E8F0] font-mono">
               Menghubungkan ke {camera.source_name}...
             </span>
           </div>
@@ -514,19 +515,19 @@ export function CCTVPlayer({
 
         {/* Error & Retry Overlay */}
         {error && (
-          <div className="absolute inset-0 z-10 bg-zinc-950/90 p-4 flex flex-col items-center justify-center text-center">
-            <AlertTriangle className="w-7 h-7 text-amber-400 mb-1.5" />
-            <p className="text-xs font-medium text-zinc-200 max-w-xs">
+          <div className="absolute inset-0 z-10 bg-[#07090D]/92 p-4 flex flex-col items-center justify-center text-center">
+            <AlertTriangle className="w-7 h-7 text-[#F59E0B] mb-1.5" />
+            <p className="text-xs font-medium text-[#F3F6FB] max-w-xs">
               {error}
             </p>
-            <p className="text-[10px] text-zinc-400 mt-0.5 truncate max-w-[260px]">
+            <p className="text-[10px] text-[#98A4B8] mt-0.5 truncate max-w-[260px]">
               Sumber: {camera.source_name}
             </p>
             <div className="flex flex-wrap items-center justify-center gap-2 mt-3">
               <button
                 type="button"
                 onClick={handleRefresh}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-sky-600 hover:bg-sky-500 text-white text-xs font-medium transition"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#3B82F6] hover:bg-[#60A5FA] text-white text-xs font-medium transition-colors"
               >
                 <RotateCw className="w-3.5 h-3.5" />
                 <span>Coba Lagi</span>
@@ -535,7 +536,7 @@ export function CCTVPlayer({
                 <button
                   type="button"
                   onClick={() => setAmgMode("embed")}
-                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs transition"
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#161C2B] hover:bg-[#1C2436] border border-[var(--border-default)] text-[#E2E8F0] text-xs transition-colors"
                 >
                   <Tv className="w-3 h-3" />
                   <span>Gunakan Embed Resmi</span>
@@ -545,7 +546,7 @@ export function CCTVPlayer({
                 href={camera.source_url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs transition"
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#161C2B] hover:bg-[#1C2436] border border-[var(--border-default)] text-[#E2E8F0] text-xs transition-colors"
               >
                 <span>Portal Asli</span>
                 <ExternalLink className="w-3 h-3" />
@@ -556,14 +557,14 @@ export function CCTVPlayer({
       </div>
 
       {/* Bottom Controls & Attribution Bar */}
-      <div className="z-20 px-2.5 py-1.5 bg-zinc-900/95 border-t border-zinc-800/80 flex items-center justify-between gap-2 text-[11px] text-zinc-400">
+      <div className="z-20 px-2.5 py-1.5 bg-[#0C1018]/95 border-t border-[var(--border-subtle)] flex items-center justify-between gap-2 text-[11px] text-[#98A4B8]">
         <div className="flex items-center gap-1.5 min-w-0 truncate">
-          <ShieldCheck className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+          <ShieldCheck className="w-3.5 h-3.5 text-[#60A5FA] shrink-0" />
           <span className="truncate" title={camera.source_name}>
             Sumber: {camera.source_name}
           </span>
           {!compact && (
-            <span className="hidden sm:inline-flex items-center gap-1 text-[10px] text-zinc-500 ml-1">
+            <span className="hidden sm:inline-flex items-center gap-1 text-[10px] text-[#657287] ml-1">
               <Clock className="w-3 h-3" />
               {new Date(camera.last_checked_at).toLocaleDateString("id-ID")}
             </span>
@@ -582,7 +583,8 @@ export function CCTVPlayer({
                 type="button"
                 onClick={handleTogglePlay}
                 title={isPlaying ? "Jeda" : "Putar"}
-                className="p-1 rounded hover:bg-zinc-800 text-zinc-300 hover:text-white transition"
+                aria-label={isPlaying ? "Jeda" : "Putar"}
+                className="p-1 rounded-md hover:bg-white/[0.08] text-[#E2E8F0] hover:text-white transition-colors"
               >
                 {isPlaying ? (
                   <Pause className="w-3.5 h-3.5" />
@@ -594,7 +596,8 @@ export function CCTVPlayer({
                 type="button"
                 onClick={handleToggleMute}
                 title={isMuted ? "Suara Aktif" : "Bisukan"}
-                className="p-1 rounded hover:bg-zinc-800 text-zinc-300 hover:text-white transition"
+                aria-label={isMuted ? "Suara Aktif" : "Bisukan"}
+                className="p-1 rounded-md hover:bg-white/[0.08] text-[#E2E8F0] hover:text-white transition-colors"
               >
                 {isMuted ? (
                   <VolumeX className="w-3.5 h-3.5" />
@@ -608,7 +611,8 @@ export function CCTVPlayer({
             type="button"
             onClick={handleRefresh}
             title="Muat Ulang Stream"
-            className="p-1 rounded hover:bg-zinc-800 text-zinc-300 hover:text-white transition"
+            aria-label="Muat Ulang Stream"
+            className="p-1 rounded-md hover:bg-white/[0.08] text-[#E2E8F0] hover:text-white transition-colors"
           >
             <RotateCw className="w-3.5 h-3.5" />
           </button>
@@ -617,7 +621,8 @@ export function CCTVPlayer({
             target="_blank"
             rel="noopener noreferrer"
             title="Sumber Resmi"
-            className="p-1 rounded hover:bg-zinc-800 text-zinc-300 hover:text-white transition"
+            aria-label="Sumber Resmi"
+            className="p-1 rounded-md hover:bg-white/[0.08] text-[#E2E8F0] hover:text-white transition-colors"
           >
             <ExternalLink className="w-3.5 h-3.5" />
           </a>
@@ -625,7 +630,8 @@ export function CCTVPlayer({
             type="button"
             onClick={handleFullscreen}
             title="Layar Penuh"
-            className="p-1 rounded hover:bg-zinc-800 text-zinc-300 hover:text-white transition"
+            aria-label="Layar Penuh"
+            className="p-1 rounded-md hover:bg-white/[0.08] text-[#E2E8F0] hover:text-white transition-colors"
           >
             <Maximize2 className="w-3.5 h-3.5" />
           </button>
@@ -634,7 +640,8 @@ export function CCTVPlayer({
               type="button"
               onClick={onClose}
               title="Tutup"
-              className="px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-[10px] font-semibold transition"
+              aria-label="Tutup pemutar"
+              className="px-2 py-0.5 rounded-md bg-[#161C2B] hover:bg-[#1C2436] text-[#E2E8F0] text-[10px] font-semibold transition-colors"
             >
               ✕
             </button>

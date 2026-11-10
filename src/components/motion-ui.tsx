@@ -5,13 +5,30 @@ import React, {
   useEffect,
   useMemo,
   useId,
-  useCallback
+  useCallback,
+  useRef
 } from "react";
 import { createPortal } from "react-dom";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, MotionConfig } from "framer-motion";
 import { Heart, ChevronDown, Check, Search, X } from "lucide-react";
 import { APP_CONFIG } from "@/lib/branding";
-import { useFavorites, useFirstLoad, useDropdown } from "@/lib/hooks";
+import {
+  useFavorites,
+  useFirstLoad,
+  useDropdown,
+  usePrefersReducedMotion
+} from "@/lib/hooks";
+import {
+  EASE_STANDARD,
+  EASE_CURTAIN,
+  DURATIONS,
+  SPRINGS,
+  getProgramsEntranceDelay
+} from "@/lib/motion";
+
+export function MotionProvider({ children }: { children: React.ReactNode }) {
+  return <MotionConfig reducedMotion="user">{children}</MotionConfig>;
+}
 
 export interface EagleEyesLogoProps {
   size?: "sm" | "md" | "lg" | "xl";
@@ -19,46 +36,50 @@ export interface EagleEyesLogoProps {
   animateHover?: boolean;
 }
 
+/**
+ * Unboxed official SCC - EAGLE EYES emblem rendered cleanly without
+ * any surrounding card box, border, or container frame.
+ */
 export function EagleEyesLogo({
   size = "md",
   className = "",
   animateHover = true
 }: EagleEyesLogoProps) {
   const sizeClasses = {
-    sm: "w-8 h-8 p-1 rounded-lg",
-    md: "w-9 h-9 sm:w-10 sm:h-10 p-1 rounded-xl",
-    lg: "w-14 h-14 p-1.5 rounded-2xl",
-    xl: "w-24 h-24 sm:w-28 sm:h-28 p-2.5 rounded-3xl"
+    sm: "w-8 h-8 sm:w-9 sm:h-9",
+    md: "w-10 h-10 sm:w-12 sm:h-12",
+    lg: "w-16 h-16 sm:w-[72px] sm:h-[72px]",
+    xl: "w-24 h-24 sm:w-28 sm:h-28"
   }[size];
 
   return (
     <motion.div
       whileHover={animateHover ? { scale: 1.04 } : undefined}
-      transition={{ type: "spring", stiffness: 400, damping: 25 }}
+      transition={SPRINGS.snappy}
       data-testid="eagle-eyes-logo-container"
-      className={`relative bg-[#090B10] border border-[#252A35] flex items-center justify-center shrink-0 shadow-[0_0_20px_rgba(255,255,255,0.06)] overflow-hidden ${sizeClasses} ${className}`}
+      className={`relative bg-transparent flex items-center justify-center shrink-0 ${sizeClasses} ${className}`}
     >
-      <picture className="w-full h-full flex items-center justify-center">
+      <picture className="w-full h-full flex items-center justify-center bg-transparent">
         <source srcSet={APP_CONFIG.primaryIconWebp} type="image/webp" />
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={APP_CONFIG.primaryIcon}
           alt={APP_CONFIG.name}
           data-testid="eagle-eyes-logo-img"
-          className="w-full h-full object-contain select-none"
-          style={{ objectFit: "contain" }}
+          className="w-full h-full object-contain select-none bg-transparent"
+          style={{ objectFit: "contain", background: "transparent" }}
         />
       </picture>
     </motion.div>
   );
 }
 
-const LOADING_STATUS_STEPS = [
+const LOADING_STATUS_LINES = [
   "MENGINISIALISASI INTI PENGAWASAN...",
   "MENGHUBUNGKAN JARINGAN 38 PROVINSI...",
-  "MEMVERIFIKASI TELEMETRI KAMERA AKTIF...",
-  "MENYINKRONKAN PETA GEOSPASIAL & HLS...",
-  "SISTEM PEMANTAUAN SIAP"
+  "MEMUAT DATA TELEMETRI KAMERA AKTIF...",
+  "MENYIAPKAN PETA GEOSPASIAL & DIRECT HLS...",
+  "MEMVERIFIKASI KESIAPAN COMMAND CENTER..."
 ];
 
 export interface LoadingOverlayProps {
@@ -66,32 +87,115 @@ export interface LoadingOverlayProps {
   forceShow?: boolean;
 }
 
+// Module-level singleton ID prevents duplicate loader overlays across mounts
+let activeLoaderInstanceId: string | null = null;
+
+/**
+ * Adapted Framer LoadingOverlay (JDvhQN):
+ * 3-zone asymmetric telemetry layout, sequential line character reveal,
+ * tabular progress readout, unboxed official Eagle Eyes emblem,
+ * and upward curtain exit. Respects both minimum duration and app readiness.
+ */
 export function LoadingOverlay({
   durationMs = 5000,
   forceShow = false
 }: LoadingOverlayProps) {
-  const { isFirstLoad, prefersReducedMotion, dismissFirstLoad } =
-    useFirstLoad(durationMs);
-  const [elapsedMs, setElapsedMs] = useState(0);
+  const instanceId = useId();
+  const [isPrimaryInstance, setIsPrimaryInstance] = useState(false);
 
-  const visible = forceShow || isFirstLoad;
+  useEffect(() => {
+    if (!activeLoaderInstanceId) {
+      activeLoaderInstanceId = instanceId;
+      setIsPrimaryInstance(true);
+    }
+    return () => {
+      if (activeLoaderInstanceId === instanceId) {
+        activeLoaderInstanceId = null;
+      }
+    };
+  }, [instanceId]);
+
+  const {
+    isFirstLoad,
+    appReady,
+    minDurationDone,
+    prefersReducedMotion,
+    dismissFirstLoad
+  } = useFirstLoad(durationMs);
+
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const startTimeRef = useRef<number | null>(null);
+
+  const visible = isPrimaryInstance && (forceShow || isFirstLoad);
 
   useEffect(() => {
     if (!visible) return;
-    const start = Date.now();
-    const interval = setInterval(() => {
-      const diff = Date.now() - start;
+    const prevOverflow =
+      typeof document !== "undefined" ? document.body.style.overflow : "";
+    if (typeof document !== "undefined") {
+      document.body.style.overflow = "hidden";
+    }
+    startTimeRef.current = Date.now();
+    const interval = window.setInterval(() => {
+      if (!startTimeRef.current) return;
+      const diff = Date.now() - startTimeRef.current;
       setElapsedMs(Math.min(diff, durationMs));
-    }, 50);
-    return () => clearInterval(interval);
+    }, 45);
+    return () => {
+      window.clearInterval(interval);
+      if (typeof document !== "undefined") {
+        document.body.style.overflow = prevOverflow;
+      }
+    };
   }, [visible, durationMs]);
 
-  const progress = Math.min(100, Math.round((elapsedMs / durationMs) * 100));
-  const radarActive = elapsedMs >= 1000 || prefersReducedMotion;
-  const stepIndex = Math.min(
-    LOADING_STATUS_STEPS.length - 1,
-    Math.floor((elapsedMs / durationMs) * LOADING_STATUS_STEPS.length)
+  const rawProgress = Math.min(100, Math.round((elapsedMs / durationMs) * 100));
+  // If minimum duration has finished but browser initialization is still in flight, hold at 99%
+  const displayProgress =
+    minDurationDone && !appReady ? 99 : rawProgress;
+
+  const statusLines = useMemo(() => {
+    if (minDurationDone && !appReady) {
+      return [
+        ...LOADING_STATUS_LINES.slice(0, 4),
+        "MENYELESAIKAN INISIALISASI APLIKASI..."
+      ];
+    }
+    return LOADING_STATUS_LINES;
+  }, [minDurationDone, appReady]);
+
+  const totalChars = useMemo(
+    () => statusLines.reduce((sum, line) => sum + line.length, 0),
+    [statusLines]
   );
+
+  const revealedChars = useMemo(() => {
+    if (prefersReducedMotion) return totalChars;
+    const msPerChar = Math.max(14, Math.floor((durationMs * 0.85) / totalChars));
+    return Math.min(totalChars, Math.floor(elapsedMs / msPerChar));
+  }, [prefersReducedMotion, durationMs, totalChars, elapsedMs]);
+
+  const lineRevealData = useMemo(() => {
+    let remaining = revealedChars;
+    let firstIncomplete = statusLines.length - 1;
+    const items = statusLines.map((line, index) => {
+      const shownCount = Math.max(0, Math.min(line.length, remaining));
+      remaining -= shownCount;
+      const done = shownCount >= line.length;
+      if (!done && firstIncomplete === statusLines.length - 1) {
+        firstIncomplete = index;
+      }
+      return {
+        text: line.slice(0, shownCount),
+        done
+      };
+    });
+    const activeIndex =
+      revealedChars >= totalChars
+        ? statusLines.length - 1
+        : Math.max(0, firstIncomplete);
+    return { items, activeIndex };
+  }, [revealedChars, statusLines, totalChars]);
 
   return (
     <AnimatePresence>
@@ -99,243 +203,209 @@ export function LoadingOverlay({
         <motion.div
           key="scc-eagle-eyes-loading-overlay"
           data-testid="eagle-eyes-loading-overlay"
-          initial={{ opacity: 1 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
-          style={{ backgroundColor: "#090B10", zIndex: 2000 }}
-          className="fixed inset-0 z-[2000] flex flex-col items-center justify-center px-4 select-none overflow-hidden"
+          initial={{ opacity: 1, y: "0%" }}
+          animate={{ opacity: 1, y: "0%" }}
+          exit={{
+            opacity: 0,
+            y: prefersReducedMotion ? "0%" : "-100%"
+          }}
+          transition={{
+            duration: prefersReducedMotion ? 0.18 : DURATIONS.curtain,
+            ease: EASE_CURTAIN
+          }}
+          style={{
+            backgroundColor: "#090B10",
+            zIndex: 2000,
+            willChange: "transform, opacity"
+          }}
+          className="fixed inset-0 z-[2000] flex items-center justify-center px-4 sm:px-8 lg:px-12 py-4 select-none overflow-y-auto overflow-x-hidden"
           role="status"
           aria-live="polite"
+          aria-busy={visible}
           aria-label={`Memuat ${APP_CONFIG.name}`}
         >
-          {/* Subtle Ambient Grid & Radial Glow */}
+          {/* Subtle Ambient Horizon Accent */}
           <div
-            className="pointer-events-none absolute inset-0 opacity-25"
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0"
             style={{
-              backgroundImage:
-                "radial-gradient(circle at 50% 50%, rgba(255,255,255,0.08) 0%, transparent 60%), linear-gradient(to right, #252A35 1px, transparent 1px), linear-gradient(to bottom, #252A35 1px, transparent 1px)",
-              backgroundSize: "100% 100%, 48px 48px, 48px 48px"
+              background:
+                "radial-gradient(ellipse 65% 45% at 50% 45%, rgba(59, 130, 246, 0.08) 0%, rgba(9, 11, 16, 0) 70%)"
             }}
           />
 
-          {/* Center Emblem + Circular Radar Scanning System */}
-          <div className="relative flex items-center justify-center w-52 h-52 sm:w-60 sm:h-60 mb-6">
-            {/* Outer Static Frame Ring */}
-            <div
-              className="absolute inset-0 rounded-full border"
-              style={{ borderColor: "#252A35" }}
-            />
-
-            {/* 1.0s+: Circular Scanning / Radar Indicator */}
-            <AnimatePresence>
-              {radarActive && (
-                <>
-                  {/* Rotating Conic Radar Sweep */}
-                  {!prefersReducedMotion && (
-                    <motion.div
-                      initial={{ opacity: 0, scale: 0.92 }}
-                      animate={{ opacity: 1, scale: 1, rotate: 360 }}
-                      exit={{ opacity: 0 }}
-                      transition={{
-                        opacity: { duration: 0.35 },
-                        scale: { duration: 0.4 },
-                        rotate: {
-                          duration: 2.2,
-                          ease: "linear",
-                          repeat: Infinity
-                        }
-                      }}
-                      data-testid="loading-radar-sweep"
-                      className="absolute inset-2 rounded-full"
-                      style={{
-                        background:
-                          "conic-gradient(from 0deg, transparent 0deg, transparent 260deg, rgba(255,255,255,0.22) 345deg, rgba(255,255,255,0.55) 360deg)"
-                      }}
-                    />
-                  )}
-
-                  {/* Inner Mask for Ring Effect */}
-                  <div
-                    className="absolute inset-[6px] rounded-full"
-                    style={{ backgroundColor: "#090B10" }}
-                  />
-
-                  {/* Segmented Counter-Rotating Tech Ring */}
-                  <motion.svg
-                    initial={{ opacity: 0 }}
-                    animate={{
-                      opacity: 0.85,
-                      rotate: prefersReducedMotion ? 0 : -360
-                    }}
-                    transition={{
-                      opacity: { duration: 0.4 },
-                      rotate: {
-                        duration: 8,
-                        ease: "linear",
-                        repeat: Infinity
-                      }
-                    }}
-                    className="absolute inset-3 w-[calc(100%-24px)] h-[calc(100%-24px)]"
-                    viewBox="0 0 200 200"
-                  >
-                    <circle
-                      cx="100"
-                      cy="100"
-                      r="92"
-                      fill="none"
-                      stroke="#252A35"
-                      strokeWidth="1.5"
-                    />
-                    <circle
-                      cx="100"
-                      cy="100"
-                      r="92"
-                      fill="none"
-                      stroke="#FFFFFF"
-                      strokeWidth="2"
-                      strokeDasharray="36 24 12 24"
-                      strokeLinecap="round"
-                    />
-                    <circle
-                      cx="100"
-                      cy="100"
-                      r="78"
-                      fill="none"
-                      stroke="#A1A1AA"
-                      strokeWidth="1"
-                      strokeDasharray="6 14"
-                      opacity="0.5"
-                    />
-                  </motion.svg>
-
-                  {/* Expanding Pulse Ring */}
-                  {!prefersReducedMotion && (
-                    <motion.div
-                      initial={{ scale: 0.75, opacity: 0.6 }}
-                      animate={{ scale: 1.12, opacity: 0 }}
-                      transition={{
-                        duration: 1.8,
-                        ease: "easeOut",
-                        repeat: Infinity
-                      }}
-                      className="absolute inset-4 rounded-full border border-white/30"
-                    />
-                  )}
-                </>
-              )}
-            </AnimatePresence>
-
-            {/* 0.0s Fade-in + 0.5s Smooth Scale of Eagle Eyes Logo */}
+          <div className="relative z-10 w-full max-w-6xl mx-auto flex flex-col gap-5 sm:gap-9">
+            {/* Official Eagle Eyes Emblem — Unboxed Direct Presentation */}
             <motion.div
-              initial={{ opacity: 0, scale: 0.78 }}
-              animate={{
-                opacity: 1,
-                scale: elapsedMs >= 500 || prefersReducedMotion ? 1 : 0.88
-              }}
-              transition={{
-                opacity: { duration: 0.45, ease: "easeOut" },
-                scale: {
-                  type: "spring",
-                  stiffness: 220,
-                  damping: 20
-                }
-              }}
-              className="relative z-10 flex items-center justify-center w-28 h-28 sm:w-32 sm:h-32 rounded-full bg-[#090B10] border border-[#252A35] p-3 shadow-[0_0_40px_rgba(255,255,255,0.12)]"
+              initial={{ opacity: 0, y: prefersReducedMotion ? 0 : 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.45, ease: EASE_STANDARD }}
+              className="flex flex-col items-center justify-center gap-3 text-center"
             >
-              <picture className="w-full h-full flex items-center justify-center">
-                <source srcSet={APP_CONFIG.primaryIconWebp} type="image/webp" />
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={APP_CONFIG.primaryIcon}
-                  alt={APP_CONFIG.name}
-                  className="w-full h-full object-contain"
-                  style={{ objectFit: "contain" }}
-                />
-              </picture>
+              <EagleEyesLogo size="xl" animateHover={false} />
+              <div className="space-y-1">
+                <h1 className="text-base sm:text-xl font-bold tracking-[0.22em] uppercase text-[#F3F6FB]">
+                  {APP_CONFIG.name}
+                </h1>
+                <p className="text-[11px] font-mono tracking-[0.18em] uppercase text-[#98A4B8]">
+                  {APP_CONFIG.subtitle}
+                </p>
+              </div>
             </motion.div>
-          </div>
 
-          {/* Application Title & Telemetry Status */}
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.25, duration: 0.45 }}
-            className="relative z-10 text-center max-w-md w-full space-y-3"
-          >
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-[#252A35] bg-white/[0.03]">
-              <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-              <span
-                className="text-[10px] font-mono tracking-[0.22em] uppercase"
-                style={{ color: "#A1A1AA" }}
+            {/* Framer LoadingOverlay 3-Zone Responsive Grid */}
+            <div className="w-full grid grid-cols-1 md:grid-cols-2 lg:grid-cols-[minmax(260px,1.25fr)_auto_minmax(220px,1fr)] items-center gap-6 sm:gap-8 lg:gap-10 border-t border-b border-[var(--border-subtle)] py-6 sm:py-7">
+              {/* Left: Sequential Telemetry Status List */}
+              <ul
+                aria-label="Loading status list"
+                className="list-none m-0 p-0 flex flex-col gap-2 min-w-0 font-mono text-[11px] sm:text-xs uppercase tracking-[0.06em]"
               >
-                INTEGRATED SURVEILLANCE COMMAND
-              </span>
-            </div>
+                {statusLines.map((line, index) => {
+                  const isActive = index === lineRevealData.activeIndex;
+                  const shownText =
+                    lineRevealData.items[index]?.text ?? line;
+                  const textToRender = prefersReducedMotion
+                    ? line
+                    : shownText || " ";
 
-            <h1
-              className="text-xl sm:text-2xl font-black tracking-[0.14em] uppercase"
-              style={{ color: "#FFFFFF" }}
-            >
-              {APP_CONFIG.name}
-            </h1>
+                  return (
+                    <li
+                      key={`${line}-${index}`}
+                      className="flex items-center gap-2 min-w-0 truncate"
+                      style={{
+                        color: isActive ? "#60A5FA" : "#98A4B8",
+                        opacity: isActive ? 1 : 0.7,
+                        fontWeight: isActive ? 600 : 400
+                      }}
+                    >
+                      <span
+                        className="w-1.5 h-1.5 rounded-full shrink-0"
+                        style={{
+                          backgroundColor: isActive ? "#3B82F6" : "#475569"
+                        }}
+                      />
+                      <span className="truncate">{textToRender}</span>
+                    </li>
+                  );
+                })}
+              </ul>
 
-            <p
-              className="text-xs leading-relaxed px-2"
-              style={{ color: "#A1A1AA" }}
-            >
-              {APP_CONFIG.description}
-            </p>
-
-            {/* Progress Bar & Telemetry Status Line */}
-            <div className="pt-2 space-y-2 max-w-xs mx-auto">
+              {/* Center: Tabular Progress Percentage Counter */}
               <div
-                className="h-1 w-full rounded-full overflow-hidden border"
+                className="text-center font-mono font-bold tabular-nums tracking-[0.08em] text-[#F3F6FB] shrink-0"
                 style={{
-                  backgroundColor: "#12151E",
-                  borderColor: "#252A35"
+                  fontSize: "clamp(28px, 4.5vw, 56px)",
+                  lineHeight: 1
                 }}
               >
-                <motion.div
-                  className="h-full bg-white rounded-full"
-                  initial={{ width: "0%" }}
-                  animate={{ width: `${progress}%` }}
-                  transition={{ duration: 0.1, ease: "linear" }}
-                />
+                ({" "}
+                <span className="text-[#60A5FA]">
+                  {String(displayProgress).padStart(2, "0")}
+                </span>
+                % )
               </div>
 
-              <div className="flex items-center justify-between text-[10px] font-mono">
-                <span
-                  className="truncate max-w-[230px]"
-                  style={{ color: "#A1A1AA" }}
+              {/* Right: System Readiness Summary & Skip Control */}
+              <div className="flex flex-col md:col-span-2 lg:col-span-1 items-start lg:items-end text-left lg:text-right gap-3">
+                <p className="text-xs leading-relaxed text-[#98A4B8] max-w-xs">
+                  {APP_CONFIG.description}
+                </p>
+                <button
+                  type="button"
+                  onClick={dismissFirstLoad}
+                  data-testid="skip-loading-overlay"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/[0.04] hover:bg-[#3B82F6]/20 border border-[var(--border-default)] hover:border-[var(--border-accent)] text-[11px] font-mono uppercase tracking-[0.12em] text-[#E2E8F0] hover:text-white transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#3B82F6]"
                 >
-                  {LOADING_STATUS_STEPS[stepIndex]}
-                </span>
-                <span
-                  className="font-bold tabular-nums"
-                  style={{ color: "#FFFFFF" }}
-                >
-                  {progress}%
-                </span>
+                  <span>Masuk Dashboard</span>
+                  <span aria-hidden="true">→</span>
+                </button>
               </div>
             </div>
-
-            <div className="pt-2">
-              <button
-                type="button"
-                onClick={dismissFirstLoad}
-                data-testid="skip-loading-overlay"
-                className="text-[10px] font-mono uppercase tracking-widest px-3 py-1 rounded border border-[#252A35] text-[#A1A1AA] hover:text-white hover:border-white/40 transition"
-              >
-                Masuk Sekarang →
-              </button>
-            </div>
-          </motion.div>
+          </div>
         </motion.div>
       )}
     </AnimatePresence>
   );
 }
+
+export interface ProgramsCardProps {
+  children: React.ReactNode;
+  index?: number;
+  className?: string;
+  style?: React.CSSProperties;
+  enableEntrance?: boolean;
+  enableHoverLift?: boolean;
+  enableShimmer?: boolean;
+  testId?: string;
+  onClick?: () => void;
+  as?: "div" | "article";
+}
+
+/**
+ * ProgramsCard — Dashboard card primitive inspired by Framer Programs (fpaSe9).
+ * Implements calm staggered upward reveal, subtle GPU hover lift, border refinement,
+ * and an understated metallic silver sheen sweep without bright colors or layout shift.
+ */
+export function ProgramsCard({
+  children,
+  index = 0,
+  className = "",
+  style,
+  enableEntrance = true,
+  enableHoverLift = true,
+  enableShimmer = false,
+  testId,
+  onClick,
+  as = "div"
+}: ProgramsCardProps) {
+  const prefersReducedMotion = usePrefersReducedMotion();
+  const delay = enableEntrance ? getProgramsEntranceDelay(index) : 0;
+
+  const Component = as === "article" ? motion.article : motion.div;
+
+  return (
+    <Component
+      data-testid={testId}
+      onClick={onClick}
+      initial={
+        enableEntrance && !prefersReducedMotion
+          ? { opacity: 0, y: 10 }
+          : false
+      }
+      animate={{ opacity: 1, y: 0 }}
+      whileHover={
+        enableHoverLift && !prefersReducedMotion
+          ? { y: -3, transition: { duration: 0.22, ease: EASE_STANDARD } }
+          : undefined
+      }
+      transition={{
+        duration: prefersReducedMotion ? 0 : DURATIONS.entrance,
+        delay: prefersReducedMotion ? 0 : delay,
+        ease: EASE_STANDARD
+      }}
+      style={style}
+      className={`group/card relative min-w-0 transition-colors duration-200 ${className}`}
+    >
+      {enableShimmer && !prefersReducedMotion && (
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 overflow-hidden rounded-[inherit]"
+        >
+          <span
+            className="absolute -top-[20%] -left-[30%] w-[42%] h-[140%] opacity-0 group-hover/card:opacity-100 -translate-x-full group-hover/card:translate-x-[320%] -skew-x-12 transition-all duration-700 ease-out"
+            style={{
+              background:
+                "linear-gradient(90deg, transparent 0%, rgba(226, 232, 240, 0.06) 50%, transparent 100%)"
+            }}
+          />
+        </span>
+      )}
+      {children}
+    </Component>
+  );
+}
+
+export const MotionCard = ProgramsCard;
 
 export interface DropdownOption {
   value: string;
@@ -449,20 +519,15 @@ export function AnimatedDropdown({
           role="listbox"
           aria-label={ariaLabel}
           data-testid={testId ? `${testId}-menu` : undefined}
-          initial={{ opacity: 0, scale: 0.94, y: -6 }}
+          initial={{ opacity: 0, scale: 0.96, y: -6 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{
             opacity: 0,
-            scale: 0.95,
+            scale: 0.96,
             y: -6,
             transition: { duration: 0.14, ease: "easeOut" }
           }}
-          transition={{
-            type: "spring",
-            stiffness: 420,
-            damping: 30,
-            mass: 0.75
-          }}
+          transition={SPRINGS.snappy}
           style={{
             position: "fixed",
             top: panelPos.top,
@@ -470,15 +535,15 @@ export function AnimatedDropdown({
             width: panelPos.width,
             zIndex: 400,
             transformOrigin: "top center",
-            backgroundColor: "#090B10",
-            borderColor: "#252A35"
+            backgroundColor: "rgba(9, 12, 18, 0.97)",
+            borderColor: "var(--border-default)"
           }}
           className="z-[400] rounded-xl border shadow-2xl overflow-hidden backdrop-blur-xl"
         >
           {searchable && (
-            <div className="p-2 border-b border-[#252A35] bg-zinc-950/80">
+            <div className="p-2 border-b border-[var(--border-subtle)] bg-[#07090D]/80">
               <div className="relative flex items-center">
-                <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-2.5 pointer-events-none" />
+                <Search className="w-3.5 h-3.5 text-[#98A4B8] absolute left-2.5 pointer-events-none" />
                 <input
                   type="text"
                   data-testid={testId ? `${testId}-search` : undefined}
@@ -488,14 +553,15 @@ export function AnimatedDropdown({
                     setFocusedIndex(0);
                   }}
                   placeholder={searchPlaceholder}
-                  className="w-full bg-zinc-900/90 border border-[#252A35] rounded-lg pl-8 pr-7 py-1.5 text-xs text-white placeholder:text-zinc-500 focus:outline-none focus:border-white/40"
+                  className="w-full ee-input rounded-lg pl-8 pr-7 py-1.5 text-xs placeholder:text-[#657287]"
                   autoFocus
                 />
                 {query && (
                   <button
                     type="button"
                     onClick={() => setQuery("")}
-                    className="absolute right-2 text-zinc-400 hover:text-white"
+                    aria-label="Hapus pencarian"
+                    className="absolute right-2 text-[#98A4B8] hover:text-white"
                   >
                     <X className="w-3 h-3" />
                   </button>
@@ -506,7 +572,7 @@ export function AnimatedDropdown({
 
           <div className="max-h-64 overflow-y-auto p-1.5 space-y-0.5">
             {filteredOptions.length === 0 ? (
-              <div className="px-3 py-4 text-center text-xs text-zinc-500">
+              <div className="px-3 py-4 text-center text-xs text-[#657287]">
                 Tidak ada opsi yang cocok
               </div>
             ) : (
@@ -516,17 +582,11 @@ export function AnimatedDropdown({
                   hoveredIndex === idx || focusedIndex === idx;
 
                 return (
-                  <motion.button
+                  <button
                     key={`${opt.value}-${idx}`}
                     type="button"
                     role="option"
                     aria-selected={isSelected}
-                    initial={{ opacity: 0, x: -4 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{
-                      duration: 0.14,
-                      delay: Math.min(idx * 0.012, 0.12)
-                    }}
                     onMouseEnter={() => setHoveredIndex(idx)}
                     onMouseLeave={() => setHoveredIndex(null)}
                     onClick={() => {
@@ -536,22 +596,17 @@ export function AnimatedDropdown({
                     className={`relative w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg text-xs text-left transition-colors ${
                       isSelected
                         ? "text-white font-semibold"
-                        : "text-zinc-300 hover:text-white"
+                        : "text-[#98A4B8] hover:text-[#F3F6FB]"
                     }`}
                   >
-                    {/* Sliding Highlight Background */}
                     {(isHighlighted || isSelected) && (
                       <motion.span
                         layoutId={`dropdown-highlight-${highlightScopeId}`}
-                        transition={{
-                          type: "spring",
-                          stiffness: 450,
-                          damping: 34
-                        }}
+                        transition={SPRINGS.snappy}
                         className={`absolute inset-0 rounded-lg ${
                           isSelected
-                            ? "bg-white/15 border border-white/25"
-                            : "bg-white/[0.07]"
+                            ? "bg-[#3B82F6]/20 border border-[#3B82F6]/45"
+                            : "bg-white/[0.06]"
                         }`}
                       />
                     )}
@@ -560,15 +615,15 @@ export function AnimatedDropdown({
 
                     <span className="relative z-10 flex items-center gap-1.5 shrink-0">
                       {opt.badge !== undefined && (
-                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-900 text-zinc-400 border border-[#252A35]">
+                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#111622] text-[#98A4B8] border border-[var(--border-subtle)] tabular-nums">
                           {opt.badge}
                         </span>
                       )}
                       {isSelected && (
-                        <Check className="w-3.5 h-3.5 text-white shrink-0" />
+                        <Check className="w-3.5 h-3.5 text-[#60A5FA] shrink-0" />
                       )}
                     </span>
-                  </motion.button>
+                  </button>
                 );
               })
             )}
@@ -585,7 +640,7 @@ export function AnimatedDropdown({
       style={{ zIndex: isOpen ? 300 : undefined }}
       className={`relative z-[300] select-none ${className}`}
     >
-      {/* Hidden native select for accessibility & automated form queries */}
+      {/* Hidden native select for accessibility & automated queries */}
       <select
         aria-label={ariaLabel}
         data-testid={testId}
@@ -618,22 +673,22 @@ export function AnimatedDropdown({
         aria-label={ariaLabel}
         data-testid={testId ? `${testId}-trigger` : undefined}
         style={{ zIndex: 300 }}
-        className={`relative z-[300] w-full flex items-center justify-between gap-2 bg-zinc-950/90 hover:bg-zinc-900 border text-xs rounded-xl px-3 py-2 text-left transition-colors focus:outline-none disabled:opacity-50 ${
+        className={`relative z-[300] w-full flex items-center justify-between gap-2 bg-[#0B0E16]/90 hover:bg-[#111622] border text-xs rounded-xl px-3 py-2 text-left transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#3B82F6] disabled:opacity-50 ${
           isOpen
-            ? "border-white/50 text-white shadow-[0_0_0_1px_rgba(255,255,255,0.18)]"
-            : "border-[#252A35] text-zinc-200 hover:border-zinc-700"
+            ? "border-[#3B82F6]/60 text-white shadow-[0_0_0_2px_rgba(59,130,246,0.16)]"
+            : "border-[var(--border-default)] text-[#E2E8F0] hover:border-[var(--border-strong)]"
         }`}
       >
         <span className="flex items-center gap-1.5 min-w-0 truncate">
-          {icon && <span className="text-zinc-400 shrink-0">{icon}</span>}
+          {icon && <span className="text-[#98A4B8] shrink-0">{icon}</span>}
           <span className="truncate font-medium">
             {selectedOption ? selectedOption.label : placeholder}
           </span>
         </span>
         <motion.span
           animate={{ rotate: isOpen ? 180 : 0 }}
-          transition={{ type: "spring", stiffness: 360, damping: 26 }}
-          className="text-zinc-400 shrink-0"
+          transition={SPRINGS.snappy}
+          className="text-[#98A4B8] shrink-0"
         >
           <ChevronDown className="w-3.5 h-3.5" />
         </motion.span>
@@ -680,9 +735,8 @@ export function FavoritesButton({
   return (
     <motion.button
       type="button"
-      whileTap={{ scale: 0.78 }}
-      whileHover={{ scale: 1.05 }}
-      transition={{ type: "spring", stiffness: 450, damping: 20 }}
+      whileTap={{ scale: 0.85 }}
+      transition={SPRINGS.snappy}
       onClick={(e) => {
         e.stopPropagation();
         toggleFavorite(cameraId);
@@ -695,22 +749,22 @@ export function FavoritesButton({
           : `Tambah ${cameraName || "kamera"} ke Favorit`
       }
       title={active ? "Hapus dari CCTV Favorit" : "Tambahkan ke CCTV Favorit"}
-      className={`inline-flex items-center justify-center gap-1.5 rounded-lg border font-medium transition-colors focus:outline-none ${
+      className={`inline-flex items-center justify-center gap-1.5 rounded-lg border font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#3B82F6] ${
         active
-          ? "bg-white/15 border-white/40 text-white shadow-[0_0_12px_rgba(255,255,255,0.16)]"
-          : "bg-zinc-900/90 hover:bg-zinc-800 border-[#252A35] text-white/85 hover:text-white"
+          ? "bg-[#3B82F6]/20 border-[#3B82F6]/50 text-white"
+          : "bg-[#111622] hover:bg-[#161C2B] border-[var(--border-default)] text-[#E2E8F0] hover:text-white"
       } ${sizeStyles} ${className}`}
     >
       <motion.span
         key={active ? "fav-filled" : "fav-outline"}
-        initial={{ scale: 0.7 }}
+        initial={{ scale: 0.8 }}
         animate={{ scale: 1 }}
-        transition={{ type: "spring", stiffness: 500, damping: 18 }}
+        transition={SPRINGS.snappy}
         className="inline-flex items-center justify-center"
       >
         <Heart
           className={`${iconSize} ${
-            active ? "fill-white text-white" : "fill-transparent text-white"
+            active ? "fill-[#60A5FA] text-[#60A5FA]" : "fill-transparent text-[#98A4B8]"
           }`}
         />
       </motion.span>

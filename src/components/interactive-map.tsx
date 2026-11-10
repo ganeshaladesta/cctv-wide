@@ -54,14 +54,14 @@ export function isValidLatLng(lat: unknown, lng: unknown): boolean {
 // Pre-create reusable lightweight DivIcons for ONLINE and OFFLINE cameras
 const ONLINE_MARKER_ICON = L.divIcon({
   className: "cctv-marker-pin",
-  html: `<div class="w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-zinc-950 shadow-[0_0_8px_rgba(16,185,129,0.85)]"></div>`,
+  html: `<div class="w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-[#07090D] shadow-[0_0_6px_rgba(16,185,129,0.65)]"></div>`,
   iconSize: [14, 14],
   iconAnchor: [7, 7]
 });
 
 const OFFLINE_MARKER_ICON = L.divIcon({
   className: "cctv-marker-pin",
-  html: `<div class="w-3.5 h-3.5 rounded-full bg-red-500 border-2 border-zinc-950 shadow-[0_0_8px_rgba(239,68,68,0.75)]"></div>`,
+  html: `<div class="w-3.5 h-3.5 rounded-full bg-red-500 border-2 border-[#07090D] shadow-[0_0_6px_rgba(239,68,68,0.55)]"></div>`,
   iconSize: [14, 14],
   iconAnchor: [7, 7]
 });
@@ -178,7 +178,7 @@ export default function InteractiveMap({
         const label =
           count >= 1000 ? `${(count / 1000).toFixed(1)}k` : String(count);
         return L.divIcon({
-          html: `<div style="width:${size}px;height:${size}px;" class="rounded-full border-2 bg-emerald-500/90 border-emerald-200 text-zinc-950 font-extrabold text-xs flex items-center justify-center shadow-lg transition-transform hover:scale-110">${label}</div>`,
+          html: `<div style="width:${size}px;height:${size}px;" class="rounded-full border-2 bg-[#0B0F17]/95 border-[#3B82F6] text-[#F3F6FB] font-mono font-bold text-[11px] flex items-center justify-center shadow-lg transition-transform hover:scale-110 tabular-nums">${label}</div>`,
           className: "cctv-cluster-icon",
           iconSize: L.point(size, size)
         });
@@ -267,7 +267,7 @@ export default function InteractiveMap({
         const circle = L.circleMarker([m[1], m[2]], {
           radius: 5.5,
           fillColor: isOnline ? "#10b981" : "#ef4444",
-          color: "#09090b",
+          color: "#07090D",
           weight: 1.5,
           fillOpacity: 0.92
         });
@@ -356,7 +356,7 @@ export default function InteractiveMap({
       ref={wrapRef}
       data-testid="map-container"
       style={{ position: "relative", isolation: "isolate", zIndex: 0 }}
-      className={`map-container relative z-0 w-full h-full min-h-[420px] sm:min-h-[540px] bg-zinc-950 rounded-xl overflow-hidden border border-[#252A35] ${
+      className={`map-container relative z-0 w-full h-full min-h-[420px] sm:min-h-[540px] bg-[#07090D] rounded-2xl overflow-hidden border border-[var(--border-default)] shadow-[var(--shadow-card)] ${
         darkFilter ? "osm-dark-tiles" : ""
       }`}
     >
@@ -377,20 +377,20 @@ export default function InteractiveMap({
         <div className="flex flex-wrap items-center gap-1.5 pointer-events-auto max-w-full">
           <div
             data-testid="map-camera-counter"
-            className="px-2.5 sm:px-3 py-1.5 rounded-lg bg-zinc-950/90 backdrop-blur-md border border-zinc-800 text-[11px] sm:text-xs flex items-center gap-1.5 sm:gap-2 shadow-lg"
+            className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-[#090C12]/92 backdrop-blur-md border border-[var(--border-default)] text-[11px] sm:text-xs flex items-center gap-1.5 sm:gap-2 shadow-lg"
           >
             <span
               className={`w-2 h-2 rounded-full shrink-0 ${
                 loadingMarkers
-                  ? "bg-amber-400 animate-ping"
-                  : "bg-emerald-400 animate-pulse"
+                  ? "bg-[#F59E0B] animate-ping"
+                  : "bg-[#10B981] animate-pulse"
               }`}
             />
-            <span className="font-semibold text-zinc-100 font-mono">
+            <span className="font-semibold text-[#F3F6FB] font-mono tabular-nums">
               {validMarkers.length.toLocaleString("id-ID")}
             </span>
-            <span className="text-zinc-400">kamera di peta</span>
-            <span className="hidden sm:inline text-[11px] text-emerald-400 font-mono border-l border-zinc-800 pl-2">
+            <span className="text-[#98A4B8]">kamera di peta</span>
+            <span className="hidden sm:inline text-[11px] text-[#10B981] font-mono tabular-nums border-l border-[var(--border-subtle)] pl-2">
               {onlineValidCount.toLocaleString("id-ID")} Online
             </span>
           </div>
@@ -398,10 +398,10 @@ export default function InteractiveMap({
           <button
             type="button"
             onClick={() => setClustering((c) => !c)}
-            className={`px-2 sm:px-2.5 py-1.5 rounded-lg text-[11px] sm:text-xs font-medium border backdrop-blur-md transition shadow-lg ${
+            className={`px-2.5 py-1.5 rounded-xl text-[11px] sm:text-xs font-medium border backdrop-blur-md transition-colors shadow-lg ${
               clustering
-                ? "bg-sky-950/90 border-sky-500/50 text-sky-300"
-                : "bg-zinc-950/90 border-zinc-800 text-zinc-300 hover:text-white"
+                ? "bg-[#3B82F6]/20 border-[#3B82F6]/45 text-white"
+                : "bg-[#090C12]/92 border-[var(--border-default)] text-[#98A4B8] hover:text-white"
             }`}
           >
             Cluster: {clustering ? "AKTIF" : "NONAKTIF"}
@@ -414,16 +414,16 @@ export default function InteractiveMap({
           style={{ zIndex: 20 }}
           className="flex flex-wrap items-center gap-1 sm:gap-1.5 pointer-events-auto"
         >
-          <div className="flex items-center bg-zinc-950/90 backdrop-blur-md border border-zinc-800 rounded-lg p-1 shadow-lg">
-            <Layers className="w-3.5 h-3.5 text-amber-400 ml-1 mr-1 hidden xs:inline" />
+          <div className="flex items-center bg-[#090C12]/92 backdrop-blur-md border border-[var(--border-default)] rounded-xl p-1 shadow-lg">
+            <Layers className="w-3.5 h-3.5 text-[#60A5FA] ml-1 mr-1 hidden xs:inline" />
             <button
               type="button"
               data-testid="osm-dark-btn"
               onClick={() => setDarkFilter(true)}
-              className={`px-1.5 sm:px-2 py-1 rounded text-[10px] sm:text-[11px] font-medium transition ${
+              className={`px-2 py-1 rounded-lg text-[10px] sm:text-[11px] font-medium transition-colors ${
                 darkFilter
-                  ? "bg-sky-600 text-white"
-                  : "text-zinc-400 hover:text-zinc-200"
+                  ? "bg-[#3B82F6] text-white"
+                  : "text-[#98A4B8] hover:text-[#F3F6FB]"
               }`}
             >
               OSM Gelap
@@ -432,10 +432,10 @@ export default function InteractiveMap({
               type="button"
               data-testid="osm-standard-btn"
               onClick={() => setDarkFilter(false)}
-              className={`px-1.5 sm:px-2 py-1 rounded text-[10px] sm:text-[11px] font-medium transition ${
+              className={`px-2 py-1 rounded-lg text-[10px] sm:text-[11px] font-medium transition-colors ${
                 !darkFilter
-                  ? "bg-sky-600 text-white"
-                  : "text-zinc-400 hover:text-zinc-200"
+                  ? "bg-[#3B82F6] text-white"
+                  : "text-[#98A4B8] hover:text-[#F3F6FB]"
               }`}
             >
               OSM Standar
@@ -446,7 +446,8 @@ export default function InteractiveMap({
             type="button"
             onClick={handleLocateMe}
             title="Lokasi Saya"
-            className="p-1.5 sm:p-2 rounded-lg bg-zinc-950/90 backdrop-blur-md border border-zinc-800 text-zinc-300 hover:text-white shadow-lg transition"
+            aria-label="Lokasi Saya"
+            className="p-1.5 sm:p-2 rounded-xl bg-[#090C12]/92 backdrop-blur-md border border-[var(--border-default)] text-[#E2E8F0] hover:bg-[#161C2B] hover:text-white shadow-lg transition-colors"
           >
             <Navigation className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
           </button>
@@ -455,7 +456,8 @@ export default function InteractiveMap({
             type="button"
             onClick={handleResetView}
             title="Reset Peta Indonesia"
-            className="p-1.5 sm:p-2 rounded-lg bg-zinc-950/90 backdrop-blur-md border border-zinc-800 text-zinc-300 hover:text-white shadow-lg transition"
+            aria-label="Reset Peta Indonesia"
+            className="p-1.5 sm:p-2 rounded-xl bg-[#090C12]/92 backdrop-blur-md border border-[var(--border-default)] text-[#E2E8F0] hover:bg-[#161C2B] hover:text-white shadow-lg transition-colors"
           >
             <RotateCcw className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
           </button>
@@ -464,7 +466,8 @@ export default function InteractiveMap({
             type="button"
             onClick={toggleFullscreen}
             title="Peta Layar Penuh"
-            className="p-1.5 sm:p-2 rounded-lg bg-zinc-950/90 backdrop-blur-md border border-zinc-800 text-zinc-300 hover:text-white shadow-lg transition"
+            aria-label="Peta Layar Penuh"
+            className="p-1.5 sm:p-2 rounded-xl bg-[#090C12]/92 backdrop-blur-md border border-[var(--border-default)] text-[#E2E8F0] hover:bg-[#161C2B] hover:text-white shadow-lg transition-colors"
           >
             {isFullscreen ? (
               <Minimize2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />

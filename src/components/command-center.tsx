@@ -41,7 +41,8 @@ import {
 import {
   EagleEyesLogo,
   AnimatedDropdown,
-  FavoritesButton
+  FavoritesButton,
+  ProgramsCard
 } from "@/components/motion-ui";
 import { FavoritesPage } from "@/components/favorites-view";
 import {
@@ -54,10 +55,10 @@ import MultiViewGrid from "@/components/multi-view-grid";
 const InteractiveMap = dynamic(() => import("@/components/interactive-map"), {
   ssr: false,
   loading: () => (
-    <div className="w-full h-[420px] sm:h-[560px] rounded-xl bg-zinc-900/60 border border-[#252A35] flex flex-col items-center justify-center gap-3 p-4">
+    <div className="w-full h-[420px] sm:h-[560px] rounded-2xl bg-[#0D121B]/85 border border-[var(--border-default)] flex flex-col items-center justify-center gap-3 p-4">
       <EagleEyesLogo size="lg" animateHover={false} />
-      <div className="w-7 h-7 border-2 border-white/80 border-t-transparent rounded-full animate-spin" />
-      <span className="text-xs text-zinc-400 font-mono text-center">
+      <div className="w-7 h-7 border-2 border-[#3B82F6] border-t-white rounded-full animate-spin" />
+      <span className="text-xs text-[#98A4B8] font-mono text-center">
         Memuat Peta Interaktif {APP_CONFIG.name} (OpenStreetMap)...
       </span>
     </div>
@@ -475,104 +476,108 @@ export default function CommandCenter({
       ? cameraInteraction.camera || null
       : null;
 
+  const kpiCards = [
+    {
+      label: "Total Kamera CCTV",
+      value: stats.total_cameras.toLocaleString("id-ID"),
+      icon: <Video className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#E2E8F0] shrink-0" />,
+      valueColor: "text-[#F3F6FB]",
+      borderTone: "border-[var(--border-default)] hover:border-[var(--border-strong)]"
+    },
+    {
+      label: "Kamera Aktif (Online)",
+      value: stats.online_cameras.toLocaleString("id-ID"),
+      icon: <CheckCircle2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#10B981] shrink-0" />,
+      valueColor: "text-[#10B981]",
+      borderTone: "border-emerald-500/25 hover:border-emerald-400/45"
+    },
+    {
+      label: "Kamera Offline",
+      value: stats.offline_cameras.toLocaleString("id-ID"),
+      icon: <XCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#EF4444] shrink-0" />,
+      valueColor: "text-[#EF4444]",
+      borderTone: "border-red-500/20 hover:border-red-400/40"
+    },
+    {
+      label: "Cakupan Provinsi",
+      value: `${stats.total_provinces} / 38`,
+      icon: <Globe2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#60A5FA] shrink-0" />,
+      valueColor: "text-[#60A5FA]",
+      borderTone: "border-[var(--border-default)] hover:border-[var(--border-accent)]"
+    },
+    {
+      label: "Kota / Kabupaten",
+      value: stats.total_cities.toLocaleString("id-ID"),
+      icon: <Building2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#F59E0B] shrink-0" />,
+      valueColor: "text-[#F3F6FB]",
+      borderTone: "border-[var(--border-default)] hover:border-[var(--border-strong)]"
+    },
+    {
+      label: "Instansi / Sumber",
+      value: stats.total_sources.toLocaleString("id-ID"),
+      icon: <Shield className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#60A5FA] shrink-0" />,
+      valueColor: "text-[#E2E8F0]",
+      borderTone: "border-[var(--border-default)] hover:border-[var(--border-strong)]"
+    }
+  ];
+
   return (
-    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-zinc-950 text-zinc-100 flex flex-col">
-      {/* Unified Institutional Responsive Header */}
+    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-transparent text-[#F3F6FB] flex flex-col">
+      {/* Breathing Navbar */}
       <ResponsiveHeader
         activeTab={activeTab}
         onSelectTab={setActiveTab}
         multiViewCount={multiViewCameras.length}
       />
 
-      {/* National Telemetry KPI Strip */}
+      {/* National Telemetry KPI Strip (Programs-inspired staggered cards) */}
       <section
         aria-label="Statistik Pemantauan Nasional"
-        className="border-b border-[#252A35] bg-zinc-900/40 px-3 sm:px-4 lg:px-6 py-2.5 sm:py-3"
+        className="px-2.5 sm:px-4 lg:px-6 pt-3 pb-2"
       >
         <div className="max-w-[1600px] mx-auto grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2 sm:gap-2.5">
-          <div className="p-2.5 sm:p-3 rounded-xl bg-zinc-900/90 border border-[#252A35] min-w-0">
-            <div className="flex items-center justify-between gap-1 text-[11px] sm:text-xs text-zinc-400">
-              <span className="truncate">Total Kamera CCTV</span>
-              <Video className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-sky-400 shrink-0" />
-            </div>
-            <p className="text-base sm:text-lg font-extrabold text-white mt-1 font-mono truncate">
-              {stats.total_cameras.toLocaleString("id-ID")}
-            </p>
-          </div>
-
-          <div className="p-2.5 sm:p-3 rounded-xl bg-zinc-900/90 border border-emerald-900/50 min-w-0">
-            <div className="flex items-center justify-between gap-1 text-[11px] sm:text-xs text-emerald-400">
-              <span className="truncate">Kamera Aktif (Online)</span>
-              <CheckCircle2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
-            </div>
-            <p className="text-base sm:text-lg font-extrabold text-emerald-400 mt-1 font-mono truncate">
-              {stats.online_cameras.toLocaleString("id-ID")}
-            </p>
-          </div>
-
-          <div className="p-2.5 sm:p-3 rounded-xl bg-zinc-900/90 border border-red-900/40 min-w-0">
-            <div className="flex items-center justify-between gap-1 text-[11px] sm:text-xs text-red-400">
-              <span className="truncate">Kamera Offline</span>
-              <XCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
-            </div>
-            <p className="text-base sm:text-lg font-extrabold text-red-400 mt-1 font-mono truncate">
-              {stats.offline_cameras.toLocaleString("id-ID")}
-            </p>
-          </div>
-
-          <div className="p-2.5 sm:p-3 rounded-xl bg-zinc-900/90 border border-[#252A35] min-w-0">
-            <div className="flex items-center justify-between gap-1 text-[11px] sm:text-xs text-zinc-400">
-              <span className="truncate">Cakupan Provinsi</span>
-              <Globe2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-sky-400 shrink-0" />
-            </div>
-            <p className="text-base sm:text-lg font-extrabold text-sky-400 mt-1 font-mono truncate">
-              {stats.total_provinces} / 38
-            </p>
-          </div>
-
-          <div className="p-2.5 sm:p-3 rounded-xl bg-zinc-900/90 border border-[#252A35] min-w-0">
-            <div className="flex items-center justify-between gap-1 text-[11px] sm:text-xs text-zinc-400">
-              <span className="truncate">Kota / Kabupaten</span>
-              <Building2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400 shrink-0" />
-            </div>
-            <p className="text-base sm:text-lg font-extrabold text-amber-400 mt-1 font-mono truncate">
-              {stats.total_cities.toLocaleString("id-ID")}
-            </p>
-          </div>
-
-          <div className="p-2.5 sm:p-3 rounded-xl bg-zinc-900/90 border border-[#252A35] min-w-0">
-            <div className="flex items-center justify-between gap-1 text-[11px] sm:text-xs text-zinc-400">
-              <span className="truncate">Instansi / Sumber</span>
-              <Shield className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400 shrink-0" />
-            </div>
-            <p className="text-base sm:text-lg font-extrabold text-amber-300 mt-1 font-mono truncate">
-              {stats.total_sources.toLocaleString("id-ID")}
-            </p>
-          </div>
+          {kpiCards.map((kpi, idx) => (
+            <ProgramsCard
+              key={kpi.label}
+              index={idx}
+              enableShimmer
+              className={`p-3 sm:p-3.5 rounded-2xl ee-surface ${kpi.borderTone}`}
+            >
+              <div className="flex items-center justify-between gap-1 text-[11px] sm:text-xs text-[#98A4B8]">
+                <span className="truncate">{kpi.label}</span>
+                {kpi.icon}
+              </div>
+              <p
+                className={`text-base sm:text-lg font-extrabold mt-1 font-mono tabular-nums truncate ${kpi.valueColor}`}
+              >
+                {kpi.value}
+              </p>
+            </ProgramsCard>
+          ))}
         </div>
       </section>
 
-      {/* Global Search & Animated Morph Dropdown Filter Bar (z-index: 100 container, triggers z-index: 300, portaled panels z-index: 400) */}
+      {/* Global Search & Animated Morph Dropdown Filter Bar (z-index: 100) */}
       <section
         style={{ position: "relative", zIndex: 100 }}
-        className="relative z-[100] px-3 sm:px-4 lg:px-6 py-2.5 sm:py-3 bg-zinc-950 border-b border-[#252A35]"
+        className="relative z-[100] px-2.5 sm:px-4 lg:px-6 py-2"
       >
-        <div className="max-w-[1600px] mx-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 items-center gap-2">
+        <div className="max-w-[1600px] mx-auto rounded-2xl ee-shell-surface px-3 py-2.5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 xl:grid-cols-[minmax(190px,1.45fr)_minmax(148px,1.05fr)_minmax(160px,1.1fr)_minmax(165px,1.15fr)_minmax(122px,0.82fr)_minmax(138px,0.92fr)_auto] items-center gap-2">
           {/* Search Input */}
-          <div className="relative sm:col-span-2 lg:col-span-3 min-w-0">
-            <Search className="w-4 h-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+          <div className="relative sm:col-span-2 lg:col-span-6 xl:col-span-1 min-w-0">
+            <Search className="w-4 h-4 text-[#98A4B8] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="text"
               data-testid="global-camera-search"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Cari nama kamera, simpang jalan, kota, provinsi..."
-              className="w-full max-w-full min-w-0 pl-9 pr-4 py-2 rounded-xl bg-zinc-950/90 border border-[#252A35] text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-white/50"
+              className="w-full max-w-full min-w-0 pl-9 pr-4 py-2 rounded-xl ee-input text-xs placeholder-[#657287]"
             />
           </div>
 
           {/* Province Morph Dropdown */}
-          <div className="lg:col-span-2 min-w-0">
+          <div className="lg:col-span-3 xl:col-span-1 min-w-0">
             <AnimatedDropdown
               value={selectedProvince}
               onChange={setSelectedProvince}
@@ -587,7 +592,7 @@ export default function CommandCenter({
           </div>
 
           {/* City Morph Dropdown */}
-          <div className="lg:col-span-2 min-w-0">
+          <div className="lg:col-span-3 xl:col-span-1 min-w-0">
             <AnimatedDropdown
               value={selectedCity}
               onChange={setSelectedCity}
@@ -602,7 +607,7 @@ export default function CommandCenter({
           </div>
 
           {/* Source / Provider Morph Dropdown */}
-          <div className="lg:col-span-2 min-w-0">
+          <div className="lg:col-span-4 xl:col-span-1 min-w-0">
             <AnimatedDropdown
               value={selectedSource}
               onChange={setSelectedSource}
@@ -617,7 +622,7 @@ export default function CommandCenter({
           </div>
 
           {/* Status Morph Dropdown */}
-          <div className="lg:col-span-1 min-w-0">
+          <div className="lg:col-span-3 xl:col-span-1 min-w-0">
             <AnimatedDropdown
               value={selectedStatus}
               onChange={setSelectedStatus}
@@ -629,7 +634,7 @@ export default function CommandCenter({
           </div>
 
           {/* Protocol Morph Dropdown */}
-          <div className="lg:col-span-1 min-w-0">
+          <div className="lg:col-span-3 xl:col-span-1 min-w-0">
             <AnimatedDropdown
               value={selectedProtocol}
               onChange={setSelectedProtocol}
@@ -641,7 +646,7 @@ export default function CommandCenter({
             />
           </div>
 
-          <div className="sm:col-span-2 lg:col-span-1 flex items-center justify-between lg:justify-end gap-2">
+          <div className="sm:col-span-2 lg:col-span-2 xl:col-span-1 flex items-center justify-between lg:justify-end gap-2">
             {(searchQuery ||
               selectedProvince ||
               selectedCity ||
@@ -651,14 +656,14 @@ export default function CommandCenter({
               <button
                 type="button"
                 onClick={handleResetFilters}
-                className="px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-[11px] font-medium text-zinc-200 transition shrink-0"
+                className="px-2.5 py-1.5 rounded-lg bg-[#161C2B] hover:bg-[#1C2436] border border-[var(--border-default)] text-[11px] font-medium text-[#E2E8F0] transition-colors shrink-0"
               >
                 Reset
               </button>
             )}
 
-            <div className="text-[11px] text-zinc-400 font-mono truncate">
-              <span className="text-white font-bold">
+            <div className="text-[11px] text-[#98A4B8] font-mono tabular-nums truncate">
+              <span className="text-[#F3F6FB] font-bold">
                 {totalMatching.toLocaleString("id-ID")}
               </span>{" "}
               cam
@@ -668,9 +673,9 @@ export default function CommandCenter({
       </section>
 
       {/* Main Workspace Area */}
-      <main className="relative z-0 flex-1 max-w-[1600px] w-full mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-4">
+      <main className="relative z-0 flex-1 max-w-[1600px] w-full mx-auto px-2.5 sm:px-4 lg:px-6 py-2.5 sm:py-3.5">
         {activeTab === "map" && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-3.5 sm:gap-4">
             {/* Left Interactive Map (8 cols on desktop, isolated at z-index: 0) */}
             <div className="lg:col-span-8 h-[460px] sm:h-[560px] lg:h-[620px] min-w-0">
               <InteractiveMap
@@ -690,27 +695,27 @@ export default function CommandCenter({
             {/* Right Live Camera Directory Sidebar (DAFTAR KAMERA — 4 cols on desktop) */}
             <div
               data-testid="daftar-kamera-sidebar"
-              className="lg:col-span-4 h-[480px] sm:h-[560px] lg:h-[620px] rounded-xl bg-zinc-900/70 border border-[#252A35] flex flex-col overflow-hidden min-w-0"
+              className="lg:col-span-4 h-[480px] sm:h-[560px] lg:h-[620px] rounded-2xl ee-surface flex flex-col overflow-hidden min-w-0"
             >
-              <div className="px-3.5 py-2.5 bg-zinc-900 border-b border-[#252A35] flex items-center justify-between gap-2">
+              <div className="px-3.5 py-2.5 bg-[#0C1018] border-b border-[var(--border-subtle)] flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 min-w-0">
-                  <Filter className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-                  <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-200 truncate">
+                  <Filter className="w-3.5 h-3.5 text-[#60A5FA] shrink-0" />
+                  <h2 className="text-xs font-bold uppercase tracking-wider text-[#F3F6FB] truncate">
                     Daftar Kamera ({totalMatching.toLocaleString("id-ID")})
                   </h2>
                 </div>
-                <span className="text-[11px] text-zinc-400 font-mono shrink-0">
+                <span className="text-[11px] text-[#98A4B8] font-mono tabular-nums shrink-0">
                   Hal {page}/{totalPages}
                 </span>
               </div>
 
-              <div className="flex-1 overflow-y-auto divide-y divide-zinc-800/60">
+              <div className="flex-1 overflow-y-auto divide-y divide-[var(--border-subtle)]">
                 {loadingCameras ? (
-                  <div className="p-8 text-center text-xs text-zinc-400">
+                  <div className="p-8 text-center text-xs text-[#98A4B8]">
                     Memuat daftar kamera...
                   </div>
                 ) : cameras.length === 0 ? (
-                  <div className="p-8 text-center text-xs text-zinc-500">
+                  <div className="p-8 text-center text-xs text-[#657287]">
                     Tidak ada kamera yang sesuai filter.
                   </div>
                 ) : (
@@ -718,30 +723,30 @@ export default function CommandCenter({
                     <div
                       key={cam.id}
                       data-testid={`directory-camera-row-${cam.id}`}
-                      className="p-3 hover:bg-zinc-800/50 transition flex items-start justify-between gap-2"
+                      className="p-3 hover:bg-white/[0.035] transition-colors flex items-start justify-between gap-2"
                     >
                       <button
                         type="button"
                         data-testid={`directory-camera-btn-${cam.id}`}
                         onClick={() => handleDirectoryCameraClick(cam.id, cam)}
-                        className="text-left min-w-0 flex-1"
+                        className="text-left min-w-0 flex-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#3B82F6] rounded-md"
                       >
                         <div className="flex items-center gap-1.5">
                           <span
                             className={`w-2 h-2 rounded-full shrink-0 ${
                               cam.status === "ONLINE"
-                                ? "bg-emerald-400"
-                                : "bg-red-400"
+                                ? "bg-[#10B981]"
+                                : "bg-[#EF4444]"
                             }`}
                           />
-                          <p className="text-xs font-semibold text-zinc-100 truncate">
+                          <p className="text-xs font-semibold text-[#F3F6FB] truncate">
                             {cam.name}
                           </p>
                         </div>
-                        <p className="text-[11px] text-zinc-400 truncate mt-0.5">
+                        <p className="text-[11px] text-[#98A4B8] truncate mt-0.5">
                           {cam.city_name}, {cam.province_name}
                         </p>
-                        <p className="text-[10px] text-zinc-500 truncate mt-0.5">
+                        <p className="text-[10px] text-[#657287] truncate mt-0.5 font-mono">
                           {cam.source_name} • {cam.protocol}
                         </p>
                       </button>
@@ -756,7 +761,8 @@ export default function CommandCenter({
                           type="button"
                           onClick={() => handleAddToMultiView(cam)}
                           title="Tambah ke Multi-View"
-                          className="p-1.5 rounded-lg bg-zinc-800 hover:bg-sky-600 text-zinc-300 hover:text-white transition"
+                          aria-label={`Tambah ${cam.name} ke Multi-View`}
+                          className="p-1.5 rounded-lg bg-[#161C2B] hover:bg-[#3B82F6] border border-[var(--border-subtle)] text-[#98A4B8] hover:text-white transition-colors"
                         >
                           <PlusSquare className="w-3.5 h-3.5" />
                         </button>
@@ -767,24 +773,24 @@ export default function CommandCenter({
               </div>
 
               {/* Pagination Footer */}
-              <div className="p-2.5 bg-zinc-900 border-t border-[#252A35] flex items-center justify-between gap-2">
+              <div className="p-2.5 bg-[#0C1018] border-t border-[var(--border-subtle)] flex items-center justify-between gap-2">
                 <button
                   type="button"
                   disabled={page <= 1}
                   onClick={() => fetchFilteredCameras(page - 1)}
-                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 text-xs text-zinc-200"
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#161C2B] hover:bg-[#1C2436] border border-[var(--border-subtle)] disabled:opacity-40 text-xs text-[#E2E8F0] transition-colors"
                 >
                   <ChevronLeft className="w-3.5 h-3.5" />
                   <span>Sebelumnya</span>
                 </button>
-                <span className="text-[11px] text-zinc-400 font-mono truncate">
+                <span className="text-[11px] text-[#98A4B8] font-mono tabular-nums truncate">
                   Hal {page}/{totalPages}
                 </span>
                 <button
                   type="button"
                   disabled={page >= totalPages}
                   onClick={() => fetchFilteredCameras(page + 1)}
-                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 text-xs text-zinc-200"
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#161C2B] hover:bg-[#1C2436] border border-[var(--border-subtle)] disabled:opacity-40 text-xs text-[#E2E8F0] transition-colors"
                 >
                   <span>Berikutnya</span>
                   <ChevronRight className="w-3.5 h-3.5" />
@@ -805,20 +811,23 @@ export default function CommandCenter({
         {activeTab === "directory" && (
           <div className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3.5 sm:gap-4">
-              {cameras.slice(0, 12).map((cam) => (
-                <div
+              {cameras.slice(0, 12).map((cam, idx) => (
+                <ProgramsCard
                   key={cam.id}
-                  className="rounded-xl bg-zinc-900/80 border border-[#252A35] overflow-hidden flex flex-col min-w-0"
+                  index={idx}
+                  enableHoverLift={false}
+                  enableShimmer={false}
+                  className="rounded-2xl ee-surface hover:border-[var(--border-strong)] overflow-hidden flex flex-col"
                 >
                   <div className="h-[190px] sm:h-[200px]">
                     <CameraVideoPlayer camera={cam} autoPlay={false} compact />
                   </div>
-                  <div className="p-3 flex items-center justify-between gap-2 bg-zinc-900">
+                  <div className="p-3 flex items-center justify-between gap-2 bg-[#0C1018]">
                     <div className="min-w-0 flex-1">
-                      <p className="text-xs font-bold text-zinc-100 truncate">
+                      <p className="text-xs font-bold text-[#F3F6FB] truncate">
                         {cam.name}
                       </p>
-                      <p className="text-[11px] text-zinc-400 truncate">
+                      <p className="text-[11px] text-[#98A4B8] truncate">
                         {cam.city_name}, {cam.province_name}
                       </p>
                     </div>
@@ -831,34 +840,34 @@ export default function CommandCenter({
                       <button
                         type="button"
                         onClick={() => handleDirectoryCameraClick(cam.id, cam)}
-                        className="px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-[11px] text-zinc-200"
+                        className="px-2 py-1 rounded-lg bg-[#161C2B] hover:bg-[#1C2436] border border-[var(--border-subtle)] text-[11px] text-[#E2E8F0] transition-colors"
                       >
                         Detail
                       </button>
                       <button
                         type="button"
                         onClick={() => handleAddToMultiView(cam)}
-                        className="px-2 py-1 rounded bg-sky-600 hover:bg-sky-500 text-[11px] text-white"
+                        className="px-2 py-1 rounded-lg bg-[#3B82F6] hover:bg-[#60A5FA] text-[11px] font-semibold text-white transition-colors"
                       >
                         +Multi
                       </button>
                     </div>
                   </div>
-                </div>
+                </ProgramsCard>
               ))}
             </div>
 
             {/* Pagination Controls */}
-            <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-xl bg-zinc-900 border border-[#252A35]">
+            <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-2xl ee-surface">
               <button
                 type="button"
                 disabled={page <= 1}
                 onClick={() => fetchFilteredCameras(page - 1)}
-                className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 text-xs font-medium"
+                className="px-3 py-1.5 rounded-xl bg-[#161C2B] hover:bg-[#1C2436] border border-[var(--border-default)] disabled:opacity-40 text-xs font-medium text-[#E2E8F0] transition-colors"
               >
                 ← Sebelumnya
               </button>
-              <span className="text-xs text-zinc-400 font-mono text-center">
+              <span className="text-xs text-[#98A4B8] font-mono tabular-nums text-center">
                 Halaman {page} / {totalPages} (
                 {totalMatching.toLocaleString("id-ID")} Kamera)
               </span>
@@ -866,7 +875,7 @@ export default function CommandCenter({
                 type="button"
                 disabled={page >= totalPages}
                 onClick={() => fetchFilteredCameras(page + 1)}
-                className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 text-xs font-medium"
+                className="px-3 py-1.5 rounded-xl bg-[#161C2B] hover:bg-[#1C2436] border border-[var(--border-default)] disabled:opacity-40 text-xs font-medium text-[#E2E8F0] transition-colors"
               >
                 Berikutnya →
               </button>
@@ -877,72 +886,75 @@ export default function CommandCenter({
         {activeTab === "provinces" && (
           <div className="space-y-6">
             <div>
-              <h2 className="text-sm font-bold text-zinc-100 uppercase tracking-wider mb-3">
+              <h2 className="text-xs font-mono font-bold text-[#E2E8F0] uppercase tracking-[0.14em] mb-3">
                 Direktori Hirarkis 38 Provinsi Indonesia
               </h2>
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-                {provinces.map((p) => (
-                  <div
+                {provinces.map((p, idx) => (
+                  <ProgramsCard
                     key={p.id}
-                    className="p-3.5 rounded-xl bg-zinc-900/90 border border-[#252A35] hover:border-sky-500/50 transition flex flex-col justify-between min-w-0"
+                    index={idx}
+                    enableShimmer
+                    className="p-3.5 rounded-2xl ee-surface hover:border-[var(--border-accent)] flex flex-col justify-between"
                   >
                     <div>
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-zinc-800 text-zinc-400">
+                        <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded-md bg-[#161C2B] border border-[var(--border-subtle)] text-[#98A4B8]">
                           {p.island}
                         </span>
-                        <span className="text-xs font-mono text-emerald-400 font-bold">
+                        <span className="text-xs font-mono text-[#10B981] font-bold tabular-nums">
                           {p.online_cameras.toLocaleString("id-ID")} Online
                         </span>
                       </div>
-                      <h3 className="text-sm font-bold text-white mt-2 truncate">
+                      <h3 className="text-sm font-bold text-[#F3F6FB] mt-2 truncate">
                         {p.name}
                       </h3>
-                      <p className="text-xs text-zinc-400 mt-0.5">
+                      <p className="text-xs text-[#98A4B8] mt-0.5 font-mono">
                         {p.total_cameras.toLocaleString("id-ID")} kamera •{" "}
                         {p.city_count} Kota/Kab • {p.source_count} Sumber
                       </p>
                     </div>
 
-                    <div className="mt-3 pt-2.5 border-t border-zinc-800/80 flex items-center justify-between gap-2">
+                    <div className="mt-3 pt-2.5 border-t border-[var(--border-subtle)] flex items-center justify-between gap-2">
                       <button
                         type="button"
                         onClick={() => {
                           setSelectedProvince(p.id);
                           setActiveTab("map");
                         }}
-                        className="text-xs text-sky-400 hover:text-sky-300 font-medium"
+                        className="text-xs text-[#60A5FA] hover:text-white font-medium transition-colors"
                       >
                         Buka di Peta →
                       </button>
                       <Link
                         href={`/kamera/${p.slug}`}
-                        className="text-xs text-zinc-400 hover:text-white"
+                        className="text-xs text-[#98A4B8] hover:text-white transition-colors"
                       >
                         Halaman Provinsi
                       </Link>
                     </div>
-                  </div>
+                  </ProgramsCard>
                 ))}
               </div>
             </div>
 
             {sources.length > 0 && (
               <div>
-                <h2 className="text-sm font-bold text-zinc-100 uppercase tracking-wider mb-3">
+                <h2 className="text-xs font-mono font-bold text-[#E2E8F0] uppercase tracking-[0.14em] mb-3">
                   Sumber Instansi Resmi Terverifikasi ({sources.length})
                 </h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5">
-                  {sources.slice(0, 36).map((s) => (
-                    <div
+                  {sources.slice(0, 36).map((s, idx) => (
+                    <ProgramsCard
                       key={s.id}
-                      className="p-3 rounded-lg bg-zinc-900/70 border border-[#252A35] flex items-center justify-between gap-2 min-w-0"
+                      index={idx}
+                      className="p-3 rounded-xl ee-surface hover:border-[var(--border-strong)] flex items-center justify-between gap-2"
                     >
                       <div className="min-w-0 flex-1">
-                        <p className="text-xs font-semibold text-zinc-100 truncate">
+                        <p className="text-xs font-semibold text-[#F3F6FB] truncate">
                           {s.name}
                         </p>
-                        <p className="text-[11px] text-zinc-400 truncate">
+                        <p className="text-[11px] text-[#98A4B8] truncate">
                           {s.city_name}, {s.province_name} • {s.protocol}
                         </p>
                       </div>
@@ -952,11 +964,11 @@ export default function CommandCenter({
                           setSelectedSource(s.id);
                           setActiveTab("directory");
                         }}
-                        className="px-2.5 py-1 rounded bg-zinc-800 hover:bg-sky-600 text-xs font-mono text-zinc-200 hover:text-white shrink-0 transition"
+                        className="px-2.5 py-1 rounded-lg bg-[#161C2B] hover:bg-[#3B82F6] border border-[var(--border-subtle)] text-xs font-mono text-[#E2E8F0] hover:text-white shrink-0 transition-colors tabular-nums"
                       >
                         {s.total_cameras} cam
                       </button>
-                    </div>
+                    </ProgramsCard>
                   ))}
                 </div>
               </div>
@@ -985,7 +997,7 @@ export default function CommandCenter({
         onSelectNearbyCamera={(nc) => handleDirectoryCameraClick(nc.id, nc)}
       />
 
-      {/* Unified Institutional Footer */}
+      {/* Breathing Footer */}
       <AppFooter />
     </div>
   );

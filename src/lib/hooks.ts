@@ -118,44 +118,103 @@ export function useFavorites() {
   };
 }
 
-export function useFirstLoad(durationMs = 5000) {
-  const [isFirstLoad, setIsFirstLoad] = useState(false);
+export function usePrefersReducedMotion(): boolean {
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
 
   useEffect(() => {
+    if (
+      typeof window === "undefined" ||
+      typeof window.matchMedia !== "function"
+    ) {
+      return;
+    }
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const update = () => setPrefersReducedMotion(mq.matches);
+    update();
+    mq.addEventListener?.("change", update);
+    return () => mq.removeEventListener?.("change", update);
+  }, []);
+
+  return prefersReducedMotion;
+}
+
+export function useFirstLoad(durationMs = 5000) {
+  const [isFirstLoad, setIsFirstLoad] = useState(false);
+  const [minDurationDone, setMinDurationDone] = useState(false);
+  const [appReady, setAppReady] = useState(false);
+  const prefersReducedMotion = usePrefersReducedMotion();
+
+  useEffect(() => {
     if (typeof window === "undefined") return;
+
     const reduced =
       typeof window.matchMedia === "function" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    setPrefersReducedMotion(reduced);
 
+    let alreadyLoaded = false;
     try {
-      const alreadyLoaded = window.sessionStorage.getItem(
-        FIRST_LOAD_SESSION_KEY
+      alreadyLoaded = Boolean(
+        window.sessionStorage.getItem(FIRST_LOAD_SESSION_KEY)
       );
-      if (!alreadyLoaded) {
-        setIsFirstLoad(true);
-        const effectiveDuration = reduced ? 600 : durationMs;
-        const timer = setTimeout(() => {
-          try {
-            window.sessionStorage.setItem(FIRST_LOAD_SESSION_KEY, "1");
-          } catch {}
-          setIsFirstLoad(false);
-        }, effectiveDuration);
-        return () => clearTimeout(timer);
-      }
     } catch {}
+
+    if (alreadyLoaded) {
+      setIsFirstLoad(false);
+      setMinDurationDone(true);
+      setAppReady(true);
+      return;
+    }
+
+    setIsFirstLoad(true);
+
+    // Track actual document / initialization readiness
+    const markReady = () => setAppReady(true);
+    if (document.readyState === "complete") {
+      markReady();
+    } else {
+      window.addEventListener("load", markReady, { once: true });
+    }
+
+    // Safety readiness timeout in case an external subresource stalls window.load indefinitely
+    const fallbackReadyTimer = window.setTimeout(
+      markReady,
+      Math.max(durationMs + 4000, 9000)
+    );
+
+    const effectiveMinDuration = reduced ? 450 : durationMs;
+    const minTimer = window.setTimeout(() => {
+      setMinDurationDone(true);
+    }, effectiveMinDuration);
+
+    return () => {
+      window.removeEventListener("load", markReady);
+      window.clearTimeout(fallbackReadyTimer);
+      window.clearTimeout(minTimer);
+    };
   }, [durationMs]);
+
+  // Dismiss only once BOTH minimum initial display duration AND app initialization are complete
+  useEffect(() => {
+    if (!isFirstLoad || !minDurationDone || !appReady) return;
+    try {
+      window.sessionStorage.setItem(FIRST_LOAD_SESSION_KEY, "1");
+    } catch {}
+    setIsFirstLoad(false);
+  }, [isFirstLoad, minDurationDone, appReady]);
 
   const dismissFirstLoad = useCallback(() => {
     try {
       window.sessionStorage.setItem(FIRST_LOAD_SESSION_KEY, "1");
     } catch {}
+    setMinDurationDone(true);
+    setAppReady(true);
     setIsFirstLoad(false);
   }, []);
 
   return {
     isFirstLoad,
+    appReady,
+    minDurationDone,
     prefersReducedMotion,
     dismissFirstLoad
   };
@@ -228,4 +287,3 @@ export function useDropdown<T extends HTMLElement = HTMLDivElement>(
     toggle
   };
 }
-

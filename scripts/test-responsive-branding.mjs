@@ -147,29 +147,29 @@ async function runResponsiveBrandingTests() {
     await send("Page.enable");
     await send("Page.navigate", { url: APP_URL });
 
-    // Poll until LoadingOverlay & radar sweep at >=1.0s are active
+    // Poll until Framer LoadingOverlay & telemetry status list are active
     let loadingOverlayCheck = null;
     for (let attempt = 0; attempt < 15; attempt++) {
       await sleep(250);
       loadingOverlayCheck = await evaluate(`(() => {
         const overlay = document.querySelector('[data-testid="eagle-eyes-loading-overlay"]');
-        const radar = document.querySelector('[data-testid="loading-radar-sweep"]');
+        const statusList = overlay?.querySelector('[aria-label="Loading status list"]');
         const cs = overlay ? getComputedStyle(overlay) : null;
         return {
           overlayPresent: !!overlay,
-          radarPresent: !!radar,
+          statusListPresent: !!statusList,
           backgroundColor: cs ? cs.backgroundColor : null,
           zIndex: cs ? cs.zIndex : null,
           hasBrandText: overlay ? overlay.innerText.includes('SCC - EAGLE EYES') : false
         };
       })()`);
-      if (loadingOverlayCheck.overlayPresent && loadingOverlayCheck.radarPresent) {
+      if (loadingOverlayCheck.overlayPresent && loadingOverlayCheck.statusListPresent) {
         break;
       }
     }
     console.log("1. LoadingOverlay Check:", JSON.stringify(loadingOverlayCheck));
     assert.equal(loadingOverlayCheck.overlayPresent, true);
-    assert.equal(loadingOverlayCheck.radarPresent, true);
+    assert.equal(loadingOverlayCheck.statusListPresent, true);
     assert.equal(loadingOverlayCheck.backgroundColor, "rgb(9, 11, 16)");
     assert.equal(loadingOverlayCheck.zIndex, "2000");
 

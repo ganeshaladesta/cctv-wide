@@ -1,12 +1,26 @@
 import type { Metadata, Viewport } from "next";
+import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { APP_CONFIG } from "@/lib/branding";
-import { LoadingOverlay } from "@/components/motion-ui";
+import { MotionProvider, LoadingOverlay } from "@/components/motion-ui";
+import { CodexRevealBackground } from "@/components/codex-reveal-background";
+
+const inter = Inter({
+  subsets: ["latin"],
+  variable: "--font-sans",
+  display: "swap"
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ["latin"],
+  variable: "--font-mono",
+  display: "swap"
+});
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  themeColor: "#090B10"
+  themeColor: "#07090D"
 };
 
 export const metadata: Metadata = {
@@ -54,12 +68,10 @@ export const metadata: Metadata = {
   keywords: [
     "SCC - EAGLE EYES",
     "Eagle Eyes",
-    "Bank Indonesia",
-    "DLAF",
-    "PAMBI",
     "CCTV Indonesia",
     "ATCS Indonesia",
     "Integrated Monitoring System",
+    "Surveillance Command Center",
     "Ganesha Ladesta"
   ]
 };
@@ -70,10 +82,18 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="id" className="dark">
-      <body className="min-h-screen bg-zinc-950 text-zinc-100 antialiased overflow-x-hidden">
-        <LoadingOverlay durationMs={5000} />
-        {children}
+    <html
+      lang="id"
+      className={`dark ${inter.variable} ${jetbrainsMono.variable}`}
+    >
+      <body className="min-h-screen font-sans text-[#F3F6FB] antialiased overflow-x-hidden relative bg-transparent">
+        <MotionProvider>
+          <CodexRevealBackground />
+          <LoadingOverlay durationMs={5000} />
+          <div className="relative z-[1] min-h-screen flex flex-col">
+            {children}
+          </div>
+        </MotionProvider>
       </body>
     </html>
   );

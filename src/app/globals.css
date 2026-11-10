@@ -4,10 +4,67 @@
 
 :root {
   color-scheme: dark;
+
+  /* Core Backgrounds & Surfaces */
+  --bg-primary: #07090d;
+  --bg-secondary: #0c1018;
+  --bg-loader: #090b10;
+  --surface-1: #111622;
+  --surface-2: #161c2b;
+  --surface-3: #1c2436;
+  --surface-glass: rgba(10, 14, 22, 0.84);
+  --surface-glass-strong: rgba(9, 11, 16, 0.94);
+
+  /* Hairline Borders */
+  --border-subtle: rgba(226, 232, 240, 0.08);
+  --border-default: rgba(226, 232, 240, 0.13);
+  --border-strong: rgba(226, 232, 240, 0.24);
+  --border-accent: rgba(59, 130, 246, 0.45);
+
+  /* Typography Colors */
+  --text-primary: #f3f6fb;
+  --text-secondary: #98a4b8;
+  --text-muted: #657287;
+
+  /* Controlled Accents */
+  --accent-silver: #e2e8f0;
+  --accent-blue: #3b82f6;
+  --accent-blue-hover: #60a5fa;
+  --accent-blue-soft: rgba(59, 130, 246, 0.14);
+
+  /* Semantic Status Colors */
+  --status-success: #10b981;
+  --status-warning: #f59e0b;
+  --status-error: #ef4444;
+
+  /* Radius Scale */
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.25rem;
+  --radius-shell: 1.5rem;
+  --radius-pill: 9999px;
+
+  /* Restrained Elevation */
+  --shadow-card: 0 8px 24px -14px rgba(0, 0, 0, 0.72);
+  --shadow-elevated: 0 18px 42px -12px rgba(0, 0, 0, 0.82);
+  --shadow-shell: 0 18px 44px -14px rgba(0, 0, 0, 0.75),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.07);
+
+  /* Motion Timing */
+  --duration-fast: 160ms;
+  --duration-normal: 260ms;
+  --duration-entrance: 440ms;
+  --ease-standard: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* Strictly Isolated Z-Index Hierarchy */
+  --z-background: 0;
+  --z-app-shell: 1;
   --z-map-tiles: 0;
   --z-map-markers: 10;
   --z-map-controls: 20;
   --z-map-preview: 30;
+  --z-navbar: 60;
   --z-dashboard-dropdown: 100;
   --z-dropdown-trigger: 300;
   --z-dropdown-panel: 400;
@@ -17,29 +74,105 @@
   --z-loading-overlay: 2000;
 }
 
-body {
-  background-color: #09090b;
-  color: #f4f4f5;
-  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+@layer base {
+  html {
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    scrollbar-width: thin;
+    scrollbar-color: rgba(148, 163, 184, 0.32) transparent;
+  }
+
+  body {
+    background-color: transparent;
+    color: var(--text-primary);
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
 }
 
-/* Custom Sleek Scrollbars */
+/* Custom Refined Scrollbars */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(24, 24, 27, 0.6);
+  background: rgba(12, 16, 24, 0.65);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(63, 63, 70, 0.8);
+  background: rgba(148, 163, 184, 0.28);
   border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(16, 185, 129, 0.7);
+  background: rgba(59, 130, 246, 0.55);
+}
+
+/* Design System Surface Utilities */
+@layer components {
+  .ee-surface {
+    background-color: var(--surface-1);
+    border: 1px solid var(--border-default);
+    box-shadow: var(--shadow-card);
+  }
+
+  .ee-surface-elevated {
+    background-color: var(--surface-2);
+    border: 1px solid var(--border-default);
+    box-shadow: var(--shadow-elevated);
+  }
+
+  .ee-shell-surface {
+    background-color: var(--surface-glass);
+    border: 1px solid var(--border-default);
+    box-shadow: var(--shadow-shell);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+  }
+
+  .ee-input {
+    background-color: rgba(9, 12, 19, 0.88);
+    border: 1px solid var(--border-default);
+    color: var(--text-primary);
+    transition: border-color var(--duration-fast) var(--ease-standard),
+      box-shadow var(--duration-fast) var(--ease-standard);
+  }
+
+  .ee-input:focus {
+    outline: none;
+    border-color: var(--border-accent);
+    box-shadow: 0 0 0 2px var(--accent-blue-soft);
+  }
+}
+
+/* Breathing Ambient Animation (Hardware-Accelerated) */
+@keyframes ee-breathe-glow {
+  0% {
+    transform: translate3d(-10%, 0, 0) scale(1);
+    opacity: 0.42;
+  }
+  50% {
+    transform: translate3d(28%, 0, 0) scale(1.12);
+    opacity: 0.72;
+  }
+  100% {
+    transform: translate3d(-10%, 0, 0) scale(1);
+    opacity: 0.42;
+  }
+}
+
+.ee-breathe-ambient {
+  animation: ee-breathe-glow 11s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ee-breathe-ambient {
+    animation: none;
+    opacity: 0.45;
+  }
 }
 
 /* Isolated Map Stacking Context — Prevents any Leaflet pane or control from escaping z-index: 0 */
@@ -54,7 +187,7 @@ body {
   position: relative !important;
   isolation: isolate !important;
   z-index: var(--z-map-tiles, 0) !important;
-  background: #09090b !important;
+  background: var(--bg-primary) !important;
   font-family: inherit;
 }
 
@@ -81,17 +214,28 @@ body {
   z-index: var(--z-map-controls, 20) !important;
 }
 
+.leaflet-bar a {
+  background-color: rgba(11, 15, 23, 0.94) !important;
+  color: var(--text-primary) !important;
+  border-bottom-color: var(--border-default) !important;
+}
+
+.leaflet-bar a:hover {
+  background-color: var(--surface-2) !important;
+  color: #ffffff !important;
+}
+
 /* Optional dark filter on standard OpenStreetMap tiles to match dark dashboard */
 .osm-dark-tiles .leaflet-tile-pane {
   filter: invert(100%) hue-rotate(180deg) brightness(92%) contrast(90%);
 }
 
 .leaflet-popup-content-wrapper {
-  background: rgba(9, 9, 11, 0.96) !important;
-  color: #f4f4f5 !important;
-  border: 1px solid rgba(63, 63, 70, 0.85) !important;
+  background: var(--surface-glass-strong) !important;
+  color: var(--text-primary) !important;
+  border: 1px solid var(--border-default) !important;
   border-radius: 0.75rem !important;
-  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.75) !important;
+  box-shadow: var(--shadow-elevated) !important;
   backdrop-filter: blur(12px);
   padding: 0 !important;
 }
@@ -102,19 +246,19 @@ body {
 }
 
 .leaflet-popup-tip {
-  background: rgba(9, 9, 11, 0.96) !important;
-  border: 1px solid rgba(63, 63, 70, 0.85) !important;
+  background: var(--surface-glass-strong) !important;
+  border: 1px solid var(--border-default) !important;
 }
 
 .leaflet-control-attribution {
-  background: rgba(9, 9, 11, 0.8) !important;
-  color: #a1a1aa !important;
+  background: rgba(7, 9, 13, 0.85) !important;
+  color: var(--text-secondary) !important;
   font-size: 10px !important;
-  backdrop-filter: blur(4px);
+  backdrop-filter: blur(6px);
 }
 
 .leaflet-control-attribution a {
-  color: #34d399 !important;
+  color: var(--accent-blue-hover) !important;
 }
 
 /* Custom MarkerCluster Styling */
