@@ -150,7 +150,7 @@ export async function GET(req: NextRequest) {
             headers: {
               "Content-Type": "application/vnd.apple.mpegurl",
               "Access-Control-Allow-Origin": "*",
-              "Cache-Control": "no-store"
+              "Cache-Control": "no-store, no-cache, must-revalidate"
             }
           });
         }
@@ -191,7 +191,7 @@ export async function GET(req: NextRequest) {
         headers: {
           "Content-Type": contentType,
           "Access-Control-Allow-Origin": "*",
-          "Cache-Control": "no-store"
+          "Cache-Control": "no-store, no-cache, must-revalidate"
         }
       });
     }

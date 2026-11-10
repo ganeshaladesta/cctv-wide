@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import {
@@ -16,7 +16,9 @@ import {
   ChevronLeft,
   ChevronRight,
   Shield,
-  Video
+  Video,
+  MapPin,
+  Radio
 } from "lucide-react";
 import {
   Camera,
@@ -32,23 +34,21 @@ import {
   AppFooter,
   DashboardTab
 } from "@/components/branding";
+import {
+  EagleEyesLogo,
+  AnimatedDropdown,
+  FavoritesButton
+} from "@/components/motion-ui";
+import { FavoritesPage } from "@/components/favorites-view";
 import CCTVPlayer from "@/components/cctv-player";
 import MultiViewGrid from "@/components/multi-view-grid";
 
 const InteractiveMap = dynamic(() => import("@/components/interactive-map"), {
   ssr: false,
   loading: () => (
-    <div className="w-full h-[420px] sm:h-[560px] rounded-xl bg-zinc-900/60 border border-zinc-800 flex flex-col items-center justify-center gap-3 p-4">
-      <div className="w-11 h-11 rounded-xl bg-white/95 border border-amber-500/40 p-1.5 flex items-center justify-center shadow">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={APP_CONFIG.primaryIcon}
-          alt={APP_CONFIG.name}
-          className="w-full h-full object-contain"
-          style={{ objectFit: "contain" }}
-        />
-      </div>
-      <div className="w-7 h-7 border-2 border-sky-500 border-t-amber-400 rounded-full animate-spin" />
+    <div className="w-full h-[420px] sm:h-[560px] rounded-xl bg-zinc-900/60 border border-[#252A35] flex flex-col items-center justify-center gap-3 p-4">
+      <EagleEyesLogo size="lg" animateHover={false} />
+      <div className="w-7 h-7 border-2 border-white/80 border-t-transparent rounded-full animate-spin" />
       <span className="text-xs text-zinc-400 font-mono text-center">
         Memuat Peta Interaktif {APP_CONFIG.name} (OpenStreetMap)...
       </span>
@@ -110,7 +110,8 @@ export default function CommandCenter({
       if (
         view === "multiview" ||
         view === "directory" ||
-        view === "provinces"
+        view === "provinces" ||
+        view === "favorites"
       ) {
         setActiveTab(view);
       }
@@ -275,6 +276,80 @@ export default function CommandCenter({
     setSelectedProtocol("");
   };
 
+  const provinceOptions = useMemo(
+    () => [
+      {
+        value: "",
+        label: "Semua 38 Provinsi",
+        badge: stats.total_cameras.toLocaleString("id-ID")
+      },
+      ...provinces.map((p) => ({
+        value: p.id,
+        label: p.name,
+        badge: p.total_cameras.toLocaleString("id-ID")
+      }))
+    ],
+    [provinces, stats.total_cameras]
+  );
+
+  const cityOptions = useMemo(
+    () => [
+      { value: "", label: "Semua Kota / Kabupaten" },
+      ...cities.map((c) => ({
+        value: c.id,
+        label: c.name,
+        badge: c.total_cameras
+      }))
+    ],
+    [cities]
+  );
+
+  const sourceOptions = useMemo(
+    () => [
+      { value: "", label: "Semua Sumber / Provider" },
+      ...sources.slice(0, 120).map((s) => ({
+        value: s.id,
+        label: s.name,
+        badge: s.total_cameras
+      }))
+    ],
+    [sources]
+  );
+
+  const statusOptions = useMemo(
+    () => [
+      { value: "", label: "Semua Status" },
+      {
+        value: "ONLINE",
+        label: "ONLINE (Aktif)",
+        badge: stats.online_cameras.toLocaleString("id-ID")
+      },
+      {
+        value: "OFFLINE",
+        label: "OFFLINE (Gangguan)",
+        badge: stats.offline_cameras.toLocaleString("id-ID")
+      }
+    ],
+    [stats.online_cameras, stats.offline_cameras]
+  );
+
+  const protocolOptions = useMemo(
+    () => [
+      { value: "", label: "Semua Protokol" },
+      { value: "HLS", label: "HLS (.m3u8)" },
+      { value: "MJPEG", label: "MJPEG Stream" },
+      { value: "SNAPSHOT", label: "JPEG Snapshot" },
+      { value: "WEBSOCKET", label: "WebSocket" },
+      { value: "EMBED", label: "Embedded Player" }
+    ],
+    []
+  );
+
+  const multiViewIdSet = useMemo(
+    () => new Set(multiViewCameras.map((c) => c.id)),
+    [multiViewCameras]
+  );
+
   return (
     <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-zinc-950 text-zinc-100 flex flex-col">
       {/* Unified Institutional Responsive Header */}
@@ -287,10 +362,10 @@ export default function CommandCenter({
       {/* National Telemetry KPI Strip (Responsive 2-col on mobile/tablet, 6-col on desktop) */}
       <section
         aria-label="Statistik Pemantauan Nasional"
-        className="border-b border-zinc-800/80 bg-zinc-900/40 px-3 sm:px-4 lg:px-6 py-2.5 sm:py-3"
+        className="border-b border-[#252A35] bg-zinc-900/40 px-3 sm:px-4 lg:px-6 py-2.5 sm:py-3"
       >
         <div className="max-w-[1600px] mx-auto grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2 sm:gap-2.5">
-          <div className="p-2.5 sm:p-3 rounded-xl bg-zinc-900/90 border border-zinc-800/90 min-w-0">
+          <div className="p-2.5 sm:p-3 rounded-xl bg-zinc-900/90 border border-[#252A35] min-w-0">
             <div className="flex items-center justify-between gap-1 text-[11px] sm:text-xs text-zinc-400">
               <span className="truncate">Total Kamera CCTV</span>
               <Video className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-sky-400 shrink-0" />
@@ -320,7 +395,7 @@ export default function CommandCenter({
             </p>
           </div>
 
-          <div className="p-2.5 sm:p-3 rounded-xl bg-zinc-900/90 border border-zinc-800/90 min-w-0">
+          <div className="p-2.5 sm:p-3 rounded-xl bg-zinc-900/90 border border-[#252A35] min-w-0">
             <div className="flex items-center justify-between gap-1 text-[11px] sm:text-xs text-zinc-400">
               <span className="truncate">Cakupan Provinsi</span>
               <Globe2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-sky-400 shrink-0" />
@@ -330,7 +405,7 @@ export default function CommandCenter({
             </p>
           </div>
 
-          <div className="p-2.5 sm:p-3 rounded-xl bg-zinc-900/90 border border-zinc-800/90 min-w-0">
+          <div className="p-2.5 sm:p-3 rounded-xl bg-zinc-900/90 border border-[#252A35] min-w-0">
             <div className="flex items-center justify-between gap-1 text-[11px] sm:text-xs text-zinc-400">
               <span className="truncate">Kota / Kabupaten</span>
               <Building2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400 shrink-0" />
@@ -340,7 +415,7 @@ export default function CommandCenter({
             </p>
           </div>
 
-          <div className="p-2.5 sm:p-3 rounded-xl bg-zinc-900/90 border border-zinc-800/90 min-w-0">
+          <div className="p-2.5 sm:p-3 rounded-xl bg-zinc-900/90 border border-[#252A35] min-w-0">
             <div className="flex items-center justify-between gap-1 text-[11px] sm:text-xs text-zinc-400">
               <span className="truncate">Instansi / Sumber</span>
               <Shield className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400 shrink-0" />
@@ -352,95 +427,92 @@ export default function CommandCenter({
         </div>
       </section>
 
-      {/* Global Search & Filter Bar (Stacks cleanly on mobile, horizontal on desktop) */}
-      <section className="px-3 sm:px-4 lg:px-6 py-2.5 sm:py-3 bg-zinc-950 border-b border-zinc-800/80">
-        <div className="max-w-[1600px] mx-auto grid grid-cols-1 sm:grid-cols-2 lg:flex lg:flex-wrap items-center gap-2">
+      {/* Global Search & Animated Morph Dropdown Filter Bar */}
+      <section className="px-3 sm:px-4 lg:px-6 py-2.5 sm:py-3 bg-zinc-950 border-b border-[#252A35]">
+        <div className="max-w-[1600px] mx-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 items-center gap-2">
           {/* Search Input */}
-          <div className="relative sm:col-span-2 lg:flex-1 lg:min-w-[240px] min-w-0">
+          <div className="relative sm:col-span-2 lg:col-span-3 min-w-0">
             <Search className="w-4 h-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Cari nama kamera, simpang jalan, kota, provinsi, atau instansi Dishub..."
-              className="w-full max-w-full min-w-0 pl-9 pr-4 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-sky-500"
+              placeholder="Cari nama kamera, simpang jalan, kota, provinsi..."
+              className="w-full max-w-full min-w-0 pl-9 pr-4 py-2 rounded-xl bg-zinc-950/90 border border-[#252A35] text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-white/50"
             />
           </div>
 
-          {/* Province Select */}
-          <select
-            aria-label="Filter Provinsi"
-            value={selectedProvince}
-            onChange={(e) => setSelectedProvince(e.target.value)}
-            className="w-full max-w-full lg:w-auto min-w-0 px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-xs text-zinc-200 focus:outline-none focus:border-sky-500"
-          >
-            <option value="">Semua 38 Provinsi</option>
-            {provinces.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name} ({p.total_cameras.toLocaleString("id-ID")})
-              </option>
-            ))}
-          </select>
+          {/* Province Morph Dropdown */}
+          <div className="lg:col-span-2 min-w-0">
+            <AnimatedDropdown
+              value={selectedProvince}
+              onChange={setSelectedProvince}
+              options={provinceOptions}
+              placeholder="Semua 38 Provinsi"
+              ariaLabel="Filter Provinsi"
+              testId="filter-province"
+              searchable
+              searchPlaceholder="Cari provinsi..."
+              icon={<Globe2 className="w-3.5 h-3.5" />}
+            />
+          </div>
 
-          {/* City Select */}
-          <select
-            aria-label="Filter Kota/Kabupaten"
-            value={selectedCity}
-            onChange={(e) => setSelectedCity(e.target.value)}
-            disabled={!selectedProvince}
-            className="w-full max-w-full lg:w-auto min-w-0 px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-xs text-zinc-200 disabled:opacity-50 focus:outline-none focus:border-sky-500"
-          >
-            <option value="">Semua Kota / Kabupaten</option>
-            {cities.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name} ({c.total_cameras})
-              </option>
-            ))}
-          </select>
+          {/* City Morph Dropdown */}
+          <div className="lg:col-span-2 min-w-0">
+            <AnimatedDropdown
+              value={selectedCity}
+              onChange={setSelectedCity}
+              options={cityOptions}
+              placeholder="Semua Kota / Kabupaten"
+              ariaLabel="Filter Kota/Kabupaten"
+              testId="filter-city"
+              searchable
+              searchPlaceholder="Cari kota/kabupaten..."
+              icon={<MapPin className="w-3.5 h-3.5" />}
+            />
+          </div>
 
-          {/* Source / Provider Select */}
-          <select
-            aria-label="Filter Sumber / Provider"
-            value={selectedSource}
-            onChange={(e) => setSelectedSource(e.target.value)}
-            className="w-full max-w-full lg:w-auto min-w-0 px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-xs text-zinc-200 focus:outline-none focus:border-sky-500"
-          >
-            <option value="">Semua Sumber / Provider</option>
-            {sources.slice(0, 120).map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name} ({s.total_cameras})
-              </option>
-            ))}
-          </select>
+          {/* Source / Provider Morph Dropdown */}
+          <div className="lg:col-span-2 min-w-0">
+            <AnimatedDropdown
+              value={selectedSource}
+              onChange={setSelectedSource}
+              options={sourceOptions}
+              placeholder="Semua Sumber / Provider"
+              ariaLabel="Filter Sumber / Provider"
+              testId="filter-source"
+              searchable
+              searchPlaceholder="Cari Dishub / provider..."
+              icon={<Shield className="w-3.5 h-3.5" />}
+            />
+          </div>
 
-          {/* Status Select */}
-          <select
-            aria-label="Filter Status Kamera"
-            value={selectedStatus}
-            onChange={(e) => setSelectedStatus(e.target.value)}
-            className="w-full max-w-full lg:w-auto min-w-0 px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-xs text-zinc-200 focus:outline-none focus:border-sky-500"
-          >
-            <option value="">Semua Status</option>
-            <option value="ONLINE">ONLINE (Aktif)</option>
-            <option value="OFFLINE">OFFLINE (Gangguan)</option>
-          </select>
+          {/* Status Morph Dropdown */}
+          <div className="lg:col-span-1 min-w-0">
+            <AnimatedDropdown
+              value={selectedStatus}
+              onChange={setSelectedStatus}
+              options={statusOptions}
+              placeholder="Status"
+              ariaLabel="Filter Status Kamera"
+              testId="filter-status"
+            />
+          </div>
 
-          {/* Protocol Select */}
-          <select
-            aria-label="Filter Protokol Stream"
-            value={selectedProtocol}
-            onChange={(e) => setSelectedProtocol(e.target.value)}
-            className="w-full max-w-full lg:w-auto min-w-0 px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-xs text-zinc-200 focus:outline-none focus:border-sky-500"
-          >
-            <option value="">Semua Protokol</option>
-            <option value="HLS">HLS (.m3u8)</option>
-            <option value="MJPEG">MJPEG Stream</option>
-            <option value="SNAPSHOT">JPEG Snapshot</option>
-            <option value="WEBSOCKET">WebSocket</option>
-            <option value="EMBED">Embedded Player</option>
-          </select>
+          {/* Protocol Morph Dropdown */}
+          <div className="lg:col-span-1 min-w-0">
+            <AnimatedDropdown
+              value={selectedProtocol}
+              onChange={setSelectedProtocol}
+              options={protocolOptions}
+              placeholder="Protokol"
+              ariaLabel="Filter Protokol Stream"
+              testId="filter-protocol"
+              icon={<Radio className="w-3.5 h-3.5" />}
+            />
+          </div>
 
-          <div className="sm:col-span-2 lg:col-span-1 flex items-center justify-between lg:justify-end gap-2 lg:ml-auto">
+          <div className="sm:col-span-2 lg:col-span-1 flex items-center justify-between lg:justify-end gap-2">
             {(searchQuery ||
               selectedProvince ||
               selectedCity ||
@@ -450,18 +522,17 @@ export default function CommandCenter({
               <button
                 type="button"
                 onClick={handleResetFilters}
-                className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs font-medium text-zinc-200 transition shrink-0"
+                className="px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-[11px] font-medium text-zinc-200 transition shrink-0"
               >
-                Reset Filter
+                Reset
               </button>
             )}
 
-            <div className="text-xs text-zinc-400 font-mono">
-              Menampilkan{" "}
-              <span className="text-amber-400 font-bold">
+            <div className="text-[11px] text-zinc-400 font-mono truncate">
+              <span className="text-white font-bold">
                 {totalMatching.toLocaleString("id-ID")}
               </span>{" "}
-              kamera
+              cam
             </div>
           </div>
         </div>
@@ -486,8 +557,8 @@ export default function CommandCenter({
             </div>
 
             {/* Right Live Camera Feed Sidebar (4 cols on desktop) */}
-            <div className="lg:col-span-4 h-[480px] sm:h-[560px] lg:h-[620px] rounded-xl bg-zinc-900/70 border border-zinc-800 flex flex-col overflow-hidden min-w-0">
-              <div className="px-3.5 py-2.5 bg-zinc-900 border-b border-zinc-800 flex items-center justify-between gap-2">
+            <div className="lg:col-span-4 h-[480px] sm:h-[560px] lg:h-[620px] rounded-xl bg-zinc-900/70 border border-[#252A35] flex flex-col overflow-hidden min-w-0">
+              <div className="px-3.5 py-2.5 bg-zinc-900 border-b border-[#252A35] flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 min-w-0">
                   <Filter className="w-3.5 h-3.5 text-sky-400 shrink-0" />
                   <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-200 truncate">
@@ -540,11 +611,16 @@ export default function CommandCenter({
                       </button>
 
                       <div className="flex items-center gap-1 shrink-0">
+                        <FavoritesButton
+                          cameraId={cam.id}
+                          cameraName={cam.name}
+                          size="sm"
+                        />
                         <button
                           type="button"
                           onClick={() => handleAddToMultiView(cam)}
                           title="Tambah ke Multi-View"
-                          className="p-1.5 rounded bg-zinc-800 hover:bg-sky-600 text-zinc-300 hover:text-white transition"
+                          className="p-1.5 rounded-lg bg-zinc-800 hover:bg-sky-600 text-zinc-300 hover:text-white transition"
                         >
                           <PlusSquare className="w-3.5 h-3.5" />
                         </button>
@@ -555,7 +631,7 @@ export default function CommandCenter({
               </div>
 
               {/* Pagination Footer */}
-              <div className="p-2.5 bg-zinc-900 border-t border-zinc-800 flex items-center justify-between gap-2">
+              <div className="p-2.5 bg-zinc-900 border-t border-[#252A35] flex items-center justify-between gap-2">
                 <button
                   type="button"
                   disabled={page <= 1}
@@ -596,7 +672,7 @@ export default function CommandCenter({
               {cameras.slice(0, 12).map((cam) => (
                 <div
                   key={cam.id}
-                  className="rounded-xl bg-zinc-900/80 border border-zinc-800 overflow-hidden flex flex-col min-w-0"
+                  className="rounded-xl bg-zinc-900/80 border border-[#252A35] overflow-hidden flex flex-col min-w-0"
                 >
                   <div className="h-[190px] sm:h-[200px]">
                     <CCTVPlayer camera={cam} autoPlay={false} compact />
@@ -611,6 +687,11 @@ export default function CommandCenter({
                       </p>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
+                      <FavoritesButton
+                        cameraId={cam.id}
+                        cameraName={cam.name}
+                        size="sm"
+                      />
                       <button
                         type="button"
                         onClick={() => handleOpenCameraDetail(cam)}
@@ -632,7 +713,7 @@ export default function CommandCenter({
             </div>
 
             {/* Pagination Controls */}
-            <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-xl bg-zinc-900 border border-zinc-800">
+            <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-xl bg-zinc-900 border border-[#252A35]">
               <button
                 type="button"
                 disabled={page <= 1}
@@ -642,7 +723,8 @@ export default function CommandCenter({
                 ← Sebelumnya
               </button>
               <span className="text-xs text-zinc-400 font-mono text-center">
-                Halaman {page} / {totalPages} ({totalMatching.toLocaleString("id-ID")} Kamera)
+                Halaman {page} / {totalPages} (
+                {totalMatching.toLocaleString("id-ID")} Kamera)
               </span>
               <button
                 type="button"
@@ -666,7 +748,7 @@ export default function CommandCenter({
                 {provinces.map((p) => (
                   <div
                     key={p.id}
-                    className="p-3.5 rounded-xl bg-zinc-900/90 border border-zinc-800 hover:border-sky-500/50 transition flex flex-col justify-between min-w-0"
+                    className="p-3.5 rounded-xl bg-zinc-900/90 border border-[#252A35] hover:border-sky-500/50 transition flex flex-col justify-between min-w-0"
                   >
                     <div>
                       <div className="flex items-center justify-between gap-2">
@@ -718,7 +800,7 @@ export default function CommandCenter({
                   {sources.slice(0, 36).map((s) => (
                     <div
                       key={s.id}
-                      className="p-3 rounded-lg bg-zinc-900/70 border border-zinc-800 flex items-center justify-between gap-2 min-w-0"
+                      className="p-3 rounded-lg bg-zinc-900/70 border border-[#252A35] flex items-center justify-between gap-2 min-w-0"
                     >
                       <div className="min-w-0 flex-1">
                         <p className="text-xs font-semibold text-zinc-100 truncate">
@@ -745,13 +827,21 @@ export default function CommandCenter({
             )}
           </div>
         )}
+
+        {activeTab === "favorites" && (
+          <FavoritesPage
+            onSelectCamera={handleOpenCameraDetail}
+            onToggleMultiView={handleAddToMultiView}
+            multiViewIds={multiViewIdSet}
+          />
+        )}
       </main>
 
       {/* Camera Detail Modal */}
       {detailCamera && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-2.5 sm:p-4">
-          <div className="w-full max-w-4xl rounded-2xl bg-zinc-950 border border-zinc-800 shadow-2xl overflow-hidden max-h-[92vh] flex flex-col">
-            <div className="px-4 sm:px-5 py-3 bg-zinc-900 border-b border-zinc-800 flex flex-wrap items-center justify-between gap-2">
+          <div className="w-full max-w-4xl rounded-2xl bg-zinc-950 border border-[#252A35] shadow-2xl overflow-hidden max-h-[92vh] flex flex-col">
+            <div className="px-4 sm:px-5 py-3 bg-zinc-900 border-b border-[#252A35] flex flex-wrap items-center justify-between gap-2">
               <div className="min-w-0 flex-1">
                 <h3 className="text-sm sm:text-base font-bold text-white truncate">
                   {detailCamera.name}
@@ -764,6 +854,12 @@ export default function CommandCenter({
                 </p>
               </div>
               <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+                <FavoritesButton
+                  cameraId={detailCamera.id}
+                  cameraName={detailCamera.name}
+                  size="md"
+                  showLabel
+                />
                 <Link
                   href={`/kamera/${encodeURIComponent(
                     provinces.find((p) => p.id === detailCamera.province_id)
@@ -789,7 +885,7 @@ export default function CommandCenter({
               </div>
 
               <div className="lg:col-span-4 space-y-3 text-xs min-w-0">
-                <div className="p-3.5 rounded-xl bg-zinc-900 border border-zinc-800 space-y-2">
+                <div className="p-3.5 rounded-xl bg-zinc-900 border border-[#252A35] space-y-2">
                   <h4 className="font-bold text-zinc-200 uppercase tracking-wider text-[11px]">
                     Informasi Teknis Kamera
                   </h4>
@@ -800,31 +896,41 @@ export default function CommandCenter({
                     </span>
                   </div>
                   <div className="flex justify-between gap-2 py-1 border-b border-zinc-800/80">
-                    <span className="text-zinc-400 shrink-0">Kota / Kabupaten</span>
+                    <span className="text-zinc-400 shrink-0">
+                      Kota / Kabupaten
+                    </span>
                     <span className="text-zinc-100 font-medium text-right truncate">
                       {detailCamera.city_name}
                     </span>
                   </div>
                   <div className="flex justify-between gap-2 py-1 border-b border-zinc-800/80">
-                    <span className="text-zinc-400 shrink-0">Instansi Sumber</span>
+                    <span className="text-zinc-400 shrink-0">
+                      Instansi Sumber
+                    </span>
                     <span className="text-sky-400 font-medium text-right truncate">
                       {detailCamera.source_name}
                     </span>
                   </div>
                   <div className="flex justify-between gap-2 py-1 border-b border-zinc-800/80">
-                    <span className="text-zinc-400 shrink-0">Koordinat GPS</span>
+                    <span className="text-zinc-400 shrink-0">
+                      Koordinat GPS
+                    </span>
                     <span className="text-zinc-200 font-mono text-right">
                       {detailCamera.latitude}, {detailCamera.longitude}
                     </span>
                   </div>
                   <div className="flex justify-between gap-2 py-1 border-b border-zinc-800/80">
-                    <span className="text-zinc-400 shrink-0">Protokol Stream</span>
+                    <span className="text-zinc-400 shrink-0">
+                      Protokol Stream
+                    </span>
                     <span className="text-zinc-200 font-mono">
                       {detailCamera.protocol}
                     </span>
                   </div>
                   <div className="flex justify-between gap-2 py-1">
-                    <span className="text-zinc-400 shrink-0">Status Terakhir</span>
+                    <span className="text-zinc-400 shrink-0">
+                      Status Terakhir
+                    </span>
                     <span
                       className={`font-bold ${
                         detailCamera.status === "ONLINE"
@@ -871,7 +977,7 @@ export default function CommandCenter({
                     href={detailCamera.source_url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="w-full py-2 px-3 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 flex items-center justify-center gap-1.5 transition"
+                    className="w-full py-2 px-3 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-[#252A35] text-zinc-300 flex items-center justify-center gap-1.5 transition"
                   >
                     <span>Kunjungi Portal Resmi Pemerintah</span>
                     <ExternalLink className="w-3.5 h-3.5" />
@@ -879,7 +985,7 @@ export default function CommandCenter({
                 </div>
 
                 {nearbyCameras.length > 0 && (
-                  <div className="p-3 rounded-xl bg-zinc-900 border border-zinc-800">
+                  <div className="p-3 rounded-xl bg-zinc-900 border border-[#252A35]">
                     <h5 className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-2">
                       Kamera Terdekat
                     </h5>

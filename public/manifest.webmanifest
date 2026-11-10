@@ -4,27 +4,36 @@
   "description": "Sistem pemantauan CCTV lalu lintas dan infrastruktur secara terintegrasi untuk mendukung monitoring situasi secara real-time.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#09090b",
-  "theme_color": "#09090b",
+  "background_color": "#090B10",
+  "theme_color": "#090B10",
   "icons": [
     {
-      "src": "/assets/logo-bank-indonesia.webp",
-      "sizes": "any",
-      "type": "image/webp",
-      "purpose": "any"
+      "src": "/favicon-16x16.png",
+      "sizes": "16x16",
+      "type": "image/png"
     },
     {
-      "src": "/assets/logo-bank-indonesia.webp",
+      "src": "/favicon-32x32.png",
+      "sizes": "32x32",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-192.png",
       "sizes": "192x192",
-      "type": "image/webp",
+      "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/assets/logo-bank-indonesia.webp",
+      "src": "/icon-512.png",
       "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/assets/scc-eagle-eyes-logo.webp",
+      "sizes": "1254x1254",
       "type": "image/webp",
       "purpose": "any"
     }
   ]
 }
-

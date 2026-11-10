@@ -7,9 +7,15 @@ export async function GET(req: NextRequest) {
   const q = sp.get("q") || undefined;
   const store = getDataStore();
   const cities = store.getCities(province, q);
-  return NextResponse.json({
-    total: cities.length,
-    data: cities
-  });
+  return NextResponse.json(
+    {
+      total: cities.length,
+      data: cities
+    },
+    {
+      headers: {
+        "Cache-Control": "public, max-age=86400, stale-while-revalidate=3600"
+      }
+    }
+  );
 }
-

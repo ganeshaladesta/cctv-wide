@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { Camera, CompactMarker, Province } from "@/lib/types";
 import CCTVPlayer from "@/components/cctv-player";
+import { FavoritesButton } from "@/components/motion-ui";
 
 interface InteractiveMapProps {
   markers: CompactMarker[];
@@ -499,13 +500,20 @@ export default function InteractiveMap({
                 {previewCam.name}
               </h4>
             </div>
-            <button
-              type="button"
-              onClick={() => setPreviewCam(null)}
-              className="text-xs text-zinc-400 hover:text-white px-2 py-0.5 rounded bg-zinc-800 shrink-0"
-            >
-              ✕ Tutup
-            </button>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <FavoritesButton
+                cameraId={previewCam.id}
+                cameraName={previewCam.name}
+                size="sm"
+              />
+              <button
+                type="button"
+                onClick={() => setPreviewCam(null)}
+                className="text-xs text-zinc-400 hover:text-white px-2 py-0.5 rounded bg-zinc-800 shrink-0"
+              >
+                ✕ Tutup
+              </button>
+            </div>
           </div>
 
           {/* Metadata Strip: City, Province & Source Agency */}

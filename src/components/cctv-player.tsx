@@ -17,11 +17,13 @@ import {
   Tv
 } from "lucide-react";
 import { Camera } from "@/lib/types";
+import { FavoritesButton } from "@/components/motion-ui";
 
 interface CCTVPlayerProps {
   camera: Camera;
   autoPlay?: boolean;
   compact?: boolean;
+  onClose?: () => void;
   onStatusChange?: (id: string, status: "ONLINE" | "OFFLINE") => void;
 }
 
@@ -56,10 +58,11 @@ function formatEmbedUrl(url: string): string {
   return url;
 }
 
-export default function CCTVPlayer({
+export function CCTVPlayer({
   camera,
   autoPlay = true,
   compact = false,
+  onClose,
   onStatusChange
 }: CCTVPlayerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -553,6 +556,11 @@ export default function CCTVPlayer({
         </div>
 
         <div className="flex items-center gap-1 shrink-0">
+          <FavoritesButton
+            cameraId={camera.id}
+            cameraName={camera.name}
+            size="sm"
+          />
           {(activeProtocol === "HLS" || activeProtocol === "MP4") && (
             <>
               <button
@@ -606,8 +614,20 @@ export default function CCTVPlayer({
           >
             <Maximize2 className="w-3.5 h-3.5" />
           </button>
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              title="Tutup"
+              className="px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-[10px] font-semibold transition"
+            >
+              ✕
+            </button>
+          )}
         </div>
       </div>
     </div>
   );
 }
+
+export default CCTVPlayer;

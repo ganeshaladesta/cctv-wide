@@ -39,9 +39,28 @@ class CCTVDataStore {
   private cityByIdOrSlug = new Map<string, City>();
   private sourceByIdOrSlug = new Map<string, CCTVSource>();
   private initialized = false;
+  private queryCache = new Map<string, { expiresAt: number; data: unknown }>();
 
   constructor() {
     this.init();
+  }
+
+  private getCached<T>(key: string, ttlMs: number, compute: () => T): T {
+    const now = Date.now();
+    const hit = this.queryCache.get(key);
+    if (hit && hit.expiresAt > now) {
+      return hit.data as T;
+    }
+    const data = compute();
+    if (this.queryCache.size > 250) {
+      this.queryCache.clear();
+    }
+    this.queryCache.set(key, { expiresAt: now + ttlMs, data });
+    return data;
+  }
+
+  invalidateCache(): void {
+    this.queryCache.clear();
   }
 
   private init() {
@@ -94,9 +113,15 @@ class CCTVDataStore {
   }
 
   getProvinces(island?: string): Province[] {
-    if (!island) return this.provinces;
-    const q = island.toLowerCase();
-    return this.provinces.filter((p) => p.island.toLowerCase() === q);
+    return this.getCached(
+      `provinces:${island || "all"}`,
+      24 * 60 * 60 * 1000,
+      () => {
+        if (!island) return this.provinces;
+        const q = island.toLowerCase();
+        return this.provinces.filter((p) => p.island.toLowerCase() === q);
+      }
+    );
   }
 
   getProvince(idOrSlug: string): Province | undefined {
@@ -104,21 +129,27 @@ class CCTVDataStore {
   }
 
   getCities(provinceFilter?: string, q?: string): City[] {
-    let list = this.cities;
-    if (provinceFilter) {
-      const prov = this.getProvince(provinceFilter);
-      const targetId = prov ? prov.id : provinceFilter;
-      list = list.filter(
-        (c) =>
-          c.province_id.toLowerCase() === targetId.toLowerCase() ||
-          c.province_name.toLowerCase() === provinceFilter.toLowerCase()
-      );
-    }
-    if (q) {
-      const term = q.toLowerCase();
-      list = list.filter((c) => c.name.toLowerCase().includes(term));
-    }
-    return list;
+    return this.getCached(
+      `cities:${provinceFilter || ""}:${q || ""}`,
+      24 * 60 * 60 * 1000,
+      () => {
+        let list = this.cities;
+        if (provinceFilter) {
+          const prov = this.getProvince(provinceFilter);
+          const targetId = prov ? prov.id : provinceFilter;
+          list = list.filter(
+            (c) =>
+              c.province_id.toLowerCase() === targetId.toLowerCase() ||
+              c.province_name.toLowerCase() === provinceFilter.toLowerCase()
+          );
+        }
+        if (q) {
+          const term = q.toLowerCase();
+          list = list.filter((c) => c.name.toLowerCase().includes(term));
+        }
+        return list;
+      }
+    );
   }
 
   getSources(filters?: {
@@ -127,39 +158,45 @@ class CCTVDataStore {
     protocol?: string;
     q?: string;
   }): CCTVSource[] {
-    let list = this.sources;
-    if (filters?.province) {
-      const prov = this.getProvince(filters.province);
-      const targetId = prov ? prov.id : filters.province;
-      list = list.filter(
-        (s) =>
-          s.province_id.toLowerCase() === targetId.toLowerCase() ||
-          s.province_name.toLowerCase() === filters.province!.toLowerCase()
-      );
-    }
-    if (filters?.city) {
-      const city = this.cityByIdOrSlug.get(filters.city.toLowerCase());
-      const targetId = city ? city.id : filters.city;
-      list = list.filter(
-        (s) =>
-          s.city_id.toLowerCase() === targetId.toLowerCase() ||
-          s.city_name.toLowerCase() === filters.city!.toLowerCase()
-      );
-    }
-    if (filters?.protocol) {
-      const proto = filters.protocol.toUpperCase();
-      list = list.filter((s) => s.protocol === proto);
-    }
-    if (filters?.q) {
-      const term = filters.q.toLowerCase();
-      list = list.filter(
-        (s) =>
-          s.name.toLowerCase().includes(term) ||
-          s.city_name.toLowerCase().includes(term) ||
-          s.province_name.toLowerCase().includes(term)
-      );
-    }
-    return list;
+    return this.getCached(
+      `sources:${JSON.stringify(filters || {})}`,
+      60 * 60 * 1000,
+      () => {
+        let list = this.sources;
+        if (filters?.province) {
+          const prov = this.getProvince(filters.province);
+          const targetId = prov ? prov.id : filters.province;
+          list = list.filter(
+            (s) =>
+              s.province_id.toLowerCase() === targetId.toLowerCase() ||
+              s.province_name.toLowerCase() === filters.province!.toLowerCase()
+          );
+        }
+        if (filters?.city) {
+          const city = this.cityByIdOrSlug.get(filters.city.toLowerCase());
+          const targetId = city ? city.id : filters.city;
+          list = list.filter(
+            (s) =>
+              s.city_id.toLowerCase() === targetId.toLowerCase() ||
+              s.city_name.toLowerCase() === filters.city!.toLowerCase()
+          );
+        }
+        if (filters?.protocol) {
+          const proto = filters.protocol.toUpperCase();
+          list = list.filter((s) => s.protocol === proto);
+        }
+        if (filters?.q) {
+          const term = filters.q.toLowerCase();
+          list = list.filter(
+            (s) =>
+              s.name.toLowerCase().includes(term) ||
+              s.city_name.toLowerCase().includes(term) ||
+              s.province_name.toLowerCase().includes(term)
+          );
+        }
+        return list;
+      }
+    );
   }
 
   getAllCameras(): Camera[] {
@@ -202,6 +239,7 @@ class CCTVDataStore {
           prov.online_cameras = Math.max(0, prov.online_cameras - 1);
         }
       }
+      this.invalidateCache();
     }
     return cam;
   }
@@ -216,13 +254,16 @@ class CCTVDataStore {
     bbox?: string;
     ids?: string[];
   }): Camera[] {
-    if (params.ids && params.ids.length > 0) {
-      return params.ids
-        .map((id) => this.cameraById.get(id.trim()))
-        .filter((c): c is Camera => Boolean(c));
-    }
-
-    let list = this.cameras;
+    return this.getCached(
+      `cameras:${JSON.stringify(params)}`,
+      5 * 60 * 1000,
+      () => {
+        let list =
+          params.ids && params.ids.length > 0
+            ? params.ids
+                .map((id) => this.cameraById.get(id.trim()))
+                .filter((c): c is Camera => Boolean(c))
+            : this.cameras;
 
     if (params.province) {
       const prov = this.getProvince(params.province);
@@ -310,6 +351,8 @@ class CCTVDataStore {
     }
 
     return list;
+      }
+    );
   }
 
   getCompactMarkers(list?: Camera[]): CompactMarker[] {
@@ -336,47 +379,49 @@ class CCTVDataStore {
   }
 
   getStats(): DashboardStats {
-    let online = 0;
-    let offline = 0;
-    const protocols: Record<string, number> = {};
-    for (const c of this.cameras) {
-      if (c.status === "ONLINE") online++;
-      else offline++;
-      protocols[c.protocol] = (protocols[c.protocol] || 0) + 1;
-    }
+    return this.getCached("stats:global", 60 * 1000, () => {
+      let online = 0;
+      let offline = 0;
+      const protocols: Record<string, number> = {};
+      for (const c of this.cameras) {
+        if (c.status === "ONLINE") online++;
+        else offline++;
+        protocols[c.protocol] = (protocols[c.protocol] || 0) + 1;
+      }
 
-    const islandMap = new Map<
-      string,
-      { provinces: number; total_cameras: number; online_cameras: number }
-    >();
-    for (const p of this.provinces) {
-      const cur = islandMap.get(p.island) || {
-        provinces: 0,
-        total_cameras: 0,
-        online_cameras: 0
+      const islandMap = new Map<
+        string,
+        { provinces: number; total_cameras: number; online_cameras: number }
+      >();
+      for (const p of this.provinces) {
+        const cur = islandMap.get(p.island) || {
+          provinces: 0,
+          total_cameras: 0,
+          online_cameras: 0
+        };
+        cur.provinces++;
+        cur.total_cameras += p.total_cameras;
+        cur.online_cameras += p.online_cameras;
+        islandMap.set(p.island, cur);
+      }
+
+      return {
+        total_cameras: this.cameras.length,
+        online_cameras: online,
+        offline_cameras: offline,
+        total_provinces: this.provinces.length,
+        total_cities: this.cities.length,
+        total_sources: this.sources.length,
+        protocols,
+        island_distribution: Array.from(islandMap.entries()).map(
+          ([island, data]) => ({
+            island,
+            ...data
+          })
+        ),
+        last_updated: "2026-11-10T09:30:00.000Z"
       };
-      cur.provinces++;
-      cur.total_cameras += p.total_cameras;
-      cur.online_cameras += p.online_cameras;
-      islandMap.set(p.island, cur);
-    }
-
-    return {
-      total_cameras: this.cameras.length,
-      online_cameras: online,
-      offline_cameras: offline,
-      total_provinces: this.provinces.length,
-      total_cities: this.cities.length,
-      total_sources: this.sources.length,
-      protocols,
-      island_distribution: Array.from(islandMap.entries()).map(
-        ([island, data]) => ({
-          island,
-          ...data
-        })
-      ),
-      last_updated: "2026-11-10T09:30:00.000Z"
-    };
+    });
   }
 }
 

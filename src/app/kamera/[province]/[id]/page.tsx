@@ -10,6 +10,7 @@ import {
 import { getDataStore } from "@/lib/data-store";
 import CCTVPlayer from "@/components/cctv-player";
 import { ResponsiveHeader, AppFooter } from "@/components/branding";
+import { FavoritesButton } from "@/components/motion-ui";
 
 export default async function CameraDetailPage(props: {
   params: Promise<{ province: string; id: string }>;
@@ -35,6 +36,12 @@ export default async function CameraDetailPage(props: {
         ]}
         rightActions={
           <>
+            <FavoritesButton
+              cameraId={camera.id}
+              cameraName={camera.name}
+              size="md"
+              showLabel
+            />
             <Link
               href={`/kamera/${province}`}
               className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs font-medium text-zinc-200"

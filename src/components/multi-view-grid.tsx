@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { Camera } from "@/lib/types";
 import CCTVPlayer from "@/components/cctv-player";
+import { FavoritesButton } from "@/components/motion-ui";
 
 export type GridLayoutSize = 1 | 2 | 4 | 6 | 9;
 
@@ -237,6 +238,11 @@ export default function MultiViewGrid({
             {cam ? (
               <>
                 <div className="absolute top-2 right-2 z-30 flex items-center gap-1">
+                  <FavoritesButton
+                    cameraId={cam.id}
+                    cameraName={cam.name}
+                    size="sm"
+                  />
                   <button
                     type="button"
                     onClick={() => onSelectDetail(cam)}
@@ -326,11 +332,17 @@ export default function MultiViewGrid({
                 </div>
               ) : (
                 searchResults.map((cam) => (
-                  <button
+                  <div
                     key={cam.id}
-                    type="button"
                     onClick={() => assignCameraToSlot(cam)}
-                    className="text-left p-2.5 rounded-lg bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-800 hover:border-emerald-500/50 transition flex items-start justify-between gap-2"
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        assignCameraToSlot(cam);
+                      }
+                    }}
+                    className="cursor-pointer text-left p-2.5 rounded-lg bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-800 hover:border-emerald-500/50 transition flex items-start justify-between gap-2"
                   >
                     <div className="min-w-0">
                       <p className="text-xs font-semibold text-zinc-100 truncate">
@@ -343,10 +355,17 @@ export default function MultiViewGrid({
                         {cam.source_name} • {cam.protocol}
                       </p>
                     </div>
-                    <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-semibold shrink-0">
-                      Pilih
-                    </span>
-                  </button>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <FavoritesButton
+                        cameraId={cam.id}
+                        cameraName={cam.name}
+                        size="sm"
+                      />
+                      <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-semibold">
+                        Pilih
+                      </span>
+                    </div>
+                  </div>
                 ))
               )}
             </div>

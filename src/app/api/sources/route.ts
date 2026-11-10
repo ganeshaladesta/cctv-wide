@@ -12,16 +12,22 @@ export async function GET(req: NextRequest) {
   const store = getDataStore();
   const sources = store.getSources({ province, city, protocol, q });
 
-  return NextResponse.json({
-    total: sources.length,
-    adapters: PROVIDER_REGISTRY.map((p) => ({
-      id: p.id,
-      name: p.name,
-      institution: p.institution,
-      officialUrl: p.officialUrl,
-      lastUpdated: p.getLastUpdated()
-    })),
-    data: sources
-  });
+  return NextResponse.json(
+    {
+      total: sources.length,
+      adapters: PROVIDER_REGISTRY.map((p) => ({
+        id: p.id,
+        name: p.name,
+        institution: p.institution,
+        officialUrl: p.officialUrl,
+        lastUpdated: p.getLastUpdated()
+      })),
+      data: sources
+    },
+    {
+      headers: {
+        "Cache-Control": "public, max-age=3600, stale-while-revalidate=600"
+      }
+    }
+  );
 }
-

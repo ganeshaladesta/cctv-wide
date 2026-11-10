@@ -6,7 +6,16 @@ export const APP_CONFIG = {
   description:
     "Sistem pemantauan CCTV lalu lintas dan infrastruktur secara terintegrasi untuk mendukung monitoring situasi secara real-time.",
   copyright: "Developed by Ganesha Ladesta.",
-  primaryIcon: "/assets/logo-bank-indonesia.webp",
+  primaryIcon: "/assets/scc-eagle-eyes-logo.png",
+  primaryIconWebp: "/assets/scc-eagle-eyes-logo.webp",
+  favicons: {
+    ico: "/favicon.ico",
+    png16: "/favicon-16x16.png",
+    png32: "/favicon-32x32.png",
+    appleTouch: "/apple-touch-icon.png",
+    icon192: "/icon-192.png",
+    icon512: "/icon-512.png"
+  },
   logos: {
     bankIndonesia: {
       src: "/assets/logo-bank-indonesia.webp",
@@ -25,4 +34,3 @@ export const APP_CONFIG = {
     }
   }
 } as const;
-

@@ -8,6 +8,10 @@ export async function GET(req: NextRequest) {
   const urlParam = sp.get("url");
   const store = getDataStore();
 
+  const healthCacheHeaders = {
+    "Cache-Control": "public, max-age=30, stale-while-revalidate=30"
+  };
+
   let targetUrl = urlParam || "";
   if (id) {
     const cam = store.getCameraById(id);
@@ -18,11 +22,14 @@ export async function GET(req: NextRequest) {
   }
 
   if (!targetUrl) {
-    return NextResponse.json({
-      status: "ok",
-      service: "SCC - EAGLE EYES Health Engine",
-      stats: store.getStats()
-    });
+    return NextResponse.json(
+      {
+        status: "ok",
+        service: "SCC - EAGLE EYES Health Engine",
+        stats: store.getStats()
+      },
+      { headers: healthCacheHeaders }
+    );
   }
 
   const probe = await probeStreamUrl(targetUrl);
@@ -30,11 +37,13 @@ export async function GET(req: NextRequest) {
     store.updateCameraStatus(id, probe.status);
   }
 
-  return NextResponse.json({
-    id: id || null,
-    stream_url: targetUrl,
-    ...probe,
-    checked_at: new Date().toISOString()
-  });
+  return NextResponse.json(
+    {
+      id: id || null,
+      stream_url: targetUrl,
+      ...probe,
+      checked_at: new Date().toISOString()
+    },
+    { headers: healthCacheHeaders }
+  );
 }
-

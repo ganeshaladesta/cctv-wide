@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { MapPin, Shield, ExternalLink } from "lucide-react";
 import { getDataStore } from "@/lib/data-store";
 import { ResponsiveHeader, AppFooter } from "@/components/branding";
+import { FavoritesButton } from "@/components/motion-ui";
 
 export default async function ProvinceDirectoryPage(props: {
   params: Promise<{ province: string }>;
@@ -102,10 +103,9 @@ export default async function ProvinceDirectoryPage(props: {
           </h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {cameras.map((cam) => (
-              <Link
+              <div
                 key={cam.id}
-                href={`/kamera/${prov.slug}/${encodeURIComponent(cam.id)}`}
-                className="p-3.5 sm:p-4 rounded-xl bg-zinc-900/90 hover:bg-zinc-900 border border-zinc-800 hover:border-sky-500/60 transition flex flex-col justify-between min-w-0"
+                className="p-3.5 sm:p-4 rounded-xl bg-zinc-900/90 hover:bg-zinc-900 border border-[#252A35] hover:border-sky-500/60 transition flex flex-col justify-between min-w-0"
               >
                 <div>
                   <div className="flex items-center justify-between gap-2">
@@ -118,34 +118,49 @@ export default async function ProvinceDirectoryPage(props: {
                     >
                       {cam.status}
                     </span>
-                    <span className="text-[10px] font-mono text-zinc-400 bg-zinc-800 px-2 py-0.5 rounded">
-                      {cam.protocol}
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] font-mono text-zinc-400 bg-zinc-800 px-2 py-0.5 rounded">
+                        {cam.protocol}
+                      </span>
+                      <FavoritesButton
+                        cameraId={cam.id}
+                        cameraName={cam.name}
+                        size="sm"
+                      />
+                    </div>
                   </div>
-                  <h3 className="text-sm font-bold text-white mt-2 truncate">
-                    {cam.name}
-                  </h3>
-                  <p className="text-xs text-zinc-400 mt-1 flex items-center gap-1">
-                    <MapPin className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
-                    <span className="truncate">
-                      {cam.city_name}, {cam.province_name}
-                    </span>
-                  </p>
-                  <p className="text-[11px] text-sky-400 mt-1 flex items-center gap-1">
-                    <Shield className="w-3.5 h-3.5 shrink-0" />
-                    <span className="truncate">{cam.source_name}</span>
-                  </p>
+                  <Link
+                    href={`/kamera/${prov.slug}/${encodeURIComponent(cam.id)}`}
+                    className="block mt-2"
+                  >
+                    <h3 className="text-sm font-bold text-white truncate hover:text-sky-400 transition">
+                      {cam.name}
+                    </h3>
+                    <p className="text-xs text-zinc-400 mt-1 flex items-center gap-1">
+                      <MapPin className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+                      <span className="truncate">
+                        {cam.city_name}, {cam.province_name}
+                      </span>
+                    </p>
+                    <p className="text-[11px] text-sky-400 mt-1 flex items-center gap-1">
+                      <Shield className="w-3.5 h-3.5 shrink-0" />
+                      <span className="truncate">{cam.source_name}</span>
+                    </p>
+                  </Link>
                 </div>
 
                 <div className="mt-3 pt-2 border-t border-zinc-800/80 flex items-center justify-between gap-2 text-xs text-zinc-300">
                   <span className="font-mono text-[10px] text-zinc-500 truncate">
                     {cam.latitude}, {cam.longitude}
                   </span>
-                  <span className="text-amber-400 font-medium inline-flex items-center gap-1 shrink-0">
+                  <Link
+                    href={`/kamera/${prov.slug}/${encodeURIComponent(cam.id)}`}
+                    className="text-amber-400 font-medium inline-flex items-center gap-1 shrink-0"
+                  >
                     Buka Stream <ExternalLink className="w-3 h-3" />
-                  </span>
+                  </Link>
                 </div>
-              </Link>
+              </div>
             ))}
           </div>
         </div>

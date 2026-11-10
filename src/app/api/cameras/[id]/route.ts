@@ -19,10 +19,17 @@ export async function GET(
   }
 
   const nearby = store.getNearbyCameras(camera, 8);
-  return NextResponse.json({
-    data: camera,
-    nearby
-  });
+  return NextResponse.json(
+    {
+      data: camera,
+      nearby
+    },
+    {
+      headers: {
+        "Cache-Control": "public, max-age=300, stale-while-revalidate=60"
+      }
+    }
+  );
 }
 
 export async function POST(
@@ -41,9 +48,15 @@ export async function POST(
     if (!updated) {
       return NextResponse.json({ error: "Camera not found" }, { status: 404 });
     }
-    return NextResponse.json({ status: "ok", data: updated });
+    return NextResponse.json(
+      { status: "ok", data: updated },
+      {
+        headers: {
+          "Cache-Control": "no-store"
+        }
+      }
+    );
   } catch {
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
 }
-

@@ -26,12 +26,19 @@ export async function GET(req: NextRequest) {
     ids
   });
 
+  const cacheHeaders = {
+    "Cache-Control": "public, max-age=300, stale-while-revalidate=60"
+  };
+
   if (mode === "markers") {
     const markers = store.getCompactMarkers(filtered);
-    return NextResponse.json({
-      total: markers.length,
-      markers
-    });
+    return NextResponse.json(
+      {
+        total: markers.length,
+        markers
+      },
+      { headers: cacheHeaders }
+    );
   }
 
   const page = Math.max(1, parseInt(sp.get("page") || "1", 10) || 1);
@@ -44,12 +51,14 @@ export async function GET(req: NextRequest) {
   const start = (page - 1) * limit;
   const paged = filtered.slice(start, start + limit);
 
-  return NextResponse.json({
-    total: filtered.length,
-    page,
-    limit,
-    total_pages: Math.ceil(filtered.length / (limit || 1)) || 1,
-    data: paged
-  });
+  return NextResponse.json(
+    {
+      total: filtered.length,
+      page,
+      limit,
+      total_pages: Math.ceil(filtered.length / (limit || 1)) || 1,
+      data: paged
+    },
+    { headers: cacheHeaders }
+  );
 }
-

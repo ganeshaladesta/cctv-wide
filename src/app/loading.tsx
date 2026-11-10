@@ -3,8 +3,11 @@ import { APP_CONFIG } from "@/lib/branding";
 
 export default function Loading() {
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col items-center justify-center p-4 gap-4">
-      <div className="w-16 h-16 rounded-2xl bg-white/95 border border-amber-500/40 p-2 flex items-center justify-center shadow-lg">
+    <div
+      style={{ backgroundColor: "#090B10" }}
+      className="min-h-screen text-zinc-100 flex flex-col items-center justify-center p-4 gap-4"
+    >
+      <div className="w-20 h-20 rounded-2xl bg-[#090B10] border border-[#252A35] p-2.5 flex items-center justify-center shadow-lg">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={APP_CONFIG.primaryIcon}
@@ -21,8 +24,7 @@ export default function Loading() {
           {APP_CONFIG.description}
         </p>
       </div>
-      <div className="w-7 h-7 border-2 border-sky-500 border-t-amber-400 rounded-full animate-spin" />
+      <div className="w-7 h-7 border-2 border-white/80 border-t-transparent rounded-full animate-spin" />
     </div>
   );
 }
-

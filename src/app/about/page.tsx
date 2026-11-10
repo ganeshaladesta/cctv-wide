@@ -7,6 +7,7 @@ import {
   InstitutionalLogos,
   AppFooter
 } from "@/components/branding";
+import { EagleEyesLogo } from "@/components/motion-ui";
 import { getDataStore } from "@/lib/data-store";
 
 export default function AboutPage() {
@@ -21,18 +22,21 @@ export default function AboutPage() {
 
       <main className="flex-1 max-w-5xl w-full mx-auto px-3 sm:px-4 lg:px-6 py-6 sm:py-10 space-y-6">
         <div className="p-5 sm:p-8 rounded-2xl bg-zinc-900/90 border border-zinc-800 space-y-5">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-zinc-800 pb-5">
-            <div className="space-y-1.5">
-              <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-sky-500/15 border border-sky-500/30 text-sky-300 text-xs font-mono font-semibold">
-                <Eye className="w-3.5 h-3.5 text-amber-400" />
-                <span>INTEGRATED SURVEILLANCE COMMAND</span>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#252A35] pb-5">
+            <div className="flex items-start sm:items-center gap-4">
+              <EagleEyesLogo size="lg" animateHover={false} />
+              <div className="space-y-1.5">
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-white/10 border border-[#252A35] text-zinc-200 text-xs font-mono font-semibold">
+                  <Eye className="w-3.5 h-3.5 text-white" />
+                  <span>INTEGRATED SURVEILLANCE COMMAND</span>
+                </div>
+                <h1 className="text-xl sm:text-2xl font-extrabold text-white">
+                  {APP_CONFIG.name}
+                </h1>
+                <p className="text-xs sm:text-sm text-zinc-300 leading-relaxed max-w-2xl">
+                  {APP_CONFIG.description}
+                </p>
               </div>
-              <h1 className="text-xl sm:text-2xl font-extrabold text-white">
-                {APP_CONFIG.name}
-              </h1>
-              <p className="text-xs sm:text-sm text-zinc-300 leading-relaxed max-w-2xl">
-                {APP_CONFIG.description}
-              </p>
             </div>
 
             <InstitutionalLogos size="md" />
