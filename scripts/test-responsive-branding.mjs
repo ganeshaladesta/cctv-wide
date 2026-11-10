@@ -266,9 +266,8 @@ async function runResponsiveBrandingTests() {
       const backdropZ = modalBackdrop ? getComputedStyle(modalBackdrop).zIndex : null;
       const modalZ = modalDialog ? getComputedStyle(modalDialog).zIndex : null;
 
-      // Verify Direct HLS is default and no iframe is initialized
-      const hlsModeBtn = modalDialog?.querySelector('[data-testid="amg-mode-hls"]');
-      const embedModeBtn = modalDialog?.querySelector('[data-testid="amg-mode-embed"]');
+      // Verify Direct HLS Only is active and no playback mode switcher or iframe exists
+      const modeSwitcher = modalDialog?.querySelector('[data-testid="amg-playback-switcher"]');
       const videoEl = modalDialog?.querySelector('video');
       const iframeEl = modalDialog?.querySelector('iframe');
 
@@ -306,8 +305,7 @@ async function runResponsiveBrandingTests() {
         mapPreviewOpenedSimultaneously: !!mapPreview,
         backdropZ,
         modalZ,
-        hlsDefaultSelected: hlsModeBtn?.getAttribute('aria-pressed') === 'true',
-        embedNotSelected: embedModeBtn?.getAttribute('aria-pressed') === 'false',
+        noModeSwitcher: !modeSwitcher,
         hasVideoElement: !!videoEl,
         hasIframeElement: !!iframeEl,
         modalOrBackdropCoversOsm,
@@ -317,7 +315,7 @@ async function runResponsiveBrandingTests() {
         bodyOverflowRestored
       };
     })()`);
-    console.log("3. Directory Click -> Full Modal Only + Direct HLS + Z-Index Check:", JSON.stringify(directoryInteractionCheck, null, 2));
+    console.log("3. Directory Click -> Full Modal Only + Direct HLS Only + Z-Index Check:", JSON.stringify(directoryInteractionCheck, null, 2));
     assert.equal(directoryInteractionCheck.foundSarinahInDirectory, true);
     assert.equal(directoryInteractionCheck.modalOpened, true);
     assert.equal(
@@ -327,10 +325,9 @@ async function runResponsiveBrandingTests() {
     );
     assert.equal(directoryInteractionCheck.backdropZ, "900");
     assert.equal(directoryInteractionCheck.modalZ, "1000");
-    assert.equal(directoryInteractionCheck.hlsDefaultSelected, true, "Direct HLS must be default for CCTV Sarinah");
-    assert.equal(directoryInteractionCheck.embedNotSelected, true);
+    assert.equal(directoryInteractionCheck.noModeSwitcher, true, "Sarinah must NOT display a playback mode selector");
     assert.equal(directoryInteractionCheck.hasVideoElement, true);
-    assert.equal(directoryInteractionCheck.hasIframeElement, false, "Must NOT initialize Embed Resmi iframe by default");
+    assert.equal(directoryInteractionCheck.hasIframeElement, false, "Must NOT initialize Embed Resmi iframe");
     assert.equal(directoryInteractionCheck.modalOrBackdropCoversOsm, true, "Modal backdrop/dialog must completely cover OSM controls");
     assert.equal(directoryInteractionCheck.bodyOverflowLocked, true);
     assert.equal(directoryInteractionCheck.favPressed, true);
@@ -353,7 +350,8 @@ async function runResponsiveBrandingTests() {
 
       const mapPreview = document.querySelector('[data-testid="map-camera-popup"]');
       const modalWhilePreview = document.querySelector('[data-testid="camera-detail-modal"]');
-      const previewHlsBtn = mapPreview?.querySelector('[data-testid="amg-mode-hls"]');
+      const previewSwitcher = mapPreview?.querySelector('[data-testid="amg-playback-switcher"]');
+      const previewVideo = mapPreview?.querySelector('video');
       const previewIframe = mapPreview?.querySelector('iframe');
 
       // Click "Detail Kamera" inside the compact map preview
@@ -377,7 +375,8 @@ async function runResponsiveBrandingTests() {
       return {
         markerFound: true,
         previewOpenedOnly: !!mapPreview && !modalWhilePreview,
-        previewHlsDefault: previewHlsBtn?.getAttribute('aria-pressed') === 'true',
+        previewNoSwitcher: !previewSwitcher,
+        previewHasVideo: !!previewVideo,
         previewNoIframe: !previewIframe,
         transitionClosedPreview: !previewAfterTransition,
         transitionOpenedModal: !!modalAfterTransition,
@@ -391,7 +390,8 @@ async function runResponsiveBrandingTests() {
       true,
       "CRITICAL: Map marker click must open ONLY compact map preview, NOT full detail modal"
     );
-    assert.equal(mapMarkerInteractionCheck.previewHlsDefault, true, "Compact map preview must also default to Direct HLS for CCTV Sarinah");
+    assert.equal(mapMarkerInteractionCheck.previewNoSwitcher, true, "Compact map preview must NOT show a mode selector");
+    assert.equal(mapMarkerInteractionCheck.previewHasVideo, true);
     assert.equal(mapMarkerInteractionCheck.previewNoIframe, true);
     assert.equal(mapMarkerInteractionCheck.transitionClosedPreview, true, "Clicking Detail Kamera must close compact map preview");
     assert.equal(mapMarkerInteractionCheck.transitionOpenedModal, true, "Clicking Detail Kamera must open full Camera Detail Modal");

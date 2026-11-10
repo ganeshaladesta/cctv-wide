@@ -28,7 +28,7 @@ export default async function ProvinceDirectoryPage(props: {
     .slice(0, 120);
 
   return (
-    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-transparent text-[#F3F6FB] flex flex-col">
+    <div className="min-h-screen w-full max-w-full overflow-x-clip bg-transparent text-[#F3F6FB] flex flex-col">
       <ResponsiveHeader
         breadcrumbs={[
           { label: "Direktori 38 Provinsi", href: "/kamera" },

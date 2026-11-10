@@ -86,7 +86,7 @@ export default function RootLayout({
       lang="id"
       className={`dark ${inter.variable} ${jetbrainsMono.variable}`}
     >
-      <body className="min-h-screen font-sans text-[#F3F6FB] antialiased overflow-x-hidden relative bg-transparent">
+      <body className="min-h-screen font-sans text-[#F3F6FB] antialiased overflow-x-clip relative bg-transparent">
         <MotionProvider>
           <CodexRevealBackground />
           <LoadingOverlay durationMs={5000} />

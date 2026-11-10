@@ -164,9 +164,7 @@ export default function InteractiveMap({
     }).addTo(map);
 
     const clusterGroup = L.markerClusterGroup({
-      chunkedLoading: true,
-      chunkInterval: 100,
-      chunkDelay: 15,
+      chunkedLoading: false,
       maxClusterRadius: 55,
       disableClusteringAtZoom: 16,
       spiderfyOnMaxZoom: true,
@@ -212,6 +210,8 @@ export default function InteractiveMap({
       resizeObs?.disconnect();
       clusterGroup.clearLayers();
       plainGroup.clearLayers();
+      if (map.hasLayer(clusterGroup)) map.removeLayer(clusterGroup);
+      if (map.hasLayer(plainGroup)) map.removeLayer(plainGroup);
       map.remove();
       mapRef.current = null;
       clusterGroupRef.current = null;
@@ -219,12 +219,15 @@ export default function InteractiveMap({
     };
   }, []);
 
-  // Synchronize markers into Leaflet MarkerClusterGroup only when validMarkers or clustering mode changes
+  // Synchronize markers into Leaflet MarkerClusterGroup with React-controlled cancellable batches
   useEffect(() => {
     const map = mapRef.current;
     const clusterGroup = clusterGroupRef.current;
     const plainGroup = plainLayerGroupRef.current;
     if (!map || !clusterGroup || !plainGroup) return;
+
+    let cancelled = false;
+    let batchTimer: number | null = null;
 
     clusterGroup.clearLayers();
     plainGroup.clearLayers();
@@ -237,24 +240,40 @@ export default function InteractiveMap({
       if (map.hasLayer(plainGroup)) map.removeLayer(plainGroup);
       if (!map.hasLayer(clusterGroup)) map.addLayer(clusterGroup);
 
-      const leafletMarkers: L.Marker[] = new Array(validMarkers.length);
-      for (let i = 0; i < validMarkers.length; i++) {
-        const m = validMarkers[i];
-        const isOnline = m[3] === 1;
-        const marker = L.marker([m[1], m[2]], {
-          icon: isOnline ? ONLINE_MARKER_ICON : OFFLINE_MARKER_ICON
-        });
-        marker.bindTooltip(
-          `${m[5]} • ${m[6]} (${isOnline ? "ONLINE" : "OFFLINE"})`,
-          { direction: "top", offset: [0, -6] }
-        );
-        marker.on("click", () => {
-          const cam = markerTupleToCamera(m, provincesRef.current);
-          onMarkerClickRef.current(cam.id, cam);
-        });
-        leafletMarkers[i] = marker;
-      }
-      clusterGroup.addLayers(leafletMarkers);
+      const BATCH_SIZE = 4000;
+      let offset = 0;
+
+      const enqueueBatch = () => {
+        if (cancelled || mapRef.current !== map || !map.hasLayer(clusterGroup)) {
+          return;
+        }
+        const end = Math.min(offset + BATCH_SIZE, validMarkers.length);
+        const batch: L.Marker[] = new Array(end - offset);
+        for (let i = offset; i < end; i++) {
+          const m = validMarkers[i];
+          const isOnline = m[3] === 1;
+          const marker = L.marker([m[1], m[2]], {
+            icon: isOnline ? ONLINE_MARKER_ICON : OFFLINE_MARKER_ICON
+          });
+          marker.bindTooltip(
+            `${m[5]} • ${m[6]} (${isOnline ? "ONLINE" : "OFFLINE"})`,
+            { direction: "top", offset: [0, -6] }
+          );
+          marker.on("click", () => {
+            const cam = markerTupleToCamera(m, provincesRef.current);
+            onMarkerClickRef.current(cam.id, cam);
+          });
+          batch[i - offset] = marker;
+        }
+
+        clusterGroup.addLayers(batch);
+        offset = end;
+        if (offset < validMarkers.length && !cancelled) {
+          batchTimer = window.setTimeout(enqueueBatch, 16);
+        }
+      };
+
+      enqueueBatch();
     } else {
       if (map.hasLayer(clusterGroup)) map.removeLayer(clusterGroup);
       if (!map.hasLayer(plainGroup)) map.addLayer(plainGroup);
@@ -282,6 +301,13 @@ export default function InteractiveMap({
         circle.addTo(plainGroup);
       }
     }
+
+    return () => {
+      cancelled = true;
+      if (batchTimer !== null) {
+        window.clearTimeout(batchTimer);
+      }
+    };
   }, [validMarkers, clustering]);
 
   // Fly to selected province or city when filter changes

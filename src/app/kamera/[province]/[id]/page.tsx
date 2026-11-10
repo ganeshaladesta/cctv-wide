@@ -22,7 +22,7 @@ export default async function CameraDetailPage(props: {
   const nearby = store.getNearbyCameras(camera, 8);
 
   return (
-    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-transparent text-[#F3F6FB] flex flex-col">
+    <div className="min-h-screen w-full max-w-full overflow-x-clip bg-transparent text-[#F3F6FB] flex flex-col">
       <ResponsiveHeader
         breadcrumbs={[
           { label: "Direktori 38 Provinsi", href: "/kamera" },

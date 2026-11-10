@@ -367,44 +367,56 @@ export default function MultiViewGrid({
             enableShimmer={!cam}
             className={`relative rounded-2xl overflow-hidden ee-surface hover:border-[var(--border-strong)] flex flex-col min-w-0 ${
               layoutSize === 1
-                ? "h-[320px] sm:h-[520px]"
+                ? "h-[360px] sm:h-[550px]"
                 : layoutSize === 2
-                ? "h-[250px] sm:h-[360px]"
-                : "h-[230px] sm:h-[270px]"
+                ? "h-[280px] sm:h-[390px]"
+                : "h-[260px] sm:h-[300px]"
             }`}
           >
             {cam ? (
               <>
-                <div className="absolute top-2 right-2 z-30 flex items-center gap-1">
-                  <FavoritesButton
-                    cameraId={cam.id}
-                    cameraName={cam.name}
-                    size="sm"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => onSelectDetail(cam)}
-                    className="px-2 py-0.5 rounded-md bg-[#090C12]/90 hover:bg-[#161C2B] text-[10px] font-medium text-[#E2E8F0] border border-[var(--border-default)] transition-colors"
-                  >
-                    Detail
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => openPickerForSlot(idx)}
-                    className="px-2 py-0.5 rounded-md bg-[#090C12]/90 hover:bg-[#161C2B] text-[10px] font-medium text-[#60A5FA] border border-[var(--border-default)] transition-colors"
-                  >
-                    Ganti
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => removeCameraAt(idx)}
-                    aria-label={`Hapus slot ${idx + 1}`}
-                    className="px-1.5 py-0.5 rounded-md bg-red-950/90 hover:bg-red-900 text-[10px] font-medium text-red-200 border border-red-800/70 transition-colors"
-                  >
-                    ✕
-                  </button>
+                <div className="px-2.5 py-1.5 bg-[#090C12] border-b border-[var(--border-subtle)] flex items-center justify-between gap-2 shrink-0">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="text-[10px] font-mono uppercase tracking-wider text-[#98A4B8] shrink-0">
+                      Slot #{idx + 1}
+                    </span>
+                    <span className="text-[11px] font-semibold text-[#E2E8F0] truncate">
+                      {cam.name}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <FavoritesButton
+                      cameraId={cam.id}
+                      cameraName={cam.name}
+                      size="sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => onSelectDetail(cam)}
+                      className="px-2 py-0.5 rounded-md bg-[#111622] hover:bg-[#1C2436] text-[10px] font-medium text-[#E2E8F0] border border-[var(--border-default)] transition-colors"
+                    >
+                      Detail
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openPickerForSlot(idx)}
+                      className="px-2 py-0.5 rounded-md bg-[#111622] hover:bg-[#1C2436] text-[10px] font-medium text-[#60A5FA] border border-[var(--border-default)] transition-colors"
+                    >
+                      Ganti
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => removeCameraAt(idx)}
+                      aria-label={`Hapus slot ${idx + 1}`}
+                      className="px-1.5 py-0.5 rounded-md bg-red-950/80 hover:bg-red-900 text-[10px] font-medium text-red-200 border border-red-800/60 transition-colors"
+                    >
+                      ✕
+                    </button>
+                  </div>
                 </div>
-                <CCTVPlayer camera={cam} />
+                <div className="flex-1 min-h-0">
+                  <CCTVPlayer camera={cam} compact />
+                </div>
               </>
             ) : (
               <button

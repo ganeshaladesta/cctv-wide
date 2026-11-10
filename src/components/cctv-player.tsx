@@ -13,8 +13,7 @@ import {
   AlertTriangle,
   Radio,
   Clock,
-  ShieldCheck,
-  Tv
+  ShieldCheck
 } from "lucide-react";
 import { Camera } from "@/lib/types";
 import { FavoritesButton } from "@/components/motion-ui";
@@ -37,11 +36,6 @@ function extractAmgChannelId(url: string): string | null {
 
 function formatEmbedUrl(url: string): string {
   try {
-    if (url.includes("stream.amg.id")) {
-      return url.includes("?")
-        ? `${url}&autoplay=true&mute=true`
-        : `${url}?autoplay=true&mute=true`;
-    }
     if (url.includes("youtube.com/embed/")) {
       return url.includes("?")
         ? `${url}&autoplay=1&mute=1`
@@ -74,9 +68,6 @@ export function CCTVPlayer({
     [camera.stream_url]
   );
 
-  // For AMG cameras (CCTV Sarinah), Direct HLS is the primary default playback mode, with Embed Resmi as an optional fallback
-  const [amgMode, setAmgMode] = useState<"hls" | "embed">("hls");
-
   const [isVisible, setIsVisible] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -86,12 +77,11 @@ export function CCTVPlayer({
   const [usingProxy, setUsingProxy] = useState(false);
   const [snapshotTick, setSnapshotTick] = useState(0);
 
-  const activeProtocol = React.useMemo(() => {
-    if (amgChannelId) {
-      return amgMode === "hls" ? "HLS" : "EMBED";
-    }
-    return camera.protocol;
-  }, [amgChannelId, amgMode, camera.protocol]);
+  // AMG Sarinah cameras permanently use Direct HLS; other providers preserve camera.protocol
+  const activeProtocol = React.useMemo(
+    () => (amgChannelId ? "HLS" : camera.protocol),
+    [amgChannelId, camera.protocol]
+  );
 
   // Lazy visibility observer so offscreen players in Multi-View or long grids pause decoding
   useEffect(() => {
@@ -109,30 +99,23 @@ export function CCTVPlayer({
     return () => obs.disconnect();
   }, []);
 
-  // Reset mode to Direct HLS when camera ID changes
-  useEffect(() => {
-    setAmgMode("hls");
-  }, [camera.id]);
-
-  // Reset proxy fallback when camera or mode changes
+  // Reset proxy fallback when camera changes
   useEffect(() => {
     setUsingProxy(false);
     setRetryCount(0);
     setError(null);
     setLoading(true);
-  }, [camera.id, camera.stream_url, amgMode]);
+  }, [camera.id, camera.stream_url]);
 
   const effectiveStreamUrl = React.useMemo(() => {
     const raw = amgChannelId
-      ? amgMode === "hls"
-        ? `https://stream.amg.id/memfs/${amgChannelId}.m3u8`
-        : `https://stream.amg.id/playersite_${amgChannelId}.html`
+      ? `https://stream.amg.id/memfs/${amgChannelId}.m3u8`
       : camera.stream_url;
     if (usingProxy && raw.startsWith("http") && activeProtocol !== "EMBED") {
       return `/api/proxy?url=${encodeURIComponent(raw)}`;
     }
     return raw;
-  }, [camera.stream_url, amgChannelId, amgMode, usingProxy, activeProtocol]);
+  }, [camera.stream_url, amgChannelId, usingProxy, activeProtocol]);
 
   const reportStatus = useCallback(
     (status: "ONLINE" | "OFFLINE") => {
@@ -145,31 +128,6 @@ export function CCTVPlayer({
     },
     [camera.id, onStatusChange]
   );
-
-  // Verify actual live stream availability for EMBED cameras (such as AMG)
-  useEffect(() => {
-    if (!isVisible || activeProtocol !== "EMBED" || !amgChannelId) return;
-    let cancelled = false;
-    fetch(`https://stream.amg.id/memfs/${amgChannelId}.m3u8`)
-      .then(async (res) => {
-        const text = await res.text();
-        if (cancelled) return;
-        if (res.ok && text.includes("#EXTM3U")) {
-          reportStatus("ONLINE");
-        } else {
-          setError("Stream AMG sedang offline");
-          reportStatus("OFFLINE");
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          reportStatus("OFFLINE");
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [isVisible, activeProtocol, amgChannelId, retryCount, reportStatus]);
 
   // Snapshot polling timer
   useEffect(() => {
@@ -388,41 +346,6 @@ export function CCTVPlayer({
             </p>
           )}
         </div>
-
-        {/* AMG Mode Switcher (Direct HLS Primary Default vs Embed Resmi Fallback) */}
-        {amgChannelId && (
-          <div
-            data-testid="amg-playback-switcher"
-            className="pointer-events-auto flex items-center gap-1 bg-[#090C12]/92 border border-[var(--border-default)] rounded-lg p-0.5"
-          >
-            <button
-              type="button"
-              data-testid="amg-mode-hls"
-              aria-pressed={amgMode === "hls"}
-              onClick={() => setAmgMode("hls")}
-              className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-colors ${
-                amgMode === "hls"
-                  ? "bg-[#3B82F6] text-white"
-                  : "text-[#98A4B8] hover:text-[#F3F6FB]"
-              }`}
-            >
-              Direct HLS
-            </button>
-            <button
-              type="button"
-              data-testid="amg-mode-embed"
-              aria-pressed={amgMode === "embed"}
-              onClick={() => setAmgMode("embed")}
-              className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-colors ${
-                amgMode === "embed"
-                  ? "bg-[#3B82F6] text-white"
-                  : "text-[#98A4B8] hover:text-[#F3F6FB]"
-              }`}
-            >
-              Embed Resmi
-            </button>
-          </div>
-        )}
       </div>
 
       {/* Main Media Surface */}
@@ -532,16 +455,6 @@ export function CCTVPlayer({
                 <RotateCw className="w-3.5 h-3.5" />
                 <span>Coba Lagi</span>
               </button>
-              {amgChannelId && amgMode === "hls" && (
-                <button
-                  type="button"
-                  onClick={() => setAmgMode("embed")}
-                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#161C2B] hover:bg-[#1C2436] border border-[var(--border-default)] text-[#E2E8F0] text-xs transition-colors"
-                >
-                  <Tv className="w-3 h-3" />
-                  <span>Gunakan Embed Resmi</span>
-                </button>
-              )}
               <a
                 href={camera.source_url}
                 target="_blank"

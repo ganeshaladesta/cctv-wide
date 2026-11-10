@@ -8,6 +8,13 @@ export const APP_CONFIG = {
   copyright: "Developed by Ganesha Ladesta.",
   primaryIcon: "/assets/scc-eagle-eyes-logo.png",
   primaryIconWebp: "/assets/scc-eagle-eyes-logo.webp",
+  institutional: {
+    ownerName: "Bank Indonesia",
+    propertyOfText: "Property of Bank Indonesia",
+    poweredByText: "Powered by SCC - EAGLE EYES",
+    developedByText: "Developed by Ganesha Ladesta",
+    logoPath: "/assets/logo-bank-indonesia.webp"
+  },
   favicons: {
     ico: "/favicon.ico",
     png16: "/favicon-16x16.png",

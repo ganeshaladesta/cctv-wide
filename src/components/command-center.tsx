@@ -522,7 +522,7 @@ export default function CommandCenter({
   ];
 
   return (
-    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-transparent text-[#F3F6FB] flex flex-col">
+    <div className="min-h-screen w-full max-w-full overflow-x-clip bg-transparent text-[#F3F6FB] flex flex-col">
       {/* Breathing Navbar */}
       <ResponsiveHeader
         activeTab={activeTab}
@@ -562,9 +562,9 @@ export default function CommandCenter({
         style={{ position: "relative", zIndex: 100 }}
         className="relative z-[100] px-2.5 sm:px-4 lg:px-6 py-2"
       >
-        <div className="max-w-[1600px] mx-auto rounded-2xl ee-shell-surface px-3 py-2.5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 xl:grid-cols-[minmax(190px,1.45fr)_minmax(148px,1.05fr)_minmax(160px,1.1fr)_minmax(165px,1.15fr)_minmax(122px,0.82fr)_minmax(138px,0.92fr)_auto] items-center gap-2">
+        <div className="max-w-[1600px] mx-auto rounded-2xl ee-shell-surface px-3 py-2.5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 min-[1400px]:grid-cols-[minmax(195px,1.35fr)_minmax(160px,1.05fr)_minmax(186px,1.2fr)_minmax(186px,1.2fr)_minmax(130px,0.82fr)_minmax(144px,0.92fr)_auto] items-center gap-2">
           {/* Search Input */}
-          <div className="relative sm:col-span-2 lg:col-span-6 xl:col-span-1 min-w-0">
+          <div className="relative sm:col-span-2 lg:col-span-6 min-[1400px]:col-span-1 min-w-0">
             <Search className="w-4 h-4 text-[#98A4B8] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="text"
@@ -577,7 +577,7 @@ export default function CommandCenter({
           </div>
 
           {/* Province Morph Dropdown */}
-          <div className="lg:col-span-3 xl:col-span-1 min-w-0">
+          <div className="lg:col-span-3 min-[1400px]:col-span-1 min-w-0">
             <AnimatedDropdown
               value={selectedProvince}
               onChange={setSelectedProvince}
@@ -592,7 +592,7 @@ export default function CommandCenter({
           </div>
 
           {/* City Morph Dropdown */}
-          <div className="lg:col-span-3 xl:col-span-1 min-w-0">
+          <div className="lg:col-span-3 min-[1400px]:col-span-1 min-w-0">
             <AnimatedDropdown
               value={selectedCity}
               onChange={setSelectedCity}
@@ -607,7 +607,7 @@ export default function CommandCenter({
           </div>
 
           {/* Source / Provider Morph Dropdown */}
-          <div className="lg:col-span-4 xl:col-span-1 min-w-0">
+          <div className="lg:col-span-4 min-[1400px]:col-span-1 min-w-0">
             <AnimatedDropdown
               value={selectedSource}
               onChange={setSelectedSource}
@@ -622,7 +622,7 @@ export default function CommandCenter({
           </div>
 
           {/* Status Morph Dropdown */}
-          <div className="lg:col-span-3 xl:col-span-1 min-w-0">
+          <div className="lg:col-span-3 min-[1400px]:col-span-1 min-w-0">
             <AnimatedDropdown
               value={selectedStatus}
               onChange={setSelectedStatus}
@@ -634,7 +634,7 @@ export default function CommandCenter({
           </div>
 
           {/* Protocol Morph Dropdown */}
-          <div className="lg:col-span-3 xl:col-span-1 min-w-0">
+          <div className="lg:col-span-3 min-[1400px]:col-span-1 min-w-0">
             <AnimatedDropdown
               value={selectedProtocol}
               onChange={setSelectedProtocol}
@@ -646,7 +646,7 @@ export default function CommandCenter({
             />
           </div>
 
-          <div className="sm:col-span-2 lg:col-span-2 xl:col-span-1 flex items-center justify-between lg:justify-end gap-2">
+          <div className="sm:col-span-2 lg:col-span-2 min-[1400px]:col-span-1 flex items-center justify-between lg:justify-end gap-2">
             {(searchQuery ||
               selectedProvince ||
               selectedCity ||
