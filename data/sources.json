@@ -8,7 +8,7 @@
     "city_id": "city-dki-jakarta-jakarta-pusat",
     "city_name": "Jakarta Pusat",
     "official_url": "https://stream.amg.id/index.html",
-    "protocol": "EMBED",
+    "protocol": "HLS",
     "requires_proxy": false,
     "total_cameras": 1,
     "online_cameras": 1,

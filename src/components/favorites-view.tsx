@@ -495,11 +495,13 @@ export function FavoritesPage({
       {/* Standalone Player Modal when used on /favorites route */}
       {activeModalCamera && (
         <div
-          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-4"
+          style={{ zIndex: 900 }}
+          className="fixed inset-0 z-[900] bg-black/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-4"
           onClick={() => setActiveModalCamera(null)}
         >
           <div
-            className="w-full max-w-3xl bg-zinc-950 border border-[#252A35] rounded-2xl overflow-hidden shadow-2xl"
+            style={{ zIndex: 1000 }}
+            className="relative z-[1000] w-full max-w-3xl bg-zinc-950 border border-[#252A35] rounded-2xl overflow-hidden shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="h-[260px] sm:h-[400px]">

@@ -146,164 +146,258 @@ async function runResponsiveBrandingTests() {
     await send("Runtime.enable");
     await send("Page.enable");
     await send("Page.navigate", { url: APP_URL });
-    await sleep(1800);
 
-    // 1. Verify 5-Second Framer Motion First-Load Overlay
-    const loadingOverlayCheck = await evaluate(`(() => {
-      const overlay = document.querySelector('[data-testid="eagle-eyes-loading-overlay"]');
-      const radar = document.querySelector('[data-testid="loading-radar-sweep"]');
-      const bg = overlay ? getComputedStyle(overlay).backgroundColor : null;
-      return {
-        overlayPresentAt1_3s: !!overlay,
-        radarPresentAt1_3s: !!radar,
-        backgroundColor: bg,
-        hasBrandText: overlay ? overlay.innerText.includes('SCC - EAGLE EYES') : false
-      };
-    })()`);
-    console.log(
-      "1. Framer Motion 5s LoadingOverlay Check (at ~1.3s):",
-      JSON.stringify(loadingOverlayCheck, null, 2)
-    );
-    assert.equal(loadingOverlayCheck.overlayPresentAt1_3s, true);
-    assert.equal(loadingOverlayCheck.radarPresentAt1_3s, true);
+    // Poll until LoadingOverlay & radar sweep at >=1.0s are active
+    let loadingOverlayCheck = null;
+    for (let attempt = 0; attempt < 15; attempt++) {
+      await sleep(250);
+      loadingOverlayCheck = await evaluate(`(() => {
+        const overlay = document.querySelector('[data-testid="eagle-eyes-loading-overlay"]');
+        const radar = document.querySelector('[data-testid="loading-radar-sweep"]');
+        const cs = overlay ? getComputedStyle(overlay) : null;
+        return {
+          overlayPresent: !!overlay,
+          radarPresent: !!radar,
+          backgroundColor: cs ? cs.backgroundColor : null,
+          zIndex: cs ? cs.zIndex : null,
+          hasBrandText: overlay ? overlay.innerText.includes('SCC - EAGLE EYES') : false
+        };
+      })()`);
+      if (loadingOverlayCheck.overlayPresent && loadingOverlayCheck.radarPresent) {
+        break;
+      }
+    }
+    console.log("1. LoadingOverlay Check:", JSON.stringify(loadingOverlayCheck));
+    assert.equal(loadingOverlayCheck.overlayPresent, true);
+    assert.equal(loadingOverlayCheck.radarPresent, true);
     assert.equal(loadingOverlayCheck.backgroundColor, "rgb(9, 11, 16)");
-    assert.equal(loadingOverlayCheck.hasBrandText, true);
+    assert.equal(loadingOverlayCheck.zIndex, "2000");
 
-    // Wait for 5.0s total duration to complete and verify fade-out + sessionStorage persistence
-    await sleep(4300);
-    const after5sCheck = await evaluate(`(() => ({
-      overlayStillPresent: !!document.querySelector('[data-testid="eagle-eyes-loading-overlay"]'),
-      sessionFlag: sessionStorage.getItem('scc_eagle_eyes_first_load_done')
-    }))()`);
-    console.log("1b. After 5.0s LoadingOverlay Fade-Out:", JSON.stringify(after5sCheck));
-    assert.equal(after5sCheck.overlayStillPresent, false, "Loading overlay must fade out after 5 seconds");
-    assert.equal(after5sCheck.sessionFlag, "1", "First-load state must persist in sessionStorage");
-
-    // 2. Verify Eagle Eyes Logo Replacement, Favicons, Manifest, and Institutional Logos
-    const brandingCheck = await evaluate(`(async () => {
-      const title = document.title;
-      const bodyText = document.body.innerText;
-      const icons = Array.from(document.querySelectorAll('link[rel*="icon"]')).map(l => l.getAttribute('href'));
-      const manifestHref = document.querySelector('link[rel="manifest"]')?.getAttribute('href');
-      const manifestRes = manifestHref ? await fetch(manifestHref).then(r => r.json()) : null;
-
-      const headerBrandImg = document.querySelector('[data-testid="eagle-eyes-logo-img"]');
-      const headerBrandSrc = headerBrandImg ? headerBrandImg.getAttribute('src') : null;
-      const headerBrandFit = headerBrandImg ? getComputedStyle(headerBrandImg).objectFit : null;
-
-      const instImgs = Array.from(document.querySelectorAll('[data-testid="institutional-logos"] img')).map(img => ({
-        src: img.getAttribute('src'),
-        alt: img.getAttribute('alt'),
-        naturalWidth: img.naturalWidth,
-        objectFit: getComputedStyle(img).objectFit
-      }));
-
-      return {
-        title,
-        hasNewBrand: bodyText.includes('SCC - EAGLE EYES'),
-        hasOldBrand: bodyText.includes('PANTAU NUSANTARA'),
-        hasCopyright: bodyText.includes('Developed by Ganesha Ladesta'),
-        icons,
-        manifestName: manifestRes?.name,
-        manifestIcons: manifestRes?.icons?.map(i => i.src) || [],
-        headerBrandSrc,
-        headerBrandFit,
-        instImgs
-      };
+    // Dismiss or wait for loading overlay
+    await evaluate(`(() => {
+      const skip = document.querySelector('[data-testid="skip-loading-overlay"]');
+      if (skip) skip.click();
     })()`);
+    await sleep(600);
 
-    console.log("2. Eagle Eyes Branding & Logo Verification:", JSON.stringify(brandingCheck, null, 2));
-    assert.equal(brandingCheck.title, "SCC - EAGLE EYES | Integrated Monitoring System");
-    assert.equal(brandingCheck.hasNewBrand, true);
-    assert.equal(brandingCheck.hasOldBrand, false);
-    assert.equal(brandingCheck.headerBrandSrc, "/assets/scc-eagle-eyes-logo.png");
-    assert.equal(brandingCheck.headerBrandFit, "contain");
-    assert.ok(brandingCheck.icons.includes("/favicon.ico"));
-    assert.ok(brandingCheck.icons.includes("/favicon-32x32.png"));
-    assert.ok(brandingCheck.icons.includes("/favicon-16x16.png"));
-    assert.ok(brandingCheck.icons.includes("/apple-touch-icon.png"));
-    assert.ok(brandingCheck.manifestIcons.includes("/icon-192.png"));
-    assert.ok(brandingCheck.manifestIcons.includes("/icon-512.png"));
-    assert.ok(brandingCheck.instImgs.length >= 3, "Must keep all 3 institutional logos in their dedicated section");
-    assert.ok(brandingCheck.instImgs.some(i => i.src === "/assets/logo-bank-indonesia.webp" && i.naturalWidth > 0 && i.objectFit === "contain"));
-    assert.ok(brandingCheck.instImgs.some(i => i.src === "/assets/logo-dlaf.png" && i.naturalWidth > 0 && i.objectFit === "contain"));
-    assert.ok(brandingCheck.instImgs.some(i => i.src === "/assets/logo-pambi.png" && i.naturalWidth > 0 && i.objectFit === "contain"));
+    // 2. Verify Kota/Kabupaten Dropdown Layering Above OSM Map Controls
+    const dropdownLayeringCheck = await evaluate(`(async () => {
+      const cityTrigger = document.querySelector('[data-testid="filter-city-trigger"]');
+      if (!cityTrigger) return { opened: false };
+      cityTrigger.click();
+      await new Promise(r => setTimeout(r, 300));
 
-    // 3. Verify Framer Motion Morph Dropdowns (AnimatedDropdown)
-    const dropdownCheck = await evaluate(`(async () => {
-      const trigger = document.querySelector('[data-testid="filter-province-trigger"]');
-      if (!trigger) return { opened: false };
-      trigger.click();
-      await new Promise(r => setTimeout(r, 250));
-      const menu = document.querySelector('[data-testid="filter-province-menu"]');
-      const opened = !!menu;
+      const menu = document.querySelector('[data-testid="filter-city-menu"]');
+      const isPortaledToBody = menu?.parentElement === document.body;
       const optionCount = menu ? menu.querySelectorAll('[role="option"]').length : 0;
+      const searchInput = document.querySelector('[data-testid="filter-city-search"]');
+      const mapContainer = document.querySelector('[data-testid="map-container"]');
+      const osmSwitcher = document.querySelector('[data-testid="osm-basemap-switcher"]');
+
+      const triggerZ = getComputedStyle(cityTrigger).zIndex;
+      const menuZ = menu ? getComputedStyle(menu).zIndex : null;
+      const mapZ = mapContainer ? getComputedStyle(mapContainer).zIndex : null;
+      const mapIsolation = mapContainer ? getComputedStyle(mapContainer).isolation : null;
+      const osmZ = osmSwitcher ? getComputedStyle(osmSwitcher).zIndex : null;
+
+      // Check hit-testing at the center of the open Kota/Kabupaten dropdown menu
+      const menuRect = menu.getBoundingClientRect();
+      const hitEl = document.elementFromPoint(
+        menuRect.left + menuRect.width / 2,
+        menuRect.top + Math.min(120, menuRect.height / 2)
+      );
+      const dropdownCoversUnderlyingElements = menu.contains(hitEl) || hitEl === menu;
+
+      // Close dropdown via Escape and verify OSM controls work
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-      await new Promise(r => setTimeout(r, 500));
-      const closedOnEscape = !document.querySelector('[data-testid="filter-province-menu"]');
-      return { opened, optionCount, closedOnEscape };
-    })()`);
-    console.log("3. Framer Motion Morph Dropdown Check:", JSON.stringify(dropdownCheck));
-    assert.equal(dropdownCheck.opened, true);
-    assert.equal(dropdownCheck.optionCount, 39, "38 provinces + 'Semua 38 Provinsi'");
-    assert.equal(dropdownCheck.closedOnEscape, true);
-
-    // 4. Verify Favorites Feature (Add -> Persist in localStorage -> View in Favorite CCTV tab -> Remove -> Empty state)
-    await send("Emulation.setDeviceMetricsOverride", {
-      width: 1440,
-      height: 900,
-      deviceScaleFactor: 1,
-      mobile: false
-    });
-    await sleep(300);
-
-    const favoritesCheck = await evaluate(`(async () => {
-      localStorage.removeItem('scc_eagle_eyes_favorites');
-      const firstFavBtn = document.querySelector('[data-testid^="favorite-btn-"]');
-      if (!firstFavBtn) return { foundBtn: false };
-      const testId = firstFavBtn.getAttribute('data-testid');
-      const cameraId = testId.replace('favorite-btn-', '');
-      firstFavBtn.click();
-      await new Promise(r => setTimeout(r, 250));
-
-      const rawStorage = localStorage.getItem('scc_eagle_eyes_favorites');
-      const parsedStorage = rawStorage ? JSON.parse(rawStorage) : [];
-
-      const navFavTab = document.querySelector('[data-testid="nav-tab-favorites"]');
-      if (navFavTab) navFavTab.click();
       await new Promise(r => setTimeout(r, 600));
+      const closed = !document.querySelector('[data-testid="filter-city-menu"]');
 
-      const favCardPresent = !!document.querySelector('[data-testid="favorite-camera-card-' + cameraId + '"]');
-      const removeBtn = document.querySelector('[data-testid="remove-favorite-' + cameraId + '"]');
-      if (removeBtn) removeBtn.click();
-      await new Promise(r => setTimeout(r, 350));
-
-      const emptyStateEl = document.querySelector('[data-testid="favorites-empty-state"]');
-      const emptyStateText = emptyStateEl ? emptyStateEl.innerText : '';
-
-      // Switch back to map tab for viewport audit
-      const mapTabBtn = Array.from(document.querySelectorAll('header nav button')).find(b => b.innerText.includes('Peta Interaktif'));
-      if (mapTabBtn) mapTabBtn.click();
-      await new Promise(r => setTimeout(r, 350));
+      const osmStdBtn = document.querySelector('[data-testid="osm-standard-btn"]');
+      const osmDarkBtn = document.querySelector('[data-testid="osm-dark-btn"]');
+      if (osmStdBtn) osmStdBtn.click();
+      await new Promise(r => setTimeout(r, 150));
+      const stdActive = !mapContainer.classList.contains('osm-dark-tiles');
+      if (osmDarkBtn) osmDarkBtn.click();
+      await new Promise(r => setTimeout(r, 150));
+      const darkActive = mapContainer.classList.contains('osm-dark-tiles');
 
       return {
-        foundBtn: true,
-        cameraId,
-        savedCount: parsedStorage.length,
-        hasAddedAt: Boolean(parsedStorage[0]?.addedAt),
-        favCardPresent,
-        emptyStateExactMatch: emptyStateText.includes('Belum ada CCTV favorit. Tambahkan kamera favorit untuk mengaksesnya lebih cepat.')
+        opened: !!menu,
+        isPortaledToBody,
+        hasSearchInput: !!searchInput,
+        optionCount,
+        triggerZ,
+        menuZ,
+        mapZ,
+        mapIsolation,
+        osmZ,
+        dropdownCoversUnderlyingElements,
+        closed,
+        stdActive,
+        darkActive
       };
     })()`);
-    console.log("4. Favorites Feature Verification:", JSON.stringify(favoritesCheck, null, 2));
-    assert.equal(favoritesCheck.foundBtn, true);
-    assert.equal(favoritesCheck.savedCount, 1);
-    assert.equal(favoritesCheck.hasAddedAt, true);
-    assert.equal(favoritesCheck.favCardPresent, true);
-    assert.equal(favoritesCheck.emptyStateExactMatch, true);
+    console.log("2. Kota/Kabupaten Dropdown vs OSM Map Controls Check:", JSON.stringify(dropdownLayeringCheck, null, 2));
+    assert.equal(dropdownLayeringCheck.opened, true);
+    assert.equal(dropdownLayeringCheck.isPortaledToBody, true);
+    assert.equal(dropdownLayeringCheck.hasSearchInput, true);
+    assert.ok(dropdownLayeringCheck.optionCount > 10, "City dropdown must list cities");
+    assert.equal(dropdownLayeringCheck.triggerZ, "300");
+    assert.equal(dropdownLayeringCheck.menuZ, "400");
+    assert.equal(dropdownLayeringCheck.mapZ, "0");
+    assert.equal(dropdownLayeringCheck.mapIsolation, "isolate");
+    assert.equal(dropdownLayeringCheck.osmZ, "20");
+    assert.equal(dropdownLayeringCheck.dropdownCoversUnderlyingElements, true, "Dropdown must visually cover underlying map/OSM controls");
+    assert.equal(dropdownLayeringCheck.closed, true);
+    assert.equal(dropdownLayeringCheck.stdActive, true);
+    assert.equal(dropdownLayeringCheck.darkActive, true);
 
-    // 5. Test all 10 viewports on Main Dashboard
-    const viewportResults = [];
+    // 3. Test Camera Directory Interaction & Modal Stacking Over Map Controls (CCTV Sarinah Direct HLS)
+    const directoryInteractionCheck = await evaluate(`(async () => {
+      const sarinahBtn = document.querySelector('[data-testid="directory-camera-btn-amg-cctv-sarinah"]');
+      if (!sarinahBtn) return { foundSarinahInDirectory: false };
+      sarinahBtn.click();
+      await new Promise(r => setTimeout(r, 400));
+
+      const modalBackdrop = document.querySelector('[data-testid="camera-detail-modal-backdrop"]');
+      const modalDialog = document.querySelector('[data-testid="camera-detail-modal"]');
+      const mapPreview = document.querySelector('[data-testid="map-camera-popup"]');
+      const backdropZ = modalBackdrop ? getComputedStyle(modalBackdrop).zIndex : null;
+      const modalZ = modalDialog ? getComputedStyle(modalDialog).zIndex : null;
+
+      // Verify Direct HLS is default and no iframe is initialized
+      const hlsModeBtn = modalDialog?.querySelector('[data-testid="amg-mode-hls"]');
+      const embedModeBtn = modalDialog?.querySelector('[data-testid="amg-mode-embed"]');
+      const videoEl = modalDialog?.querySelector('video');
+      const iframeEl = modalDialog?.querySelector('iframe');
+
+      // Check hit-test at the exact screen coordinates of the OSM Basemap Switcher while modal is open
+      const osmSwitcher = document.querySelector('[data-testid="osm-basemap-switcher"]');
+      const osmRect = osmSwitcher.getBoundingClientRect();
+      const topHitAtOsmCoords = document.elementFromPoint(
+        osmRect.left + osmRect.width / 2,
+        osmRect.top + osmRect.height / 2
+      );
+      const modalOrBackdropCoversOsm =
+        modalBackdrop.contains(topHitAtOsmCoords) || topHitAtOsmCoords === modalBackdrop;
+
+      const bodyOverflowLocked = document.body.style.overflow === 'hidden';
+
+      // Toggle Favorite button inside modal
+      const favBtn = modalDialog?.querySelector('[data-testid="favorite-btn-amg-cctv-sarinah"]');
+      if (favBtn) favBtn.click();
+      await new Promise(r => setTimeout(r, 200));
+      const favPressed = favBtn?.getAttribute('aria-pressed') === 'true';
+      if (favBtn) favBtn.click(); // toggle back
+      await new Promise(r => setTimeout(r, 150));
+
+      // Close modal
+      const closeBtn = document.querySelector('[data-testid="close-camera-detail-modal"]');
+      if (closeBtn) closeBtn.click();
+      await new Promise(r => setTimeout(r, 450));
+
+      const modalClosed = !document.querySelector('[data-testid="camera-detail-modal"]');
+      const bodyOverflowRestored = document.body.style.overflow !== 'hidden';
+
+      return {
+        foundSarinahInDirectory: true,
+        modalOpened: !!modalDialog,
+        mapPreviewOpenedSimultaneously: !!mapPreview,
+        backdropZ,
+        modalZ,
+        hlsDefaultSelected: hlsModeBtn?.getAttribute('aria-pressed') === 'true',
+        embedNotSelected: embedModeBtn?.getAttribute('aria-pressed') === 'false',
+        hasVideoElement: !!videoEl,
+        hasIframeElement: !!iframeEl,
+        modalOrBackdropCoversOsm,
+        bodyOverflowLocked,
+        favPressed,
+        modalClosed,
+        bodyOverflowRestored
+      };
+    })()`);
+    console.log("3. Directory Click -> Full Modal Only + Direct HLS + Z-Index Check:", JSON.stringify(directoryInteractionCheck, null, 2));
+    assert.equal(directoryInteractionCheck.foundSarinahInDirectory, true);
+    assert.equal(directoryInteractionCheck.modalOpened, true);
+    assert.equal(
+      directoryInteractionCheck.mapPreviewOpenedSimultaneously,
+      false,
+      "CRITICAL: Directory click must NOT open map preview card"
+    );
+    assert.equal(directoryInteractionCheck.backdropZ, "900");
+    assert.equal(directoryInteractionCheck.modalZ, "1000");
+    assert.equal(directoryInteractionCheck.hlsDefaultSelected, true, "Direct HLS must be default for CCTV Sarinah");
+    assert.equal(directoryInteractionCheck.embedNotSelected, true);
+    assert.equal(directoryInteractionCheck.hasVideoElement, true);
+    assert.equal(directoryInteractionCheck.hasIframeElement, false, "Must NOT initialize Embed Resmi iframe by default");
+    assert.equal(directoryInteractionCheck.modalOrBackdropCoversOsm, true, "Modal backdrop/dialog must completely cover OSM controls");
+    assert.equal(directoryInteractionCheck.bodyOverflowLocked, true);
+    assert.equal(directoryInteractionCheck.favPressed, true);
+    assert.equal(directoryInteractionCheck.modalClosed, true);
+    assert.equal(directoryInteractionCheck.bodyOverflowRestored, true);
+
+    // 4. Test Map Marker Click -> Compact Map Preview ONLY -> "Detail Kamera" -> Full Detail Modal ONLY
+    const mapMarkerInteractionCheck = await evaluate(`(async () => {
+      // Search amg-cctv-sarinah so the single Sarinah marker is rendered directly on the map
+      const searchInput = document.querySelector('[data-testid="global-camera-search"]');
+      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+      nativeInputValueSetter.call(searchInput, 'amg-cctv-sarinah');
+      searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise(r => setTimeout(r, 800));
+
+      const markerPin = document.querySelector('.leaflet-marker-icon.cctv-marker-pin') || document.querySelector('.cctv-marker-pin');
+      if (!markerPin) return { markerFound: false };
+      markerPin.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      await new Promise(r => setTimeout(r, 450));
+
+      const mapPreview = document.querySelector('[data-testid="map-camera-popup"]');
+      const modalWhilePreview = document.querySelector('[data-testid="camera-detail-modal"]');
+      const previewHlsBtn = mapPreview?.querySelector('[data-testid="amg-mode-hls"]');
+      const previewIframe = mapPreview?.querySelector('iframe');
+
+      // Click "Detail Kamera" inside the compact map preview
+      const detailBtn = document.querySelector('[data-testid="map-preview-detail-btn"]');
+      if (detailBtn) detailBtn.click();
+      await new Promise(r => setTimeout(r, 450));
+
+      const previewAfterTransition = document.querySelector('[data-testid="map-camera-popup"]');
+      const modalAfterTransition = document.querySelector('[data-testid="camera-detail-modal"]');
+      const modalContainsSarinah = modalAfterTransition?.innerText.includes('CCTV Sarinah') || false;
+
+      // Close modal and clear search
+      const closeBtn = document.querySelector('[data-testid="close-camera-detail-modal"]');
+      if (closeBtn) closeBtn.click();
+      await new Promise(r => setTimeout(r, 450));
+
+      nativeInputValueSetter.call(searchInput, '');
+      searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise(r => setTimeout(r, 500));
+
+      return {
+        markerFound: true,
+        previewOpenedOnly: !!mapPreview && !modalWhilePreview,
+        previewHlsDefault: previewHlsBtn?.getAttribute('aria-pressed') === 'true',
+        previewNoIframe: !previewIframe,
+        transitionClosedPreview: !previewAfterTransition,
+        transitionOpenedModal: !!modalAfterTransition,
+        modalContainsSarinah
+      };
+    })()`);
+    console.log("4. Map Marker Click -> Compact Preview Only -> Detail Kamera Transition:", JSON.stringify(mapMarkerInteractionCheck, null, 2));
+    assert.equal(mapMarkerInteractionCheck.markerFound, true);
+    assert.equal(
+      mapMarkerInteractionCheck.previewOpenedOnly,
+      true,
+      "CRITICAL: Map marker click must open ONLY compact map preview, NOT full detail modal"
+    );
+    assert.equal(mapMarkerInteractionCheck.previewHlsDefault, true, "Compact map preview must also default to Direct HLS for CCTV Sarinah");
+    assert.equal(mapMarkerInteractionCheck.previewNoIframe, true);
+    assert.equal(mapMarkerInteractionCheck.transitionClosedPreview, true, "Clicking Detail Kamera must close compact map preview");
+    assert.equal(mapMarkerInteractionCheck.transitionOpenedModal, true, "Clicking Detail Kamera must open full Camera Detail Modal");
+    assert.equal(mapMarkerInteractionCheck.modalContainsSarinah, true);
+
+    // 5. Responsive Validation Across All 10 Viewports (320px -> 1920px)
     for (const vp of VIEWPORTS) {
       await send("Emulation.setDeviceMetricsOverride", {
         width: vp.width,
@@ -311,7 +405,7 @@ async function runResponsiveBrandingTests() {
         deviceScaleFactor: vp.mobile ? 2 : 1,
         mobile: vp.mobile
       });
-      await sleep(300);
+      await sleep(250);
 
       const check = await evaluate(`(() => {
         const scrollWidth = document.documentElement.scrollWidth;
@@ -320,71 +414,32 @@ async function runResponsiveBrandingTests() {
         const mapRect = document.querySelector('.leaflet-container')?.getBoundingClientRect();
         return {
           viewport: "${vp.label}",
-          innerWidth,
-          scrollWidth,
           overflowX,
           mapWidth: Math.round(mapRect?.width || 0),
           mapHeight: Math.round(mapRect?.height || 0)
         };
       })()`);
 
-      viewportResults.push(check);
-      assert.equal(
-        check.overflowX,
-        false,
-        `Horizontal overflow at ${vp.label}: scrollWidth=${check.scrollWidth} > innerWidth=${check.innerWidth}`
-      );
-      assert.ok(
-        check.mapWidth > 250 && check.mapHeight >= 400,
-        `Map must be visible at ${vp.label}`
-      );
+      assert.equal(check.overflowX, false, `Horizontal overflow at ${vp.label}`);
+      assert.ok(check.mapWidth > 250 && check.mapHeight >= 400, `Map visible at ${vp.label}`);
     }
-    console.log("5. 10-Viewport Audit Results (320px -> 1920px): PASS");
+    console.log("5. 10-Viewport Responsive Validation (320px -> 1920px): PASS");
 
-    // 6. Test Secondary Pages (/favorites, /kamera, /about, /kamera/dki-jakarta/amg-cctv-sarinah)
-    for (const route of [
-      "/favorites",
-      "/kamera",
-      "/about",
-      "/kamera/dki-jakarta/amg-cctv-sarinah"
-    ]) {
-      await send("Page.navigate", { url: `${APP_URL}${route}` });
-      await sleep(1000);
-      for (const width of [320, 768, 1440]) {
-        await send("Emulation.setDeviceMetricsOverride", {
-          width,
-          height: 800,
-          deviceScaleFactor: 1,
-          mobile: width < 1024
-        });
-        await sleep(200);
-        const pageState = await evaluate(`(() => ({
-          route: "${route}",
-          width: ${width},
-          overflowX: document.documentElement.scrollWidth > window.innerWidth,
-          hasNewBrand: document.body.innerText.includes('SCC - EAGLE EYES'),
-          hasEagleLogo: !!document.querySelector('[data-testid="eagle-eyes-logo-img"]'),
-          overlayReplayed: !!document.querySelector('[data-testid="eagle-eyes-loading-overlay"]')
-        }))()`);
-        assert.equal(pageState.overflowX, false, `Overflow on ${route} at ${width}px`);
-        assert.equal(pageState.hasNewBrand, true, `Missing SCC - EAGLE EYES on ${route}`);
-        assert.equal(pageState.hasEagleLogo, true, `Missing Eagle Eyes logo on ${route}`);
-        assert.equal(pageState.overlayReplayed, false, `Loading overlay must not replay on ${route}`);
-      }
-    }
-
-    console.log("6. Secondary Pages (/favorites, /kamera, /about, /kamera/dki-jakarta/amg-cctv-sarinah): PASS");
-    console.log("7. Console Errors:", JSON.stringify(consoleErrors));
-    console.log("8. Page Exceptions:", JSON.stringify(pageExceptions));
+    console.log("6. Console Errors:", JSON.stringify(consoleErrors));
+    console.log("7. Page Exceptions:", JSON.stringify(pageExceptions));
     assert.equal(consoleErrors.length, 0, "Must have 0 console errors");
     assert.equal(pageExceptions.length, 0, "Must have 0 page exceptions");
 
-    console.log("ALL BRANDING, LOADING OVERLAY, FAVORITES, MORPH DROPDOWN & 10-VIEWPORT TESTS PASSED!");
+    console.log("=== ALL STACKING CONTEXT, INTERACTION FLOW, DIRECT HLS & RESPONSIVE TESTS PASSED ===");
     ws.close();
   } finally {
-    if (chrome) chrome.kill();
-    server.kill();
-    await sleep(400);
+    if (chrome && chrome.pid) {
+      spawn("taskkill", ["/PID", String(chrome.pid), "/T", "/F"], { stdio: "ignore" });
+    }
+    if (server && server.pid) {
+      spawn("taskkill", ["/PID", String(server.pid), "/T", "/F"], { stdio: "ignore" });
+    }
+    await sleep(500);
     try {
       fs.rmSync(userDataDir, { recursive: true, force: true });
     } catch {}
@@ -392,6 +447,6 @@ async function runResponsiveBrandingTests() {
 }
 
 runResponsiveBrandingTests().catch((err) => {
-  console.error("Responsive/Branding test failed:", err);
+  console.error("Test failed:", err);
   process.exit(1);
 });

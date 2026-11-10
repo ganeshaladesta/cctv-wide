@@ -1,6 +1,13 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useId } from "react";
+import React, {
+  useState,
+  useEffect,
+  useMemo,
+  useId,
+  useCallback
+} from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Heart, ChevronDown, Check, Search, X } from "lucide-react";
 import { APP_CONFIG } from "@/lib/branding";
@@ -96,8 +103,8 @@ export function LoadingOverlay({
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
-          style={{ backgroundColor: "#090B10" }}
-          className="fixed inset-0 z-[9999] flex flex-col items-center justify-center px-4 select-none overflow-hidden"
+          style={{ backgroundColor: "#090B10", zIndex: 2000 }}
+          className="fixed inset-0 z-[2000] flex flex-col items-center justify-center px-4 select-none overflow-hidden"
           role="status"
           aria-live="polite"
           aria-label={`Memuat ${APP_CONFIG.name}`}
@@ -347,6 +354,7 @@ export interface AnimatedDropdownProps {
   searchPlaceholder?: string;
   className?: string;
   icon?: React.ReactNode;
+  disabled?: boolean;
 }
 
 export function AnimatedDropdown({
@@ -359,11 +367,22 @@ export function AnimatedDropdown({
   searchable = false,
   searchPlaceholder = "Cari...",
   className = "",
-  icon
+  icon,
+  disabled = false
 }: AnimatedDropdownProps) {
   const [query, setQuery] = useState("");
   const highlightScopeId = useId();
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  const [mounted, setMounted] = useState(false);
+  const [panelPos, setPanelPos] = useState<{
+    top: number;
+    left: number;
+    width: number;
+  }>({ top: 0, left: 0, width: 220 });
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const filteredOptions = useMemo(() => {
     if (!searchable || !query.trim()) return options;
@@ -376,6 +395,7 @@ export function AnimatedDropdown({
     focusedIndex,
     setFocusedIndex,
     containerRef,
+    menuRef,
     close,
     toggle
   } = useDropdown<HTMLDivElement>(filteredOptions.length, (idx) => {
@@ -386,29 +406,191 @@ export function AnimatedDropdown({
     }
   });
 
-  const selectedOption = useMemo(
-    () => options.find((o) => o.value === value),
-    [options, value]
-  );
+  const updatePanelPosition = useCallback(() => {
+    if (!containerRef.current || typeof window === "undefined") return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const desiredWidth = Math.max(rect.width, 220);
+    const clampedWidth = Math.min(desiredWidth, vw - 16);
+    const clampedLeft = Math.max(8, Math.min(rect.left, vw - clampedWidth - 8));
+    setPanelPos({
+      top: Math.round(rect.bottom + 6),
+      left: Math.round(clampedLeft),
+      width: Math.round(clampedWidth)
+    });
+  }, [containerRef]);
 
   useEffect(() => {
     if (!isOpen) {
       setQuery("");
       setHoveredIndex(null);
+      return;
     }
-  }, [isOpen]);
+    updatePanelPosition();
+    window.addEventListener("resize", updatePanelPosition);
+    window.addEventListener("scroll", updatePanelPosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePanelPosition);
+      window.removeEventListener("scroll", updatePanelPosition, true);
+    };
+  }, [isOpen, updatePanelPosition]);
+
+  const selectedOption = useMemo(
+    () => options.find((o) => o.value === value),
+    [options, value]
+  );
+
+  const dropdownMenuContent = (
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div
+          ref={menuRef}
+          key="morph-dropdown-panel"
+          role="listbox"
+          aria-label={ariaLabel}
+          data-testid={testId ? `${testId}-menu` : undefined}
+          initial={{ opacity: 0, scale: 0.94, y: -6 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{
+            opacity: 0,
+            scale: 0.95,
+            y: -6,
+            transition: { duration: 0.14, ease: "easeOut" }
+          }}
+          transition={{
+            type: "spring",
+            stiffness: 420,
+            damping: 30,
+            mass: 0.75
+          }}
+          style={{
+            position: "fixed",
+            top: panelPos.top,
+            left: panelPos.left,
+            width: panelPos.width,
+            zIndex: 400,
+            transformOrigin: "top center",
+            backgroundColor: "#090B10",
+            borderColor: "#252A35"
+          }}
+          className="z-[400] rounded-xl border shadow-2xl overflow-hidden backdrop-blur-xl"
+        >
+          {searchable && (
+            <div className="p-2 border-b border-[#252A35] bg-zinc-950/80">
+              <div className="relative flex items-center">
+                <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-2.5 pointer-events-none" />
+                <input
+                  type="text"
+                  data-testid={testId ? `${testId}-search` : undefined}
+                  value={query}
+                  onChange={(e) => {
+                    setQuery(e.target.value);
+                    setFocusedIndex(0);
+                  }}
+                  placeholder={searchPlaceholder}
+                  className="w-full bg-zinc-900/90 border border-[#252A35] rounded-lg pl-8 pr-7 py-1.5 text-xs text-white placeholder:text-zinc-500 focus:outline-none focus:border-white/40"
+                  autoFocus
+                />
+                {query && (
+                  <button
+                    type="button"
+                    onClick={() => setQuery("")}
+                    className="absolute right-2 text-zinc-400 hover:text-white"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          <div className="max-h-64 overflow-y-auto p-1.5 space-y-0.5">
+            {filteredOptions.length === 0 ? (
+              <div className="px-3 py-4 text-center text-xs text-zinc-500">
+                Tidak ada opsi yang cocok
+              </div>
+            ) : (
+              filteredOptions.map((opt, idx) => {
+                const isSelected = opt.value === value;
+                const isHighlighted =
+                  hoveredIndex === idx || focusedIndex === idx;
+
+                return (
+                  <motion.button
+                    key={`${opt.value}-${idx}`}
+                    type="button"
+                    role="option"
+                    aria-selected={isSelected}
+                    initial={{ opacity: 0, x: -4 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{
+                      duration: 0.14,
+                      delay: Math.min(idx * 0.012, 0.12)
+                    }}
+                    onMouseEnter={() => setHoveredIndex(idx)}
+                    onMouseLeave={() => setHoveredIndex(null)}
+                    onClick={() => {
+                      onChange(opt.value);
+                      close();
+                    }}
+                    className={`relative w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg text-xs text-left transition-colors ${
+                      isSelected
+                        ? "text-white font-semibold"
+                        : "text-zinc-300 hover:text-white"
+                    }`}
+                  >
+                    {/* Sliding Highlight Background */}
+                    {(isHighlighted || isSelected) && (
+                      <motion.span
+                        layoutId={`dropdown-highlight-${highlightScopeId}`}
+                        transition={{
+                          type: "spring",
+                          stiffness: 450,
+                          damping: 34
+                        }}
+                        className={`absolute inset-0 rounded-lg ${
+                          isSelected
+                            ? "bg-white/15 border border-white/25"
+                            : "bg-white/[0.07]"
+                        }`}
+                      />
+                    )}
+
+                    <span className="relative z-10 truncate">{opt.label}</span>
+
+                    <span className="relative z-10 flex items-center gap-1.5 shrink-0">
+                      {opt.badge !== undefined && (
+                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-900 text-zinc-400 border border-[#252A35]">
+                          {opt.badge}
+                        </span>
+                      )}
+                      {isSelected && (
+                        <Check className="w-3.5 h-3.5 text-white shrink-0" />
+                      )}
+                    </span>
+                  </motion.button>
+                );
+              })
+            )}
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
 
   return (
     <div
       ref={containerRef}
       data-testid={testId ? `${testId}-wrapper` : undefined}
-      className={`relative select-none ${className}`}
+      style={{ zIndex: isOpen ? 300 : undefined }}
+      className={`relative z-[300] select-none ${className}`}
     >
       {/* Hidden native select for accessibility & automated form queries */}
       <select
         aria-label={ariaLabel}
         data-testid={testId}
         value={value}
+        disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
         className="sr-only"
         tabIndex={-1}
@@ -420,16 +602,23 @@ export function AnimatedDropdown({
         ))}
       </select>
 
-      {/* Trigger Button */}
+      {/* Trigger Button (z-index: 300) */}
       <motion.button
         type="button"
-        whileTap={{ scale: 0.985 }}
-        onClick={toggle}
+        disabled={disabled}
+        whileTap={disabled ? undefined : { scale: 0.985 }}
+        onClick={() => {
+          if (!disabled) {
+            updatePanelPosition();
+            toggle();
+          }
+        }}
         aria-haspopup="listbox"
         aria-expanded={isOpen}
         aria-label={ariaLabel}
         data-testid={testId ? `${testId}-trigger` : undefined}
-        className={`w-full flex items-center justify-between gap-2 bg-zinc-950/90 hover:bg-zinc-900 border text-xs rounded-xl px-3 py-2 text-left transition-colors focus:outline-none ${
+        style={{ zIndex: 300 }}
+        className={`relative z-[300] w-full flex items-center justify-between gap-2 bg-zinc-950/90 hover:bg-zinc-900 border text-xs rounded-xl px-3 py-2 text-left transition-colors focus:outline-none disabled:opacity-50 ${
           isOpen
             ? "border-white/50 text-white shadow-[0_0_0_1px_rgba(255,255,255,0.18)]"
             : "border-[#252A35] text-zinc-200 hover:border-zinc-700"
@@ -450,130 +639,10 @@ export function AnimatedDropdown({
         </motion.span>
       </motion.button>
 
-      {/* Morphing Animated Dropdown Menu */}
-      <AnimatePresence>
-        {isOpen && (
-          <motion.div
-            key="morph-dropdown-panel"
-            role="listbox"
-            aria-label={ariaLabel}
-            data-testid={testId ? `${testId}-menu` : undefined}
-            initial={{ opacity: 0, scale: 0.94, y: -6 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: -6 }}
-            transition={{
-              type: "spring",
-              stiffness: 420,
-              damping: 30,
-              mass: 0.75
-            }}
-            style={{
-              transformOrigin: "top center",
-              backgroundColor: "#090B10",
-              borderColor: "#252A35"
-            }}
-            className="absolute left-0 right-0 mt-1.5 z-50 min-w-[200px] rounded-xl border shadow-2xl overflow-hidden backdrop-blur-xl"
-          >
-            {searchable && options.length > 6 && (
-              <div className="p-2 border-b border-[#252A35] bg-zinc-950/80">
-                <div className="relative flex items-center">
-                  <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-2.5 pointer-events-none" />
-                  <input
-                    type="text"
-                    value={query}
-                    onChange={(e) => {
-                      setQuery(e.target.value);
-                      setFocusedIndex(0);
-                    }}
-                    placeholder={searchPlaceholder}
-                    className="w-full bg-zinc-900/90 border border-[#252A35] rounded-lg pl-8 pr-7 py-1.5 text-xs text-white placeholder:text-zinc-500 focus:outline-none focus:border-white/40"
-                    autoFocus
-                  />
-                  {query && (
-                    <button
-                      type="button"
-                      onClick={() => setQuery("")}
-                      className="absolute right-2 text-zinc-400 hover:text-white"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
-
-            <div className="max-h-60 overflow-y-auto p-1.5 space-y-0.5">
-              {filteredOptions.length === 0 ? (
-                <div className="px-3 py-4 text-center text-xs text-zinc-500">
-                  Tidak ada opsi yang cocok
-                </div>
-              ) : (
-                filteredOptions.map((opt, idx) => {
-                  const isSelected = opt.value === value;
-                  const isHighlighted =
-                    hoveredIndex === idx || focusedIndex === idx;
-
-                  return (
-                    <motion.button
-                      key={`${opt.value}-${idx}`}
-                      type="button"
-                      role="option"
-                      aria-selected={isSelected}
-                      initial={{ opacity: 0, x: -4 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{
-                        duration: 0.14,
-                        delay: Math.min(idx * 0.012, 0.12)
-                      }}
-                      onMouseEnter={() => setHoveredIndex(idx)}
-                      onMouseLeave={() => setHoveredIndex(null)}
-                      onClick={() => {
-                        onChange(opt.value);
-                        close();
-                      }}
-                      className={`relative w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg text-xs text-left transition-colors ${
-                        isSelected
-                          ? "text-white font-semibold"
-                          : "text-zinc-300 hover:text-white"
-                      }`}
-                    >
-                      {/* Sliding Highlight Background */}
-                      {(isHighlighted || isSelected) && (
-                        <motion.span
-                          layoutId={`dropdown-highlight-${highlightScopeId}`}
-                          transition={{
-                            type: "spring",
-                            stiffness: 450,
-                            damping: 34
-                          }}
-                          className={`absolute inset-0 rounded-lg ${
-                            isSelected
-                              ? "bg-white/15 border border-white/25"
-                              : "bg-white/[0.07]"
-                          }`}
-                        />
-                      )}
-
-                      <span className="relative z-10 truncate">{opt.label}</span>
-
-                      <span className="relative z-10 flex items-center gap-1.5 shrink-0">
-                        {opt.badge !== undefined && (
-                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-900 text-zinc-400 border border-[#252A35]">
-                            {opt.badge}
-                          </span>
-                        )}
-                        {isSelected && (
-                          <Check className="w-3.5 h-3.5 text-white shrink-0" />
-                        )}
-                      </span>
-                    </motion.button>
-                  );
-                })
-              )}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Portaled Morphing Dropdown Panel (z-index: 400 in document.body) */}
+      {mounted && typeof document !== "undefined"
+        ? createPortal(dropdownMenuContent, document.body)
+        : dropdownMenuContent}
     </div>
   );
 }
@@ -651,4 +720,3 @@ export function FavoritesButton({
     </motion.button>
   );
 }
-

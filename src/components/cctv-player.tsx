@@ -74,8 +74,8 @@ export function CCTVPlayer({
     [camera.stream_url]
   );
 
-  // For AMG cameras, support both Official Embed iframe and Direct 2K HLS
-  const [amgMode, setAmgMode] = useState<"embed" | "hls">("embed");
+  // For AMG cameras (CCTV Sarinah), Direct HLS is the primary default playback mode, with Embed Resmi as an optional fallback
+  const [amgMode, setAmgMode] = useState<"hls" | "embed">("hls");
 
   const [isVisible, setIsVisible] = useState(true);
   const [loading, setLoading] = useState(true);
@@ -87,7 +87,9 @@ export function CCTVPlayer({
   const [snapshotTick, setSnapshotTick] = useState(0);
 
   const activeProtocol = React.useMemo(() => {
-    if (amgChannelId && amgMode === "hls") return "HLS";
+    if (amgChannelId) {
+      return amgMode === "hls" ? "HLS" : "EMBED";
+    }
     return camera.protocol;
   }, [amgChannelId, amgMode, camera.protocol]);
 
@@ -107,7 +109,12 @@ export function CCTVPlayer({
     return () => obs.disconnect();
   }, []);
 
-  // Reset proxy fallback when camera changes
+  // Reset mode to Direct HLS when camera ID changes
+  useEffect(() => {
+    setAmgMode("hls");
+  }, [camera.id]);
+
+  // Reset proxy fallback when camera or mode changes
   useEffect(() => {
     setUsingProxy(false);
     setRetryCount(0);
@@ -116,15 +123,16 @@ export function CCTVPlayer({
   }, [camera.id, camera.stream_url, amgMode]);
 
   const effectiveStreamUrl = React.useMemo(() => {
-    const raw =
-      amgChannelId && amgMode === "hls"
+    const raw = amgChannelId
+      ? amgMode === "hls"
         ? `https://stream.amg.id/memfs/${amgChannelId}.m3u8`
-        : camera.stream_url;
-    if (usingProxy && raw.startsWith("http")) {
+        : `https://stream.amg.id/playersite_${amgChannelId}.html`
+      : camera.stream_url;
+    if (usingProxy && raw.startsWith("http") && activeProtocol !== "EMBED") {
       return `/api/proxy?url=${encodeURIComponent(raw)}`;
     }
     return raw;
-  }, [camera.stream_url, amgChannelId, amgMode, usingProxy]);
+  }, [camera.stream_url, amgChannelId, amgMode, usingProxy, activeProtocol]);
 
   const reportStatus = useCallback(
     (status: "ONLINE" | "OFFLINE") => {
@@ -380,22 +388,16 @@ export function CCTVPlayer({
           )}
         </div>
 
-        {/* AMG Mode Switcher (Official Embed vs Direct 2K HLS) */}
+        {/* AMG Mode Switcher (Direct HLS Primary Default vs Embed Resmi Fallback) */}
         {amgChannelId && (
-          <div className="pointer-events-auto flex items-center gap-1 bg-zinc-950/90 border border-zinc-700/80 rounded-md p-0.5">
+          <div
+            data-testid="amg-playback-switcher"
+            className="pointer-events-auto flex items-center gap-1 bg-zinc-950/90 border border-zinc-700/80 rounded-md p-0.5"
+          >
             <button
               type="button"
-              onClick={() => setAmgMode("embed")}
-              className={`px-2 py-0.5 rounded text-[10px] font-semibold transition ${
-                amgMode === "embed"
-                  ? "bg-sky-600 text-white"
-                  : "text-zinc-400 hover:text-zinc-200"
-              }`}
-            >
-              Embed Resmi
-            </button>
-            <button
-              type="button"
+              data-testid="amg-mode-hls"
+              aria-pressed={amgMode === "hls"}
               onClick={() => setAmgMode("hls")}
               className={`px-2 py-0.5 rounded text-[10px] font-semibold transition ${
                 amgMode === "hls"
@@ -404,6 +406,19 @@ export function CCTVPlayer({
               }`}
             >
               Direct HLS
+            </button>
+            <button
+              type="button"
+              data-testid="amg-mode-embed"
+              aria-pressed={amgMode === "embed"}
+              onClick={() => setAmgMode("embed")}
+              className={`px-2 py-0.5 rounded text-[10px] font-semibold transition ${
+                amgMode === "embed"
+                  ? "bg-sky-600 text-white"
+                  : "text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              Embed Resmi
             </button>
           </div>
         )}
@@ -419,7 +434,7 @@ export function CCTVPlayer({
         ) : activeProtocol === "EMBED" ? (
           <iframe
             key={`${camera.id}-${retryCount}`}
-            src={formatEmbedUrl(camera.stream_url)}
+            src={formatEmbedUrl(effectiveStreamUrl)}
             title={camera.name}
             loading="lazy"
             className="w-full h-full border-0 min-h-[180px] aspect-video"
@@ -630,4 +645,5 @@ export function CCTVPlayer({
   );
 }
 
+export const CameraVideoPlayer = CCTVPlayer;
 export default CCTVPlayer;

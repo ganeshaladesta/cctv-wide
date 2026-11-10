@@ -4,6 +4,17 @@
 
 :root {
   color-scheme: dark;
+  --z-map-tiles: 0;
+  --z-map-markers: 10;
+  --z-map-controls: 20;
+  --z-map-preview: 30;
+  --z-dashboard-dropdown: 100;
+  --z-dropdown-trigger: 300;
+  --z-dropdown-panel: 400;
+  --z-modal-backdrop: 900;
+  --z-modal-content: 1000;
+  --z-modal-tooltip: 1100;
+  --z-loading-overlay: 2000;
 }
 
 body {
@@ -31,10 +42,43 @@ body {
   background: rgba(16, 185, 129, 0.7);
 }
 
-/* Leaflet Dark Theme Overrides for OpenStreetMap */
+/* Isolated Map Stacking Context — Prevents any Leaflet pane or control from escaping z-index: 0 */
+.map-container {
+  position: relative;
+  isolation: isolate;
+  z-index: var(--z-map-tiles, 0);
+}
+
+/* Leaflet Dark Theme & Strict Stacking Hierarchy Overrides */
 .leaflet-container {
+  position: relative !important;
+  isolation: isolate !important;
+  z-index: var(--z-map-tiles, 0) !important;
   background: #09090b !important;
   font-family: inherit;
+}
+
+.leaflet-map-pane,
+.leaflet-pane,
+.leaflet-tile-pane {
+  z-index: var(--z-map-tiles, 0) !important;
+}
+
+.leaflet-overlay-pane,
+.leaflet-shadow-pane,
+.leaflet-marker-pane {
+  z-index: var(--z-map-markers, 10) !important;
+}
+
+.leaflet-tooltip-pane,
+.leaflet-popup-pane {
+  z-index: 15 !important;
+}
+
+.leaflet-top,
+.leaflet-bottom,
+.leaflet-control {
+  z-index: var(--z-map-controls, 20) !important;
 }
 
 /* Optional dark filter on standard OpenStreetMap tiles to match dark dashboard */

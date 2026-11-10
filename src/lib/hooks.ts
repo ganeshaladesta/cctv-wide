@@ -168,6 +168,7 @@ export function useDropdown<T extends HTMLElement = HTMLDivElement>(
   const [isOpen, setIsOpen] = useState(false);
   const [focusedIndex, setFocusedIndex] = useState<number>(-1);
   const containerRef = useRef<T | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
   const close = useCallback(() => {
     setIsOpen(false);
@@ -181,10 +182,11 @@ export function useDropdown<T extends HTMLElement = HTMLDivElement>(
   useEffect(() => {
     if (!isOpen) return;
     const handlePointerDown = (e: MouseEvent | TouchEvent) => {
-      if (
-        containerRef.current &&
-        !containerRef.current.contains(e.target as Node)
-      ) {
+      const target = e.target as Node;
+      const inContainer =
+        containerRef.current && containerRef.current.contains(target);
+      const inMenu = menuRef.current && menuRef.current.contains(target);
+      if (!inContainer && !inMenu) {
         close();
       }
     };
@@ -221,6 +223,7 @@ export function useDropdown<T extends HTMLElement = HTMLDivElement>(
     focusedIndex,
     setFocusedIndex,
     containerRef,
+    menuRef,
     close,
     toggle
   };

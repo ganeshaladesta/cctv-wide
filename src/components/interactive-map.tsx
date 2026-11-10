@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useEffect, useRef, useState, useMemo } from "react";
-import Link from "next/link";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import "leaflet.markercluster";
@@ -12,27 +11,21 @@ import {
   Maximize2,
   Minimize2,
   RotateCcw,
-  PlusSquare,
-  Eye,
-  Navigation,
-  ExternalLink,
-  CheckCircle2,
-  XCircle,
-  Building2,
-  MapPin
+  Navigation
 } from "lucide-react";
 import { Camera, CompactMarker, Province } from "@/lib/types";
-import CCTVPlayer from "@/components/cctv-player";
-import { FavoritesButton } from "@/components/motion-ui";
+import { CameraMapPreview } from "@/components/camera-interfaces";
 
 interface InteractiveMapProps {
   markers: CompactMarker[];
   provinces: Province[];
   selectedProvince?: string;
   selectedCity?: string;
-  selectedCamera: Camera | null;
+  previewCamera: Camera | null;
   loadingMarkers?: boolean;
-  onSelectCamera: (camera: Camera) => void;
+  onMarkerClick: (cameraId: string, camera: Camera) => void;
+  onClosePreview: () => void;
+  onOpenFullDetail: (cameraId: string, camera: Camera) => void;
   onAddToMultiView: (camera: Camera) => void;
 }
 
@@ -47,7 +40,12 @@ export function isValidLatLng(lat: unknown, lng: unknown): boolean {
   if (typeof lat !== "number" || typeof lng !== "number") {
     return false;
   }
-  if (Number.isNaN(lat) || Number.isNaN(lng) || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+  if (
+    Number.isNaN(lat) ||
+    Number.isNaN(lng) ||
+    !Number.isFinite(lat) ||
+    !Number.isFinite(lng)
+  ) {
     return false;
   }
   return lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
@@ -102,9 +100,11 @@ export default function InteractiveMap({
   provinces,
   selectedProvince,
   selectedCity,
-  selectedCamera,
+  previewCamera,
   loadingMarkers = false,
-  onSelectCamera,
+  onMarkerClick,
+  onClosePreview,
+  onOpenFullDetail,
   onAddToMultiView
 }: InteractiveMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -114,15 +114,15 @@ export default function InteractiveMap({
   const plainLayerGroupRef = useRef<L.LayerGroup | null>(null);
   const provincesRef = useRef<Province[]>(provinces);
   provincesRef.current = provinces;
+  const onMarkerClickRef = useRef(onMarkerClick);
+  onMarkerClickRef.current = onMarkerClick;
 
   const [darkFilter, setDarkFilter] = useState(true);
   const [clustering, setClustering] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [previewCam, setPreviewCam] = useState<Camera | null>(null);
 
   // Strict coordinate validation:
   // latitude >= -90 && latitude <= 90 && longitude >= -180 && longitude <= 180
-  // Excludes null, undefined, NaN, and invalid coordinates.
   const validMarkers = useMemo(() => {
     const out: CompactMarker[] = [];
     for (let i = 0; i < markers.length; i++) {
@@ -250,7 +250,7 @@ export default function InteractiveMap({
         );
         marker.on("click", () => {
           const cam = markerTupleToCamera(m, provincesRef.current);
-          setPreviewCam(cam);
+          onMarkerClickRef.current(cam.id, cam);
         });
         leafletMarkers[i] = marker;
       }
@@ -277,7 +277,7 @@ export default function InteractiveMap({
         );
         circle.on("click", () => {
           const cam = markerTupleToCamera(m, provincesRef.current);
-          setPreviewCam(cam);
+          onMarkerClickRef.current(cam.id, cam);
         });
         circle.addTo(plainGroup);
       }
@@ -309,16 +309,15 @@ export default function InteractiveMap({
     }
   }, [selectedProvince, selectedCity, provinces, validMarkers]);
 
-  // Fly to selected camera
+  // Fly to previewCamera when a map marker is clicked
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !selectedCamera) return;
-    if (!isValidLatLng(selectedCamera.latitude, selectedCamera.longitude)) return;
-    setPreviewCam(selectedCamera);
-    map.flyTo([selectedCamera.latitude, selectedCamera.longitude], 15, {
-      duration: 1.0
+    if (!map || !previewCamera) return;
+    if (!isValidLatLng(previewCamera.latitude, previewCamera.longitude)) return;
+    map.flyTo([previewCamera.latitude, previewCamera.longitude], 15, {
+      duration: 0.85
     });
-  }, [selectedCamera]);
+  }, [previewCamera]);
 
   const handleResetView = () => {
     mapRef.current?.flyTo([-2.5489, 118.0149], 5, { duration: 1.0 });
@@ -352,26 +351,28 @@ export default function InteractiveMap({
     }
   };
 
-  const previewProvinceSlug = previewCam
-    ? provinces.find((p) => p.id === previewCam.province_id)?.slug ||
-      previewCam.province_id.replace(/^prov-/, "")
-    : "dki-jakarta";
-
   return (
     <div
       ref={wrapRef}
-      className={`relative w-full h-full min-h-[420px] sm:min-h-[540px] bg-zinc-950 rounded-xl overflow-hidden border border-zinc-800 ${
+      data-testid="map-container"
+      style={{ position: "relative", isolation: "isolate", zIndex: 0 }}
+      className={`map-container relative z-0 w-full h-full min-h-[420px] sm:min-h-[540px] bg-zinc-950 rounded-xl overflow-hidden border border-[#252A35] ${
         darkFilter ? "osm-dark-tiles" : ""
       }`}
     >
-      {/* Map Canvas */}
+      {/* Map Canvas (z-index: 0) */}
       <div
         ref={mapContainerRef}
+        style={{ zIndex: 0 }}
         className="w-full h-full min-h-[420px] sm:min-h-[540px] z-0"
       />
 
-      {/* Responsive Top Overlay Controls (Wraps cleanly on 320px mobile without collision) */}
-      <div className="absolute top-2.5 inset-x-2.5 z-[400] flex flex-wrap items-center justify-between gap-1.5 pointer-events-none">
+      {/* Responsive Top Overlay Controls (z-index: 20 inside isolated map container) */}
+      <div
+        data-testid="map-controls-bar"
+        style={{ zIndex: 20 }}
+        className="absolute top-2.5 inset-x-2.5 z-[20] flex flex-wrap items-center justify-between gap-1.5 pointer-events-none"
+      >
         {/* Left: Map Status Pill & Cluster Toggle */}
         <div className="flex flex-wrap items-center gap-1.5 pointer-events-auto max-w-full">
           <div
@@ -407,12 +408,17 @@ export default function InteractiveMap({
           </button>
         </div>
 
-        {/* Right: OSM Theme & Fullscreen Controls */}
-        <div className="flex flex-wrap items-center gap-1 sm:gap-1.5 pointer-events-auto">
+        {/* Right: OSM Basemap Switcher & Navigation Controls (z-index: 20) */}
+        <div
+          data-testid="osm-basemap-switcher"
+          style={{ zIndex: 20 }}
+          className="flex flex-wrap items-center gap-1 sm:gap-1.5 pointer-events-auto"
+        >
           <div className="flex items-center bg-zinc-950/90 backdrop-blur-md border border-zinc-800 rounded-lg p-1 shadow-lg">
             <Layers className="w-3.5 h-3.5 text-amber-400 ml-1 mr-1 hidden xs:inline" />
             <button
               type="button"
+              data-testid="osm-dark-btn"
               onClick={() => setDarkFilter(true)}
               className={`px-1.5 sm:px-2 py-1 rounded text-[10px] sm:text-[11px] font-medium transition ${
                 darkFilter
@@ -424,6 +430,7 @@ export default function InteractiveMap({
             </button>
             <button
               type="button"
+              data-testid="osm-standard-btn"
               onClick={() => setDarkFilter(false)}
               className={`px-1.5 sm:px-2 py-1 rounded text-[10px] sm:text-[11px] font-medium transition ${
                 !darkFilter
@@ -468,105 +475,14 @@ export default function InteractiveMap({
         </div>
       </div>
 
-      {/* Floating Camera Information & Live Preview Card when Marker is Clicked */}
-      {previewCam && (
-        <div
-          data-testid="map-camera-popup"
-          className="absolute bottom-3 left-2.5 right-2.5 sm:left-4 sm:right-auto z-[450] sm:w-[380px] rounded-xl bg-zinc-950/95 backdrop-blur-xl border border-zinc-700/80 shadow-2xl overflow-hidden pointer-events-auto"
-        >
-          {/* Header: Name, Status Badge, Close Button */}
-          <div className="flex items-start justify-between gap-2 px-3.5 py-2.5 bg-zinc-900 border-b border-zinc-800">
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1.5">
-                <span
-                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
-                    previewCam.status === "ONLINE"
-                      ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40"
-                      : "bg-red-500/20 text-red-400 border border-red-500/40"
-                  }`}
-                >
-                  {previewCam.status === "ONLINE" ? (
-                    <CheckCircle2 className="w-2.5 h-2.5" />
-                  ) : (
-                    <XCircle className="w-2.5 h-2.5" />
-                  )}
-                  {previewCam.status}
-                </span>
-                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300">
-                  {previewCam.protocol}
-                </span>
-              </div>
-              <h4 className="text-xs font-bold text-zinc-100 truncate mt-1">
-                {previewCam.name}
-              </h4>
-            </div>
-            <div className="flex items-center gap-1.5 shrink-0">
-              <FavoritesButton
-                cameraId={previewCam.id}
-                cameraName={previewCam.name}
-                size="sm"
-              />
-              <button
-                type="button"
-                onClick={() => setPreviewCam(null)}
-                className="text-xs text-zinc-400 hover:text-white px-2 py-0.5 rounded bg-zinc-800 shrink-0"
-              >
-                ✕ Tutup
-              </button>
-            </div>
-          </div>
-
-          {/* Metadata Strip: City, Province & Source Agency */}
-          <div className="px-3.5 py-2 bg-zinc-900/60 border-b border-zinc-800/80 space-y-1 text-[11px]">
-            <div className="flex items-center gap-1.5 text-zinc-300 truncate">
-              <MapPin className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-              <span className="truncate">
-                {previewCam.city_name}, {previewCam.province_name}
-              </span>
-            </div>
-            <div className="flex items-center gap-1.5 text-zinc-400 truncate">
-              <Building2 className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-              <span className="truncate">{previewCam.source_name}</span>
-            </div>
-          </div>
-
-          {/* Live Camera Stream / Snapshot Preview */}
-          <div className="h-[200px] w-full bg-black">
-            <CCTVPlayer camera={previewCam} compact />
-          </div>
-
-          {/* Action Buttons: Detail Modal, Detail Page Link, Multi-View */}
-          <div className="p-2.5 bg-zinc-900/95 border-t border-zinc-800 flex items-center justify-between gap-1.5">
-            <button
-              type="button"
-              onClick={() => onSelectCamera(previewCam)}
-              className="flex-1 inline-flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs font-medium text-zinc-100 transition"
-            >
-              <Eye className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Detail</span>
-            </button>
-
-            <Link
-              href={`/kamera/${encodeURIComponent(
-                previewProvinceSlug
-              )}/${encodeURIComponent(previewCam.id)}`}
-              className="flex-1 inline-flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs font-medium text-sky-400 hover:text-sky-300 transition"
-            >
-              <ExternalLink className="w-3.5 h-3.5" />
-              <span>Halaman Kamera</span>
-            </Link>
-
-            <button
-              type="button"
-              onClick={() => onAddToMultiView(previewCam)}
-              className="flex-1 inline-flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-medium text-white transition"
-            >
-              <PlusSquare className="w-3.5 h-3.5" />
-              <span>+ Multi-View</span>
-            </button>
-          </div>
-        </div>
-      )}
+      {/* Compact Floating Map Preview — Rendered ONLY when interaction.type === "map-preview" */}
+      <CameraMapPreview
+        camera={previewCamera}
+        provinces={provinces}
+        onClose={onClosePreview}
+        onOpenFullDetail={onOpenFullDetail}
+        onAddToMultiView={onAddToMultiView}
+      />
     </div>
   );
 }

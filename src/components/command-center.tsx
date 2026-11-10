@@ -1,6 +1,12 @@
 "use client";
 
-import React, { useEffect, useState, useCallback, useMemo } from "react";
+import React, {
+  useEffect,
+  useState,
+  useCallback,
+  useMemo,
+  useRef
+} from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import {
@@ -10,9 +16,7 @@ import {
   CheckCircle2,
   XCircle,
   Globe2,
-  ExternalLink,
   PlusSquare,
-  Activity,
   ChevronLeft,
   ChevronRight,
   Shield,
@@ -40,7 +44,11 @@ import {
   FavoritesButton
 } from "@/components/motion-ui";
 import { FavoritesPage } from "@/components/favorites-view";
-import CCTVPlayer from "@/components/cctv-player";
+import {
+  CameraInteraction,
+  CameraDetailModal,
+  CameraVideoPlayer
+} from "@/components/camera-interfaces";
 import MultiViewGrid from "@/components/multi-view-grid";
 
 const InteractiveMap = dynamic(() => import("@/components/interactive-map"), {
@@ -95,12 +103,29 @@ export default function CommandCenter({
   const [multiViewCameras, setMultiViewCameras] = useState<Camera[]>(
     initialCameras.slice(0, 4)
   );
-  const [detailCamera, setDetailCamera] = useState<Camera | null>(null);
+
+  // Mutually Exclusive Camera Interaction State Machine
+  const [cameraInteraction, setCameraInteraction] =
+    useState<CameraInteraction>({ type: "none" });
   const [nearbyCameras, setNearbyCameras] = useState<Camera[]>([]);
   const [probeStatus, setProbeStatus] = useState<{
     loading: boolean;
     result?: string;
   }>({ loading: false });
+
+  // Shared camera detail cache to avoid duplicate API requests
+  const cameraDetailCacheRef = useRef<
+    Map<string, { camera: Camera; nearby: Camera[] }>
+  >(new Map());
+
+  // Seed cache with initialCameras and current cameras page
+  useEffect(() => {
+    for (const c of cameras) {
+      if (!cameraDetailCacheRef.current.has(c.id)) {
+        cameraDetailCacheRef.current.set(c.id, { camera: c, nearby: [] });
+      }
+    }
+  }, [cameras]);
 
   // URL query hydration on mount
   useEffect(() => {
@@ -130,15 +155,13 @@ export default function CommandCenter({
     }
   }, []);
 
-  // Load cities & sources when province changes
+  // Load cities (all cities when no province selected, or filtered by province)
   useEffect(() => {
-    if (!selectedProvince) {
-      setCities([]);
-      setSelectedCity("");
-      return;
-    }
     setSelectedCity("");
-    fetch(`/api/cities?province_id=${encodeURIComponent(selectedProvince)}`)
+    const url = selectedProvince
+      ? `/api/cities?province_id=${encodeURIComponent(selectedProvince)}`
+      : `/api/cities`;
+    fetch(url)
       .then((r) => r.json())
       .then((j) => setCities(j.data || []))
       .catch(() => {});
@@ -218,37 +241,127 @@ export default function CommandCenter({
 
   useEffect(() => {
     const controller = new AbortController();
-    const timer = setTimeout(() => {
-      fetchFilteredCameras(1, controller.signal);
-    }, searchQuery ? 180 : 0);
+    const timer = setTimeout(
+      () => {
+        fetchFilteredCameras(1, controller.signal);
+      },
+      searchQuery ? 180 : 0
+    );
     return () => {
       clearTimeout(timer);
       controller.abort();
     };
   }, [fetchFilteredCameras, searchQuery]);
 
-  const handleOpenCameraDetail = async (cam: Camera) => {
-    setDetailCamera(cam);
-    setProbeStatus({ loading: false });
-    try {
-      const res = await fetch(`/api/cameras/${encodeURIComponent(cam.id)}`);
-      if (res.ok) {
-        const json = await res.json();
-        if (json.data) setDetailCamera(json.data);
-        setNearbyCameras(json.nearby || []);
+  const hydrateCameraDetail = useCallback(
+    async (cameraId: string, fallbackCam?: Camera) => {
+      const cached = cameraDetailCacheRef.current.get(cameraId);
+      if (cached && cached.nearby.length > 0) {
+        setNearbyCameras(cached.nearby);
+        setCameraInteraction((prev) =>
+          prev.type !== "none" && prev.cameraId === cameraId
+            ? { ...prev, camera: cached.camera }
+            : prev
+        );
+        return;
       }
-    } catch {}
-  };
 
-  const handleAddToMultiView = (cam: Camera) => {
+      try {
+        const res = await fetch(
+          `/api/cameras/${encodeURIComponent(cameraId)}`
+        );
+        if (res.ok) {
+          const json = await res.json();
+          const fullCam: Camera | undefined = json.data || fallbackCam;
+          const near: Camera[] = Array.isArray(json.nearby) ? json.nearby : [];
+          if (fullCam) {
+            cameraDetailCacheRef.current.set(cameraId, {
+              camera: fullCam,
+              nearby: near
+            });
+            setNearbyCameras(near);
+            setCameraInteraction((prev) =>
+              prev.type !== "none" && prev.cameraId === cameraId
+                ? { ...prev, camera: fullCam }
+                : prev
+            );
+          }
+        }
+      } catch {}
+    },
+    []
+  );
+
+  // 1. Directory Click Handler -> Opens ONLY Full Camera Detail Modal
+  const handleDirectoryCameraClick = useCallback(
+    (cameraId: string, cam?: Camera) => {
+      const resolved =
+        cam ||
+        cameraDetailCacheRef.current.get(cameraId)?.camera ||
+        cameras.find((c) => c.id === cameraId);
+      setProbeStatus({ loading: false });
+      setCameraInteraction({
+        type: "camera-detail",
+        cameraId,
+        camera: resolved
+      });
+      hydrateCameraDetail(cameraId, resolved);
+    },
+    [cameras, hydrateCameraDetail]
+  );
+
+  // 2. Map Marker Click Handler -> Opens ONLY Compact Floating Map Preview
+  const handleMapMarkerClick = useCallback(
+    (cameraId: string, cam?: Camera) => {
+      const resolved =
+        cam ||
+        cameraDetailCacheRef.current.get(cameraId)?.camera ||
+        cameras.find((c) => c.id === cameraId);
+      setCameraInteraction({
+        type: "map-preview",
+        cameraId,
+        camera: resolved
+      });
+    },
+    [cameras]
+  );
+
+  // 3. Transition from Compact Map Preview -> Full Camera Detail Modal
+  const handleOpenFullDetail = useCallback(
+    (cameraId: string, cam?: Camera) => {
+      const resolved =
+        cam ||
+        (cameraInteraction.type !== "none"
+          ? cameraInteraction.camera
+          : undefined) ||
+        cameraDetailCacheRef.current.get(cameraId)?.camera ||
+        cameras.find((c) => c.id === cameraId);
+      setProbeStatus({ loading: false });
+      setCameraInteraction({
+        type: "camera-detail",
+        cameraId,
+        camera: resolved
+      });
+      hydrateCameraDetail(cameraId, resolved);
+    },
+    [cameraInteraction, cameras, hydrateCameraDetail]
+  );
+
+  // 4. Close any open camera interface
+  const handleCloseCameraInterface = useCallback(() => {
+    setCameraInteraction({ type: "none" });
+  }, []);
+
+  const handleAddToMultiView = useCallback((cam: Camera) => {
     setMultiViewCameras((prev) => {
       if (prev.some((c) => c.id === cam.id)) return prev;
       return [...prev, cam].slice(-9);
     });
+    setCameraInteraction({ type: "none" });
     setActiveTab("multiview");
-  };
+  }, []);
 
-  const handleVerifyStreamLive = async (cam: Camera) => {
+  const handleVerifyStreamLive = useCallback(async (cam: Camera) => {
     setProbeStatus({ loading: true });
     try {
       const res = await fetch(`/api/health?id=${encodeURIComponent(cam.id)}`);
@@ -258,14 +371,16 @@ export default function CommandCenter({
         result: `${json.status} • HTTP ${json.httpStatus} • ${json.latencyMs}ms • Protocol: ${json.protocol}`
       });
       if (json.status === "ONLINE" || json.status === "OFFLINE") {
-        setDetailCamera((prev) =>
-          prev ? { ...prev, status: json.status } : null
+        setCameraInteraction((prev) =>
+          prev.type === "camera-detail" && prev.camera
+            ? { ...prev, camera: { ...prev.camera, status: json.status } }
+            : prev
         );
       }
     } catch {
       setProbeStatus({ loading: false, result: "Gagal memverifikasi stream" });
     }
-  };
+  }, []);
 
   const handleResetFilters = () => {
     setSearchQuery("");
@@ -350,6 +465,16 @@ export default function CommandCenter({
     [multiViewCameras]
   );
 
+  const activePreviewCamera =
+    cameraInteraction.type === "map-preview"
+      ? cameraInteraction.camera || null
+      : null;
+
+  const activeDetailCamera =
+    cameraInteraction.type === "camera-detail"
+      ? cameraInteraction.camera || null
+      : null;
+
   return (
     <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-zinc-950 text-zinc-100 flex flex-col">
       {/* Unified Institutional Responsive Header */}
@@ -359,7 +484,7 @@ export default function CommandCenter({
         multiViewCount={multiViewCameras.length}
       />
 
-      {/* National Telemetry KPI Strip (Responsive 2-col on mobile/tablet, 6-col on desktop) */}
+      {/* National Telemetry KPI Strip */}
       <section
         aria-label="Statistik Pemantauan Nasional"
         className="border-b border-[#252A35] bg-zinc-900/40 px-3 sm:px-4 lg:px-6 py-2.5 sm:py-3"
@@ -427,14 +552,18 @@ export default function CommandCenter({
         </div>
       </section>
 
-      {/* Global Search & Animated Morph Dropdown Filter Bar */}
-      <section className="px-3 sm:px-4 lg:px-6 py-2.5 sm:py-3 bg-zinc-950 border-b border-[#252A35]">
+      {/* Global Search & Animated Morph Dropdown Filter Bar (z-index: 100 container, triggers z-index: 300, portaled panels z-index: 400) */}
+      <section
+        style={{ position: "relative", zIndex: 100 }}
+        className="relative z-[100] px-3 sm:px-4 lg:px-6 py-2.5 sm:py-3 bg-zinc-950 border-b border-[#252A35]"
+      >
         <div className="max-w-[1600px] mx-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 items-center gap-2">
           {/* Search Input */}
           <div className="relative sm:col-span-2 lg:col-span-3 min-w-0">
             <Search className="w-4 h-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="text"
+              data-testid="global-camera-search"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Cari nama kamera, simpang jalan, kota, provinsi..."
@@ -539,25 +668,30 @@ export default function CommandCenter({
       </section>
 
       {/* Main Workspace Area */}
-      <main className="flex-1 max-w-[1600px] w-full mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-4">
+      <main className="relative z-0 flex-1 max-w-[1600px] w-full mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-4">
         {activeTab === "map" && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-            {/* Left Interactive Map (8 cols on desktop) */}
+            {/* Left Interactive Map (8 cols on desktop, isolated at z-index: 0) */}
             <div className="lg:col-span-8 h-[460px] sm:h-[560px] lg:h-[620px] min-w-0">
               <InteractiveMap
                 markers={markers}
                 provinces={provinces}
                 selectedProvince={selectedProvince}
                 selectedCity={selectedCity}
-                selectedCamera={detailCamera}
+                previewCamera={activePreviewCamera}
                 loadingMarkers={loadingMarkers}
-                onSelectCamera={handleOpenCameraDetail}
+                onMarkerClick={handleMapMarkerClick}
+                onClosePreview={handleCloseCameraInterface}
+                onOpenFullDetail={handleOpenFullDetail}
                 onAddToMultiView={handleAddToMultiView}
               />
             </div>
 
-            {/* Right Live Camera Feed Sidebar (4 cols on desktop) */}
-            <div className="lg:col-span-4 h-[480px] sm:h-[560px] lg:h-[620px] rounded-xl bg-zinc-900/70 border border-[#252A35] flex flex-col overflow-hidden min-w-0">
+            {/* Right Live Camera Directory Sidebar (DAFTAR KAMERA — 4 cols on desktop) */}
+            <div
+              data-testid="daftar-kamera-sidebar"
+              className="lg:col-span-4 h-[480px] sm:h-[560px] lg:h-[620px] rounded-xl bg-zinc-900/70 border border-[#252A35] flex flex-col overflow-hidden min-w-0"
+            >
               <div className="px-3.5 py-2.5 bg-zinc-900 border-b border-[#252A35] flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 min-w-0">
                   <Filter className="w-3.5 h-3.5 text-sky-400 shrink-0" />
@@ -583,11 +717,13 @@ export default function CommandCenter({
                   cameras.map((cam) => (
                     <div
                       key={cam.id}
+                      data-testid={`directory-camera-row-${cam.id}`}
                       className="p-3 hover:bg-zinc-800/50 transition flex items-start justify-between gap-2"
                     >
                       <button
                         type="button"
-                        onClick={() => handleOpenCameraDetail(cam)}
+                        data-testid={`directory-camera-btn-${cam.id}`}
+                        onClick={() => handleDirectoryCameraClick(cam.id, cam)}
                         className="text-left min-w-0 flex-1"
                       >
                         <div className="flex items-center gap-1.5">
@@ -662,7 +798,7 @@ export default function CommandCenter({
           <MultiViewGrid
             cameras={multiViewCameras}
             onSetCameras={setMultiViewCameras}
-            onSelectDetail={handleOpenCameraDetail}
+            onSelectDetail={(cam) => handleDirectoryCameraClick(cam.id, cam)}
           />
         )}
 
@@ -675,7 +811,7 @@ export default function CommandCenter({
                   className="rounded-xl bg-zinc-900/80 border border-[#252A35] overflow-hidden flex flex-col min-w-0"
                 >
                   <div className="h-[190px] sm:h-[200px]">
-                    <CCTVPlayer camera={cam} autoPlay={false} compact />
+                    <CameraVideoPlayer camera={cam} autoPlay={false} compact />
                   </div>
                   <div className="p-3 flex items-center justify-between gap-2 bg-zinc-900">
                     <div className="min-w-0 flex-1">
@@ -694,7 +830,7 @@ export default function CommandCenter({
                       />
                       <button
                         type="button"
-                        onClick={() => handleOpenCameraDetail(cam)}
+                        onClick={() => handleDirectoryCameraClick(cam.id, cam)}
                         className="px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-[11px] text-zinc-200"
                       >
                         Detail
@@ -830,189 +966,24 @@ export default function CommandCenter({
 
         {activeTab === "favorites" && (
           <FavoritesPage
-            onSelectCamera={handleOpenCameraDetail}
+            onSelectCamera={(cam) => handleDirectoryCameraClick(cam.id, cam)}
             onToggleMultiView={handleAddToMultiView}
             multiViewIds={multiViewIdSet}
           />
         )}
       </main>
 
-      {/* Camera Detail Modal */}
-      {detailCamera && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-2.5 sm:p-4">
-          <div className="w-full max-w-4xl rounded-2xl bg-zinc-950 border border-[#252A35] shadow-2xl overflow-hidden max-h-[92vh] flex flex-col">
-            <div className="px-4 sm:px-5 py-3 bg-zinc-900 border-b border-[#252A35] flex flex-wrap items-center justify-between gap-2">
-              <div className="min-w-0 flex-1">
-                <h3 className="text-sm sm:text-base font-bold text-white truncate">
-                  {detailCamera.name}
-                </h3>
-                <p className="text-xs text-zinc-400 truncate">
-                  {detailCamera.city_name}, {detailCamera.province_name} • ID:{" "}
-                  <span className="font-mono text-zinc-300">
-                    {detailCamera.id}
-                  </span>
-                </p>
-              </div>
-              <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-                <FavoritesButton
-                  cameraId={detailCamera.id}
-                  cameraName={detailCamera.name}
-                  size="md"
-                  showLabel
-                />
-                <Link
-                  href={`/kamera/${encodeURIComponent(
-                    provinces.find((p) => p.id === detailCamera.province_id)
-                      ?.slug || detailCamera.province_id.replace("prov-", "")
-                  )}/${encodeURIComponent(detailCamera.id)}`}
-                  className="px-2.5 sm:px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs font-medium text-zinc-200"
-                >
-                  Halaman Penuh
-                </Link>
-                <button
-                  type="button"
-                  onClick={() => setDetailCamera(null)}
-                  className="px-2.5 sm:px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold text-zinc-200"
-                >
-                  ✕ Tutup
-                </button>
-              </div>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-3.5 sm:p-5 grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-5">
-              <div className="lg:col-span-8 h-[240px] sm:h-[380px]">
-                <CCTVPlayer camera={detailCamera} />
-              </div>
-
-              <div className="lg:col-span-4 space-y-3 text-xs min-w-0">
-                <div className="p-3.5 rounded-xl bg-zinc-900 border border-[#252A35] space-y-2">
-                  <h4 className="font-bold text-zinc-200 uppercase tracking-wider text-[11px]">
-                    Informasi Teknis Kamera
-                  </h4>
-                  <div className="flex justify-between gap-2 py-1 border-b border-zinc-800/80">
-                    <span className="text-zinc-400 shrink-0">Provinsi</span>
-                    <span className="text-zinc-100 font-medium text-right truncate">
-                      {detailCamera.province_name}
-                    </span>
-                  </div>
-                  <div className="flex justify-between gap-2 py-1 border-b border-zinc-800/80">
-                    <span className="text-zinc-400 shrink-0">
-                      Kota / Kabupaten
-                    </span>
-                    <span className="text-zinc-100 font-medium text-right truncate">
-                      {detailCamera.city_name}
-                    </span>
-                  </div>
-                  <div className="flex justify-between gap-2 py-1 border-b border-zinc-800/80">
-                    <span className="text-zinc-400 shrink-0">
-                      Instansi Sumber
-                    </span>
-                    <span className="text-sky-400 font-medium text-right truncate">
-                      {detailCamera.source_name}
-                    </span>
-                  </div>
-                  <div className="flex justify-between gap-2 py-1 border-b border-zinc-800/80">
-                    <span className="text-zinc-400 shrink-0">
-                      Koordinat GPS
-                    </span>
-                    <span className="text-zinc-200 font-mono text-right">
-                      {detailCamera.latitude}, {detailCamera.longitude}
-                    </span>
-                  </div>
-                  <div className="flex justify-between gap-2 py-1 border-b border-zinc-800/80">
-                    <span className="text-zinc-400 shrink-0">
-                      Protokol Stream
-                    </span>
-                    <span className="text-zinc-200 font-mono">
-                      {detailCamera.protocol}
-                    </span>
-                  </div>
-                  <div className="flex justify-between gap-2 py-1">
-                    <span className="text-zinc-400 shrink-0">
-                      Status Terakhir
-                    </span>
-                    <span
-                      className={`font-bold ${
-                        detailCamera.status === "ONLINE"
-                          ? "text-emerald-400"
-                          : "text-red-400"
-                      }`}
-                    >
-                      {detailCamera.status}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="flex flex-col gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handleAddToMultiView(detailCamera)}
-                    className="w-full py-2 px-3 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-semibold flex items-center justify-center gap-1.5 transition"
-                  >
-                    <PlusSquare className="w-4 h-4" />
-                    <span>Tambahkan ke Multi-View Wall</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => handleVerifyStreamLive(detailCamera)}
-                    disabled={probeStatus.loading}
-                    className="w-full py-2 px-3 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-medium flex items-center justify-center gap-1.5 transition"
-                  >
-                    <Activity className="w-4 h-4 text-amber-400" />
-                    <span>
-                      {probeStatus.loading
-                        ? "Memeriksa Koneksi Stream..."
-                        : "Cek Kesehatan Stream (Live Probe)"}
-                    </span>
-                  </button>
-
-                  {probeStatus.result && (
-                    <div className="p-2 rounded bg-zinc-900 border border-zinc-700 text-[11px] font-mono text-emerald-300 break-words">
-                      {probeStatus.result}
-                    </div>
-                  )}
-
-                  <a
-                    href={detailCamera.source_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="w-full py-2 px-3 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-[#252A35] text-zinc-300 flex items-center justify-center gap-1.5 transition"
-                  >
-                    <span>Kunjungi Portal Resmi Pemerintah</span>
-                    <ExternalLink className="w-3.5 h-3.5" />
-                  </a>
-                </div>
-
-                {nearbyCameras.length > 0 && (
-                  <div className="p-3 rounded-xl bg-zinc-900 border border-[#252A35]">
-                    <h5 className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-2">
-                      Kamera Terdekat
-                    </h5>
-                    <div className="space-y-1.5 max-h-[140px] overflow-y-auto">
-                      {nearbyCameras.map((nc) => (
-                        <button
-                          key={nc.id}
-                          type="button"
-                          onClick={() => handleOpenCameraDetail(nc)}
-                          className="w-full text-left px-2 py-1.5 rounded hover:bg-zinc-800 flex items-center justify-between gap-2"
-                        >
-                          <span className="truncate text-zinc-200">
-                            {nc.name}
-                          </span>
-                          <span className="text-[10px] font-mono text-sky-400 shrink-0">
-                            {nc.protocol}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Portaled Full Camera Detail Modal — Rendered ONLY when interaction.type === "camera-detail" */}
+      <CameraDetailModal
+        camera={activeDetailCamera}
+        provinces={provinces}
+        nearbyCameras={nearbyCameras}
+        probeStatus={probeStatus}
+        onClose={handleCloseCameraInterface}
+        onVerifyStreamLive={handleVerifyStreamLive}
+        onAddToMultiView={handleAddToMultiView}
+        onSelectNearbyCamera={(nc) => handleDirectoryCameraClick(nc.id, nc)}
+      />
 
       {/* Unified Institutional Footer */}
       <AppFooter />
