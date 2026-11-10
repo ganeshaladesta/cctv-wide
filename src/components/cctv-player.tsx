@@ -13,7 +13,8 @@ import {
   AlertTriangle,
   Radio,
   Clock,
-  ShieldCheck
+  ShieldCheck,
+  Tv
 } from "lucide-react";
 import { Camera } from "@/lib/types";
 
@@ -24,8 +25,21 @@ interface CCTVPlayerProps {
   onStatusChange?: (id: string, status: "ONLINE" | "OFFLINE") => void;
 }
 
-function formatYoutubeEmbed(url: string): string {
+function extractAmgChannelId(url: string): string | null {
+  if (!url || !url.includes("stream.amg.id")) return null;
+  const match = url.match(
+    /(?:playersite_)?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i
+  );
+  return match ? match[1] : null;
+}
+
+function formatEmbedUrl(url: string): string {
   try {
+    if (url.includes("stream.amg.id")) {
+      return url.includes("?")
+        ? `${url}&autoplay=true&mute=true`
+        : `${url}?autoplay=true&mute=true`;
+    }
     if (url.includes("youtube.com/embed/")) {
       return url.includes("?")
         ? `${url}&autoplay=1&mute=1`
@@ -52,6 +66,14 @@ export default function CCTVPlayer({
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
 
+  const amgChannelId = React.useMemo(
+    () => extractAmgChannelId(camera.stream_url),
+    [camera.stream_url]
+  );
+
+  // For AMG cameras, support both Official Embed iframe and Direct 2K HLS
+  const [amgMode, setAmgMode] = useState<"embed" | "hls">("embed");
+
   const [isVisible, setIsVisible] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -60,6 +82,11 @@ export default function CCTVPlayer({
   const [retryCount, setRetryCount] = useState(0);
   const [usingProxy, setUsingProxy] = useState(false);
   const [snapshotTick, setSnapshotTick] = useState(0);
+
+  const activeProtocol = React.useMemo(() => {
+    if (amgChannelId && amgMode === "hls") return "HLS";
+    return camera.protocol;
+  }, [amgChannelId, amgMode, camera.protocol]);
 
   // Lazy visibility observer so offscreen players in Multi-View or long grids pause decoding
   useEffect(() => {
@@ -83,15 +110,18 @@ export default function CCTVPlayer({
     setRetryCount(0);
     setError(null);
     setLoading(true);
-  }, [camera.id, camera.stream_url]);
+  }, [camera.id, camera.stream_url, amgMode]);
 
   const effectiveStreamUrl = React.useMemo(() => {
-    const raw = camera.stream_url;
+    const raw =
+      amgChannelId && amgMode === "hls"
+        ? `https://stream.amg.id/memfs/${amgChannelId}.m3u8`
+        : camera.stream_url;
     if (usingProxy && raw.startsWith("http")) {
       return `/api/proxy?url=${encodeURIComponent(raw)}`;
     }
     return raw;
-  }, [camera.stream_url, usingProxy]);
+  }, [camera.stream_url, amgChannelId, amgMode, usingProxy]);
 
   const reportStatus = useCallback(
     (status: "ONLINE" | "OFFLINE") => {
@@ -105,22 +135,47 @@ export default function CCTVPlayer({
     [camera.id, onStatusChange]
   );
 
+  // Verify actual live stream availability for EMBED cameras (such as AMG)
+  // Do NOT falsely mark ONLINE merely because an iframe HTML page loads
+  useEffect(() => {
+    if (!isVisible || activeProtocol !== "EMBED" || !amgChannelId) return;
+    let cancelled = false;
+    fetch(`https://stream.amg.id/memfs/${amgChannelId}.m3u8`)
+      .then(async (res) => {
+        const text = await res.text();
+        if (cancelled) return;
+        if (res.ok && text.includes("#EXTM3U")) {
+          reportStatus("ONLINE");
+        } else {
+          setError("Stream AMG sedang offline");
+          reportStatus("OFFLINE");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          reportStatus("OFFLINE");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isVisible, activeProtocol, amgChannelId, retryCount, reportStatus]);
+
   // Snapshot polling timer
   useEffect(() => {
-    if (camera.protocol !== "SNAPSHOT" || !isVisible) return;
+    if (activeProtocol !== "SNAPSHOT" || !isVisible) return;
     const interval = setInterval(() => {
       if (!document.hidden) {
         setSnapshotTick((t) => t + 1);
       }
     }, 6000);
     return () => clearInterval(interval);
-  }, [camera.protocol, isVisible]);
+  }, [activeProtocol, isVisible]);
 
   // HLS & MP4 Video lifecycle
   useEffect(() => {
     if (!isVisible) return;
-    if (camera.protocol !== "HLS" && camera.protocol !== "MP4") {
-      setLoading(false);
+    if (activeProtocol !== "HLS" && activeProtocol !== "MP4") {
       return;
     }
 
@@ -133,7 +188,7 @@ export default function CCTVPlayer({
 
     const watchdog = setTimeout(() => {
       if (cancelled) return;
-      if (!usingProxy && camera.stream_url.startsWith("http")) {
+      if (!usingProxy && effectiveStreamUrl.startsWith("http")) {
         setUsingProxy(true);
       } else {
         setLoading(false);
@@ -149,7 +204,7 @@ export default function CCTVPlayer({
       }
     };
 
-    if (camera.protocol === "HLS" && Hls.isSupported()) {
+    if (activeProtocol === "HLS" && Hls.isSupported()) {
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: true,
@@ -180,7 +235,7 @@ export default function CCTVPlayer({
         if (cancelled) return;
         if (data.fatal) {
           clearTimeout(watchdog);
-          if (!usingProxy && camera.stream_url.startsWith("http")) {
+          if (!usingProxy && effectiveStreamUrl.startsWith("http")) {
             hls.destroy();
             hlsRef.current = null;
             setUsingProxy(true);
@@ -194,7 +249,7 @@ export default function CCTVPlayer({
             return;
           }
           setLoading(false);
-          setError("Stream tidak merespons (CORS / Offline pada server Dishub)");
+          setError("Stream tidak merespons (CORS / Offline pada server sumber)");
         }
       });
     } else {
@@ -211,7 +266,7 @@ export default function CCTVPlayer({
       const onErr = () => {
         if (cancelled) return;
         clearTimeout(watchdog);
-        if (!usingProxy && camera.stream_url.startsWith("http")) {
+        if (!usingProxy && effectiveStreamUrl.startsWith("http")) {
           setUsingProxy(true);
           return;
         }
@@ -234,8 +289,7 @@ export default function CCTVPlayer({
     };
   }, [
     camera.id,
-    camera.protocol,
-    camera.stream_url,
+    activeProtocol,
     effectiveStreamUrl,
     usingProxy,
     retryCount,
@@ -282,12 +336,12 @@ export default function CCTVPlayer({
   return (
     <div
       ref={containerRef}
-      className="relative group w-full h-full min-h-[180px] bg-zinc-950 rounded-lg overflow-hidden border border-zinc-800/80 flex flex-col justify-between select-none"
+      className="relative group w-full h-full min-h-[180px] aspect-video bg-zinc-950 rounded-lg overflow-hidden border border-zinc-800/80 flex flex-col justify-between select-none"
     >
       {/* Top Status & Attribution Overlay */}
       <div className="absolute top-0 inset-x-0 z-20 p-2.5 bg-gradient-to-b from-black/85 via-black/40 to-transparent flex items-start justify-between gap-2 pointer-events-none">
         <div className="min-w-0">
-          <div className="flex items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
             <span
               className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wider uppercase ${
                 error
@@ -309,7 +363,7 @@ export default function CCTVPlayer({
               {error ? "GANGGUAN" : camera.status === "ONLINE" ? "LIVE" : "OFFLINE"}
             </span>
             <span className="px-1.5 py-0.5 rounded bg-zinc-800/90 text-zinc-300 text-[10px] font-mono border border-zinc-700/70">
-              {camera.protocol}
+              {activeProtocol}
               {usingProxy ? " • PROXY" : ""}
             </span>
           </div>
@@ -322,6 +376,34 @@ export default function CCTVPlayer({
             </p>
           )}
         </div>
+
+        {/* AMG Mode Switcher (Official Embed vs Direct 2K HLS) */}
+        {amgChannelId && (
+          <div className="pointer-events-auto flex items-center gap-1 bg-zinc-950/90 border border-zinc-700/80 rounded-md p-0.5">
+            <button
+              type="button"
+              onClick={() => setAmgMode("embed")}
+              className={`px-2 py-0.5 rounded text-[10px] font-semibold transition ${
+                amgMode === "embed"
+                  ? "bg-sky-600 text-white"
+                  : "text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              Embed Resmi
+            </button>
+            <button
+              type="button"
+              onClick={() => setAmgMode("hls")}
+              className={`px-2 py-0.5 rounded text-[10px] font-semibold transition ${
+                amgMode === "hls"
+                  ? "bg-sky-600 text-white"
+                  : "text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              Direct HLS
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Main Media Surface */}
@@ -331,20 +413,26 @@ export default function CCTVPlayer({
             <Radio className="w-5 h-5 text-zinc-600 animate-pulse" />
             <span>Menunggu di layar...</span>
           </div>
-        ) : camera.protocol === "EMBED" ? (
+        ) : activeProtocol === "EMBED" ? (
           <iframe
-            src={formatYoutubeEmbed(camera.stream_url)}
+            key={`${camera.id}-${retryCount}`}
+            src={formatEmbedUrl(camera.stream_url)}
             title={camera.name}
-            className="w-full h-full border-0 min-h-[180px]"
-            allow="autoplay; encrypted-media; picture-in-picture"
+            loading="lazy"
+            className="w-full h-full border-0 min-h-[180px] aspect-video"
+            allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
             allowFullScreen
             onLoad={() => setLoading(false)}
+            onError={() => {
+              setLoading(false);
+              setError("Gagal memuat player embed resmi");
+            }}
           />
-        ) : camera.protocol === "MJPEG" || camera.protocol === "SNAPSHOT" ? (
+        ) : activeProtocol === "MJPEG" || activeProtocol === "SNAPSHOT" ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={
-              camera.protocol === "SNAPSHOT"
+              activeProtocol === "SNAPSHOT"
                 ? `${effectiveStreamUrl}${
                     effectiveStreamUrl.includes("?") ? "&" : "?"
                   }_t=${snapshotTick}`
@@ -357,7 +445,7 @@ export default function CCTVPlayer({
               setError(null);
             }}
             onError={() => {
-              if (!usingProxy && camera.stream_url.startsWith("http")) {
+              if (!usingProxy && effectiveStreamUrl.startsWith("http")) {
                 setUsingProxy(true);
               } else {
                 setLoading(false);
@@ -365,7 +453,7 @@ export default function CCTVPlayer({
               }
             }}
           />
-        ) : camera.protocol === "WEBSOCKET" ? (
+        ) : activeProtocol === "WEBSOCKET" ? (
           <div className="flex flex-col items-center justify-center p-4 text-center">
             <Radio className="w-8 h-8 text-emerald-400 mb-2 animate-pulse" />
             <p className="text-xs text-zinc-200 font-medium">
@@ -378,7 +466,7 @@ export default function CCTVPlayer({
               href={camera.source_url}
               target="_blank"
               rel="noopener noreferrer"
-              className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-500 text-xs font-medium text-white transition"
+              className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-sky-600 hover:bg-sky-500 text-xs font-medium text-white transition"
             >
               <span>Buka Portal Resmi</span>
               <ExternalLink className="w-3.5 h-3.5" />
@@ -399,7 +487,7 @@ export default function CCTVPlayer({
         {/* Loading Spinner Overlay */}
         {loading && !error && (
           <div className="absolute inset-0 z-10 bg-zinc-950/75 backdrop-blur-xs flex flex-col items-center justify-center gap-2">
-            <div className="w-7 h-7 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+            <div className="w-7 h-7 border-2 border-sky-500 border-t-amber-400 rounded-full animate-spin" />
             <span className="text-[11px] text-zinc-300 font-mono">
               Menghubungkan ke {camera.source_name}...
             </span>
@@ -416,15 +504,25 @@ export default function CCTVPlayer({
             <p className="text-[10px] text-zinc-400 mt-0.5 truncate max-w-[260px]">
               Sumber: {camera.source_name}
             </p>
-            <div className="flex items-center gap-2 mt-3">
+            <div className="flex flex-wrap items-center justify-center gap-2 mt-3">
               <button
                 type="button"
                 onClick={handleRefresh}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium transition"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-sky-600 hover:bg-sky-500 text-white text-xs font-medium transition"
               >
                 <RotateCw className="w-3.5 h-3.5" />
                 <span>Coba Lagi</span>
               </button>
+              {amgChannelId && amgMode === "hls" && (
+                <button
+                  type="button"
+                  onClick={() => setAmgMode("embed")}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs transition"
+                >
+                  <Tv className="w-3 h-3" />
+                  <span>Gunakan Embed Resmi</span>
+                </button>
+              )}
               <a
                 href={camera.source_url}
                 target="_blank"
@@ -442,9 +540,9 @@ export default function CCTVPlayer({
       {/* Bottom Controls & Attribution Bar */}
       <div className="z-20 px-2.5 py-1.5 bg-zinc-900/95 border-t border-zinc-800/80 flex items-center justify-between gap-2 text-[11px] text-zinc-400">
         <div className="flex items-center gap-1.5 min-w-0 truncate">
-          <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+          <ShieldCheck className="w-3.5 h-3.5 text-sky-400 shrink-0" />
           <span className="truncate" title={camera.source_name}>
-            {camera.source_name}
+            Sumber: {camera.source_name}
           </span>
           {!compact && (
             <span className="hidden sm:inline-flex items-center gap-1 text-[10px] text-zinc-500 ml-1">
@@ -455,7 +553,7 @@ export default function CCTVPlayer({
         </div>
 
         <div className="flex items-center gap-1 shrink-0">
-          {(camera.protocol === "HLS" || camera.protocol === "MP4") && (
+          {(activeProtocol === "HLS" || activeProtocol === "MP4") && (
             <>
               <button
                 type="button"
@@ -495,7 +593,7 @@ export default function CCTVPlayer({
             href={camera.source_url}
             target="_blank"
             rel="noopener noreferrer"
-            title="Sumber Resmi Pemerintah"
+            title="Sumber Resmi"
             className="p-1 rounded hover:bg-zinc-800 text-zinc-300 hover:text-white transition"
           >
             <ExternalLink className="w-3.5 h-3.5" />
@@ -513,4 +611,3 @@ export default function CCTVPlayer({
     </div>
   );
 }
-

@@ -398,6 +398,21 @@ export default function CommandCenter({
             ))}
           </select>
 
+          {/* Source / Provider Select */}
+          <select
+            aria-label="Filter Sumber / Provider"
+            value={selectedSource}
+            onChange={(e) => setSelectedSource(e.target.value)}
+            className="w-full max-w-full lg:w-auto min-w-0 px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-xs text-zinc-200 focus:outline-none focus:border-sky-500"
+          >
+            <option value="">Semua Sumber / Provider</option>
+            {sources.slice(0, 120).map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name} ({s.total_cameras})
+              </option>
+            ))}
+          </select>
+
           {/* Status Select */}
           <select
             aria-label="Filter Status Kamera"

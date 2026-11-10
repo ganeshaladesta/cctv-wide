@@ -25,13 +25,24 @@ export function detectStreamProtocol(url: string): StreamProtocol {
   return "HLS";
 }
 
+export function extractAmgChannelId(url: string): string | null {
+  if (!url || !url.includes("stream.amg.id")) return null;
+  const match = url.match(
+    /(?:playersite_)?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i
+  );
+  return match ? match[1] : null;
+}
+
 export async function probeStreamUrl(
   streamUrl: string,
   timeoutMs = 8000
 ): Promise<StreamValidationResult> {
   const start = Date.now();
   const protocol = detectStreamProtocol(streamUrl);
-  const targetUrl = streamUrl.startsWith("/api/proxy?upstream=")
+  const amgChannelId = extractAmgChannelId(streamUrl);
+  const targetUrl = amgChannelId
+    ? `https://stream.amg.id/memfs/${amgChannelId}.m3u8`
+    : streamUrl.startsWith("/api/proxy?upstream=")
     ? `https://atcsindonesia.com${decodeURIComponent(
         streamUrl.replace("/api/proxy?upstream=", "")
       )}`
@@ -235,12 +246,22 @@ export class OpenCCTVProvider extends BaseCCTVProvider {
   protected readonly sourceKeyword = undefined;
 }
 
+export class AMGLiveProvider extends BaseCCTVProvider {
+  readonly id = "amg-live-provider";
+  readonly name = "AMG Live CCTV (Sarinah Jakarta Pusat)";
+  readonly institution = "AMG (Alternative Media Group)";
+  readonly officialUrl = "https://stream.amg.id/index.html";
+  protected readonly provinceFilter = "prov-jakarta";
+  protected readonly sourceKeyword = "amg";
+}
+
 export const PROVIDER_REGISTRY: CCTVProviderAdapter[] = [
   new JogjaATCSProvider(),
   new BandungATCSProvider(),
   new JakartaCCTVProvider(),
   new SemarangCCTVProvider(),
   new NationalTollProvider(),
-  new OpenCCTVProvider()
+  new OpenCCTVProvider(),
+  new AMGLiveProvider()
 ];
 

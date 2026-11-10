@@ -45,7 +45,7 @@ try {
   assert.equal(statsRes.status, 200);
   const stats = await statsRes.json();
   assert.equal(stats.total_provinces, 38);
-  assert.equal(stats.total_cameras, 23355);
+  assert.equal(stats.total_cameras, 23356);
   console.log(
     `[PASS] GET /api/stats -> ${stats.total_cameras} cameras, ${stats.online_cameras} online, ${stats.total_provinces} provinces`
   );
@@ -57,27 +57,28 @@ try {
   assert.equal(provJson.total, 38);
   console.log(`[PASS] GET /api/provinces -> ${provJson.total} provinces`);
 
-  // 3. /api/cameras?q=Malioboro
-  const camRes = await fetch(`${BASE}/api/cameras?q=Malioboro`);
-  assert.equal(camRes.status, 200);
-  const camJson = await camRes.json();
-  assert.ok(camJson.total > 0, "Should find Malioboro cameras");
+  // 3. /api/cameras?q=Sarinah
+  const sarinahRes = await fetch(`${BASE}/api/cameras?q=Sarinah`);
+  assert.equal(sarinahRes.status, 200);
+  const sarinahJson = await sarinahRes.json();
+  assert.ok(sarinahJson.total >= 1, "Should find CCTV Sarinah");
+  assert.equal(sarinahJson.data[0].id, "amg-cctv-sarinah");
   console.log(
-    `[PASS] GET /api/cameras?q=Malioboro -> ${camJson.total} matches (top: ${camJson.data[0].name})`
+    `[PASS] GET /api/cameras?q=Sarinah -> found ${sarinahJson.data[0].name} (${sarinahJson.data[0].source_name})`
   );
 
   // 4. /api/cameras?mode=markers
   const markRes = await fetch(`${BASE}/api/cameras?mode=markers`);
   assert.equal(markRes.status, 200);
   const markJson = await markRes.json();
-  assert.equal(markJson.total, 23355);
+  assert.equal(markJson.total, 23356);
   console.log(`[PASS] GET /api/cameras?mode=markers -> ${markJson.total} compact markers`);
 
   // 5. /api/sources
   const srcRes = await fetch(`${BASE}/api/sources`);
   assert.equal(srcRes.status, 200);
   const srcJson = await srcRes.json();
-  assert.equal(srcJson.adapters.length, 6);
+  assert.equal(srcJson.adapters.length, 7);
   console.log(
     `[PASS] GET /api/sources -> ${srcJson.total} sources, ${srcJson.adapters.length} modular provider adapters`
   );
@@ -94,12 +95,12 @@ try {
   assert.ok(proxyText.includes("/api/proxy?url="), "Proxy should rewrite nested playlist URLs");
   console.log("[PASS] GET /api/proxy -> Live HLS manifest fetched & rewritten with ACAO=*");
 
-  // 7. HTML Pages: /, /kamera, /kamera/di-yogyakarta
-  for (const route of ["/", "/kamera", "/kamera/di-yogyakarta"]) {
+  // 7. HTML Pages: /, /kamera, /kamera/dki-jakarta/amg-cctv-sarinah
+  for (const route of ["/", "/kamera", "/kamera/dki-jakarta/amg-cctv-sarinah"]) {
     const htmlRes = await fetch(`${BASE}${route}`);
     assert.equal(htmlRes.status, 200);
     const html = await htmlRes.text();
-    assert.ok(html.includes("PANTAU NUSANTARA"));
+    assert.ok(html.includes("SCC - EAGLE EYES"));
     assert.ok(html.includes("Ganesha Ladesta"));
     console.log(`[PASS] GET ${route} -> HTTP 200 (${html.length} bytes)`);
   }

@@ -1,5 +1,21 @@
 [
   {
+    "id": "src-amg",
+    "name": "AMG",
+    "slug": "amg",
+    "province_id": "prov-jakarta",
+    "province_name": "DKI Jakarta",
+    "city_id": "city-dki-jakarta-jakarta-pusat",
+    "city_name": "Jakarta Pusat",
+    "official_url": "https://stream.amg.id/index.html",
+    "protocol": "EMBED",
+    "requires_proxy": false,
+    "total_cameras": 1,
+    "online_cameras": 1,
+    "offline_cameras": 0,
+    "last_verified_at": "2026-11-10T10:45:00.000Z"
+  },
+  {
     "id": "src-binamarga-tol-cctv",
     "name": "binamarga-tol-cctv",
     "slug": "binamarga-tol-cctv",
