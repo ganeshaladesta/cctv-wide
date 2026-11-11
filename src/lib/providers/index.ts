@@ -5,6 +5,7 @@ import {
   StreamValidationResult
 } from "@/lib/types";
 import { getDataStore } from "@/lib/data-store";
+import { normalizeLegacyStreamUrl } from "@/lib/stream-url";
 
 export function detectStreamProtocol(url: string): StreamProtocol {
   const u = (url || "").toLowerCase();
@@ -42,11 +43,7 @@ export async function probeStreamUrl(
   const amgChannelId = extractAmgChannelId(streamUrl);
   const targetUrl = amgChannelId
     ? `https://stream.amg.id/memfs/${amgChannelId}.m3u8`
-    : streamUrl.startsWith("/api/proxy?upstream=")
-    ? `https://atcsindonesia.com${decodeURIComponent(
-        streamUrl.replace("/api/proxy?upstream=", "")
-      )}`
-    : streamUrl;
+    : normalizeLegacyStreamUrl(streamUrl);
 
   if (targetUrl.startsWith("ws://") || targetUrl.startsWith("wss://")) {
     return {

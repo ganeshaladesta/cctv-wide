@@ -66,32 +66,26 @@ const OFFLINE_MARKER_ICON = L.divIcon({
   iconAnchor: [7, 7]
 });
 
-function markerTupleToCamera(m: CompactMarker, provinces: Province[]): Camera {
-  const provId = m[7] || "";
-  const provName =
-    m[10] ||
-    provinces.find((p) => p.id === provId || p.slug === provId)?.name ||
-    provId.replace("prov-", "").replace(/-/g, " ").toUpperCase();
-
+function markerTupleToCamera(m: CompactMarker): Camera {
   return {
     id: m[0],
     latitude: m[1],
     longitude: m[2],
     status: m[3] === 1 ? "ONLINE" : "OFFLINE",
-    protocol: m[4],
-    name: m[5],
-    city_name: m[6],
-    province_id: provId,
-    source_name: m[8],
-    stream_url: m[9],
-    province_name: provName,
+    protocol: "HLS",
+    name: m[0],
+    city_name: "Memuat lokasi...",
+    province_id: "",
+    source_name: "Memuat sumber...",
+    stream_url: "",
+    province_name: "Indonesia",
     city_id: "",
     source_id: "",
-    location: m[6],
-    source_url: m[11] || "https://dishub.go.id",
-    last_checked_at: new Date().toISOString(),
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString()
+    location: "",
+    source_url: "https://dishub.go.id",
+    last_checked_at: "",
+    created_at: "",
+    updated_at: ""
   };
 }
 
@@ -112,8 +106,6 @@ export default function InteractiveMap({
   const mapRef = useRef<L.Map | null>(null);
   const clusterGroupRef = useRef<L.MarkerClusterGroup | null>(null);
   const plainLayerGroupRef = useRef<L.LayerGroup | null>(null);
-  const provincesRef = useRef<Province[]>(provinces);
-  provincesRef.current = provinces;
   const onMarkerClickRef = useRef(onMarkerClick);
   onMarkerClickRef.current = onMarkerClick;
 
@@ -245,11 +237,11 @@ export default function InteractiveMap({
           icon: isOnline ? ONLINE_MARKER_ICON : OFFLINE_MARKER_ICON
         });
         marker.bindTooltip(
-          `${m[5]} • ${m[6]} (${isOnline ? "ONLINE" : "OFFLINE"})`,
+          `${m[0]} • ${isOnline ? "ONLINE" : "OFFLINE"}`,
           { direction: "top", offset: [0, -6] }
         );
         marker.on("click", () => {
-          const cam = markerTupleToCamera(m, provincesRef.current);
+          const cam = markerTupleToCamera(m);
           onMarkerClickRef.current(cam.id, cam);
         });
         leafletMarkers[i] = marker;
@@ -272,11 +264,11 @@ export default function InteractiveMap({
           fillOpacity: 0.92
         });
         circle.bindTooltip(
-          `${m[5]} • ${m[6]} (${isOnline ? "ONLINE" : "OFFLINE"})`,
+          `${m[0]} • ${isOnline ? "ONLINE" : "OFFLINE"}`,
           { direction: "top", offset: [0, -6] }
         );
         circle.on("click", () => {
-          const cam = markerTupleToCamera(m, provincesRef.current);
+          const cam = markerTupleToCamera(m);
           onMarkerClickRef.current(cam.id, cam);
         });
         circle.addTo(plainGroup);

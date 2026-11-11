@@ -10,6 +10,7 @@ import {
   Province,
   StreamProtocol
 } from "@/lib/types";
+import { normalizeLegacyStreamUrl } from "@/lib/stream-url";
 
 export function isValidCoordinate(lat: unknown, lng: unknown): boolean {
   if (lat === null || lat === undefined || lng === null || lng === undefined) {
@@ -38,6 +39,10 @@ class CCTVDataStore {
   private provinceByIdOrSlug = new Map<string, Province>();
   private cityByIdOrSlug = new Map<string, City>();
   private sourceByIdOrSlug = new Map<string, CCTVSource>();
+  private allowedProxyHosts = new Set<string>([
+    "atcsindonesia.com",
+    "stream.amg.id"
+  ]);
   private initialized = false;
   private queryCache = new Map<string, { expiresAt: number; data: unknown }>();
 
@@ -63,6 +68,28 @@ class CCTVDataStore {
     this.queryCache.clear();
   }
 
+  private addAllowedHost(urlStr?: string): void {
+    if (!urlStr) return;
+    try {
+      const u = new URL(urlStr);
+      if (u.protocol !== "http:" && u.protocol !== "https:") return;
+      const host = u.hostname.toLowerCase().replace(/\.$/, "");
+      if (
+        !host ||
+        host === "youtube.com" ||
+        host === "www.youtube.com" ||
+        host === "youtu.be"
+      ) {
+        return;
+      }
+      this.allowedProxyHosts.add(host);
+    } catch {}
+  }
+
+  getAllowedProxyHosts(): ReadonlySet<string> {
+    return this.allowedProxyHosts;
+  }
+
   private init() {
     if (this.initialized) return;
     const dataDir = path.join(process.cwd(), "data");
@@ -80,11 +107,12 @@ class CCTVDataStore {
         fs.readFileSync(path.join(dataDir, "cameras.json"), "utf8")
       );
 
-      // Filter and normalize coordinates on load
+      // Filter invalid coordinates and safely normalize legacy nested proxy URLs on load
       this.cameras = rawCameras.filter((cam) => {
         if (!isValidCoordinate(cam.latitude, cam.longitude)) return false;
         cam.latitude = Number(cam.latitude);
         cam.longitude = Number(cam.longitude);
+        cam.stream_url = normalizeLegacyStreamUrl(cam.stream_url, cam.source_url);
         return true;
       });
 
@@ -102,9 +130,12 @@ class CCTVDataStore {
         this.sourceByIdOrSlug.set(s.id.toLowerCase(), s);
         this.sourceByIdOrSlug.set(s.slug.toLowerCase(), s);
         this.sourceByIdOrSlug.set(s.name.toLowerCase(), s);
+        this.addAllowedHost(s.official_url);
       }
       for (const cam of this.cameras) {
         this.cameraById.set(cam.id, cam);
+        this.addAllowedHost(cam.stream_url);
+        this.addAllowedHost(cam.source_url);
       }
       this.initialized = true;
     } catch (err) {
@@ -223,23 +254,21 @@ class CCTVDataStore {
   updateCameraStatus(id: string, status: CameraStatus): Camera | null {
     const cam = this.cameraById.get(id);
     if (!cam) return null;
-    const prev = cam.status;
+    if (cam.status === status) return cam;
+
     cam.status = status;
     cam.last_checked_at = new Date().toISOString();
     cam.updated_at = cam.last_checked_at;
 
-    if (prev !== status) {
-      const prov = this.provinceByIdOrSlug.get(cam.province_id.toLowerCase());
-      if (prov) {
-        if (status === "ONLINE") {
-          prov.online_cameras++;
-          prov.offline_cameras = Math.max(0, prov.offline_cameras - 1);
-        } else {
-          prov.offline_cameras++;
-          prov.online_cameras = Math.max(0, prov.online_cameras - 1);
-        }
+    const prov = this.provinceByIdOrSlug.get(cam.province_id.toLowerCase());
+    if (prov) {
+      if (status === "ONLINE") {
+        prov.online_cameras++;
+        prov.offline_cameras = Math.max(0, prov.offline_cameras - 1);
+      } else {
+        prov.offline_cameras++;
+        prov.online_cameras = Math.max(0, prov.online_cameras - 1);
       }
-      this.invalidateCache();
     }
     return cam;
   }
@@ -362,17 +391,9 @@ class CCTVDataStore {
       if (!isValidCoordinate(c.latitude, c.longitude)) continue;
       out.push([
         c.id,
-        Number(c.latitude),
-        Number(c.longitude),
-        c.status === "ONLINE" ? 1 : 0,
-        c.protocol,
-        c.name,
-        c.city_name,
-        c.province_id,
-        c.source_name,
-        c.stream_url,
-        c.province_name,
-        c.source_url
+        Math.round(Number(c.latitude) * 1e5) / 1e5,
+        Math.round(Number(c.longitude) * 1e5) / 1e5,
+        c.status === "ONLINE" ? 1 : 0
       ]);
     }
     return out;

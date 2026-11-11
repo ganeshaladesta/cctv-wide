@@ -74,23 +74,10 @@ export interface Camera {
 }
 
 /**
- * Compact tuple for map markers:
- * [0:id, 1:lat, 2:lng, 3:status(1=ONLINE,0=OFFLINE), 4:protocol, 5:name, 6:city_name, 7:province_id, 8:source_name, 9:stream_url, 10:province_name, 11:source_url]
+ * Minimal compact tuple for map markers (~1.26 MB raw / ~218 KB gzip for 23k+ cameras):
+ * [0:id, 1:lat, 2:lng, 3:status(1=ONLINE,0=OFFLINE)]
  */
-export type CompactMarker = [
-  string,
-  number,
-  number,
-  number,
-  StreamProtocol,
-  string,
-  string,
-  string,
-  string,
-  string,
-  string,
-  string
-];
+export type CompactMarker = [string, number, number, number];
 
 export interface DashboardStats {
   total_cameras: number;
