@@ -72,3 +72,4 @@ export function isMjpegUrl(rawUrl: string): boolean {
     lower.includes("mode=jpeg")
   );
 }
+
