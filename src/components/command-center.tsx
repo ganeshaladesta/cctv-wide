@@ -78,8 +78,8 @@ export default function CommandCenter({
 }: CommandCenterProps) {
   const [stats] = useState<DashboardStats>(initialStats);
   const [provinces] = useState<Province[]>(initialProvinces);
-  const [cities, setCities] = useState<City[]>([]);
-  const [sources, setSources] = useState<CCTVSource[]>([]);
+  const [allCities, setAllCities] = useState<City[]>([]);
+  const [allSources, setAllSources] = useState<CCTVSource[]>([]);
 
   const [activeTab, setActiveTab] = useState<DashboardTab>("map");
   const [searchQuery, setSearchQuery] = useState("");
@@ -116,14 +116,21 @@ export default function CommandCenter({
 
   // Shared camera detail cache to avoid duplicate API requests
   const cameraDetailCacheRef = useRef<
-    Map<string, { camera: Camera; nearby: Camera[] }>
+    Map<string, { camera: Camera; nearby: Camera[]; nearbyLoaded?: boolean }>
   >(new Map());
+  const pageAbortRef = useRef<AbortController | null>(null);
+  const hasMountedFilterRef = useRef(false);
 
   // Seed cache with initialCameras and current cameras page
   useEffect(() => {
     for (const c of cameras) {
-      if (!cameraDetailCacheRef.current.has(c.id)) {
-        cameraDetailCacheRef.current.set(c.id, { camera: c, nearby: [] });
+      const existing = cameraDetailCacheRef.current.get(c.id);
+      if (!existing) {
+        cameraDetailCacheRef.current.set(c.id, {
+          camera: c,
+          nearby: [],
+          nearbyLoaded: false
+        });
       }
     }
   }, [cameras]);
@@ -156,59 +163,126 @@ export default function CommandCenter({
     }
   }, []);
 
-  // Load cities (all cities when no province selected, or filtered by province)
+  // Fetch /api/cities and /api/sources ONCE on mount; filter client-side when dropdowns change
   useEffect(() => {
-    setSelectedCity("");
-    const url = selectedProvince
-      ? `/api/cities?province_id=${encodeURIComponent(selectedProvince)}`
-      : `/api/cities`;
-    fetch(url)
+    const controller = new AbortController();
+    fetch("/api/cities", { signal: controller.signal })
       .then((r) => r.json())
-      .then((j) => setCities(j.data || []))
+      .then((j) => {
+        if (!controller.signal.aborted) {
+          setAllCities(j.data || []);
+        }
+      })
       .catch(() => {});
-  }, [selectedProvince]);
 
-  useEffect(() => {
+    fetch("/api/sources", { signal: controller.signal })
+      .then((r) => r.json())
+      .then((j) => {
+        if (!controller.signal.aborted) {
+          setAllSources(j.data || []);
+        }
+      })
+      .catch(() => {});
+
+    return () => controller.abort();
+  }, []);
+
+  const cities = useMemo(() => {
+    if (!selectedProvince) return allCities;
+    const provLower = selectedProvince.toLowerCase();
+    const prov = provinces.find(
+      (p) =>
+        p.id.toLowerCase() === provLower ||
+        p.slug.toLowerCase() === provLower ||
+        p.name.toLowerCase() === provLower
+    );
+    const targetId = (prov ? prov.id : selectedProvince).toLowerCase();
+    return allCities.filter(
+      (c) =>
+        c.province_id.toLowerCase() === targetId ||
+        c.province_name.toLowerCase() === provLower
+    );
+  }, [allCities, selectedProvince, provinces]);
+
+  const sources = useMemo(() => {
+    let list = allSources;
+    if (selectedProvince) {
+      const provLower = selectedProvince.toLowerCase();
+      const prov = provinces.find(
+        (p) =>
+          p.id.toLowerCase() === provLower ||
+          p.slug.toLowerCase() === provLower ||
+          p.name.toLowerCase() === provLower
+      );
+      const targetId = (prov ? prov.id : selectedProvince).toLowerCase();
+      list = list.filter(
+        (s) =>
+          s.province_id.toLowerCase() === targetId ||
+          s.province_name.toLowerCase() === provLower
+      );
+    }
+    if (selectedCity) {
+      const cityLower = selectedCity.toLowerCase();
+      const cityObj = allCities.find(
+        (c) =>
+          c.id.toLowerCase() === cityLower ||
+          c.slug.toLowerCase() === cityLower ||
+          c.name.toLowerCase() === cityLower
+      );
+      const targetCityId = (cityObj ? cityObj.id : selectedCity).toLowerCase();
+      list = list.filter(
+        (s) =>
+          s.city_id.toLowerCase() === targetCityId ||
+          s.city_name.toLowerCase() === cityLower
+      );
+    }
+    return list;
+  }, [allSources, allCities, selectedProvince, selectedCity, provinces]);
+
+  const buildFilterParams = useCallback(() => {
     const params = new URLSearchParams();
+    if (searchQuery.trim()) params.set("q", searchQuery.trim());
     if (selectedProvince) params.set("province", selectedProvince);
     if (selectedCity) params.set("city", selectedCity);
-    fetch(`/api/sources?${params.toString()}`)
-      .then((r) => r.json())
-      .then((j) => setSources(j.data || []))
-      .catch(() => {});
-  }, [selectedProvince, selectedCity]);
+    if (selectedSource) params.set("source", selectedSource);
+    if (selectedStatus) params.set("status", selectedStatus);
+    if (selectedProtocol) params.set("protocol", selectedProtocol);
+    return params;
+  }, [
+    searchQuery,
+    selectedProvince,
+    selectedCity,
+    selectedSource,
+    selectedStatus,
+    selectedProtocol
+  ]);
 
-  // Synchronized fetch for filtered cameras & map markers
-  const fetchFilteredCameras = useCallback(
-    async (targetPage = 1, signal?: AbortSignal) => {
+  // Fetch paginated directory page independently (never re-fetches map markers)
+  const fetchCameraPage = useCallback(
+    async (targetPage = 1, externalSignal?: AbortSignal) => {
+      pageAbortRef.current?.abort();
+      const ownController = new AbortController();
+      pageAbortRef.current = ownController;
+
+      const signal = externalSignal || ownController.signal;
+      if (externalSignal) {
+        externalSignal.addEventListener("abort", () => ownController.abort(), {
+          once: true
+        });
+      }
+
       setLoadingCameras(true);
-      setLoadingMarkers(true);
       try {
-        const params = new URLSearchParams();
-        if (searchQuery.trim()) params.set("q", searchQuery.trim());
-        if (selectedProvince) params.set("province", selectedProvince);
-        if (selectedCity) params.set("city", selectedCity);
-        if (selectedSource) params.set("source", selectedSource);
-        if (selectedStatus) params.set("status", selectedStatus);
-        if (selectedProtocol) params.set("protocol", selectedProtocol);
-
-        const listParams = new URLSearchParams(params);
+        const listParams = buildFilterParams();
         listParams.set("page", String(targetPage));
         listParams.set("limit", "24");
 
-        const markerParams = new URLSearchParams(params);
-        markerParams.set("mode", "markers");
+        const camRes = await fetch(`/api/cameras?${listParams.toString()}`, {
+          signal: ownController.signal
+        });
+        const camJson = await camRes.json();
 
-        const [camRes, markerRes] = await Promise.all([
-          fetch(`/api/cameras?${listParams.toString()}`, { signal }),
-          fetch(`/api/cameras?${markerParams.toString()}`, { signal })
-        ]);
-        const [camJson, markerJson] = await Promise.all([
-          camRes.json(),
-          markerRes.json()
-        ]);
-
-        if (signal?.aborted) return;
+        if (signal.aborted || ownController.signal.aborted) return;
 
         setCameras(camJson.data || []);
         setTotalMatching(
@@ -216,48 +290,79 @@ export default function CommandCenter({
         );
         setPage(camJson.page || 1);
         setTotalPages(camJson.total_pages || 1);
+      } catch (err) {
+        if ((err as Error)?.name !== "AbortError") {
+          console.error("Failed to fetch cameras page:", err);
+        }
+      } finally {
+        if (!ownController.signal.aborted) {
+          setLoadingCameras(false);
+        }
+      }
+    },
+    [buildFilterParams]
+  );
+
+  // Fetch compact map markers only when initial load or filters change
+  const fetchMapMarkers = useCallback(
+    async (signal?: AbortSignal) => {
+      setLoadingMarkers(true);
+      try {
+        const markerParams = buildFilterParams();
+        markerParams.set("mode", "markers");
+
+        const markerRes = await fetch(
+          `/api/cameras?${markerParams.toString()}`,
+          { signal }
+        );
+        const markerJson = await markerRes.json();
+
+        if (signal?.aborted) return;
+
         if (Array.isArray(markerJson.markers)) {
           setMarkers(markerJson.markers);
         }
       } catch (err) {
         if ((err as Error)?.name !== "AbortError") {
-          console.error("Failed to fetch cameras:", err);
+          console.error("Failed to fetch map markers:", err);
         }
       } finally {
         if (!signal?.aborted) {
-          setLoadingCameras(false);
           setLoadingMarkers(false);
         }
       }
     },
-    [
-      searchQuery,
-      selectedProvince,
-      selectedCity,
-      selectedSource,
-      selectedStatus,
-      selectedProtocol
-    ]
+    [buildFilterParams]
   );
 
   useEffect(() => {
     const controller = new AbortController();
+    const isInitialMount = !hasMountedFilterRef.current;
+
     const timer = setTimeout(
       () => {
-        fetchFilteredCameras(1, controller.signal);
+        hasMountedFilterRef.current = true;
+        if (isInitialMount) {
+          // Reuse SSR initialCameras on first mount; fetch compact map markers once
+          fetchMapMarkers(controller.signal);
+        } else {
+          fetchCameraPage(1, controller.signal);
+          fetchMapMarkers(controller.signal);
+        }
       },
-      searchQuery ? 180 : 0
+      isInitialMount || !searchQuery ? 0 : 250
     );
+
     return () => {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [fetchFilteredCameras, searchQuery]);
+  }, [fetchCameraPage, fetchMapMarkers, searchQuery]);
 
   const hydrateCameraDetail = useCallback(
     async (cameraId: string, fallbackCam?: Camera) => {
       const cached = cameraDetailCacheRef.current.get(cameraId);
-      if (cached && cached.nearby.length > 0) {
+      if (cached && cached.nearbyLoaded && cached.camera.stream_url) {
         setNearbyCameras(cached.nearby);
         setCameraInteraction((prev) =>
           prev.type !== "none" && prev.cameraId === cameraId
@@ -278,7 +383,8 @@ export default function CommandCenter({
           if (fullCam) {
             cameraDetailCacheRef.current.set(cameraId, {
               camera: fullCam,
-              nearby: near
+              nearby: near,
+              nearbyLoaded: true
             });
             setNearbyCameras(near);
             setCameraInteraction((prev) =>
@@ -311,20 +417,24 @@ export default function CommandCenter({
     [cameras, hydrateCameraDetail]
   );
 
-  // 2. Map Marker Click Handler -> Opens ONLY Compact Floating Map Preview
+  // 2. Map Marker Click Handler -> Opens ONLY Compact Floating Map Preview & hydrates details if needed
   const handleMapMarkerClick = useCallback(
     (cameraId: string, cam?: Camera) => {
-      const resolved =
-        cam ||
+      const fullCached =
         cameraDetailCacheRef.current.get(cameraId)?.camera ||
         cameras.find((c) => c.id === cameraId);
+      const resolved =
+        fullCached && fullCached.stream_url ? fullCached : cam || fullCached;
       setCameraInteraction({
         type: "map-preview",
         cameraId,
         camera: resolved
       });
+      if (!resolved?.stream_url) {
+        hydrateCameraDetail(cameraId, resolved);
+      }
     },
-    [cameras]
+    [cameras, hydrateCameraDetail]
   );
 
   // 3. Transition from Compact Map Preview -> Full Camera Detail Modal
@@ -580,7 +690,10 @@ export default function CommandCenter({
           <div className="lg:col-span-3 min-[1400px]:col-span-1 min-w-0">
             <AnimatedDropdown
               value={selectedProvince}
-              onChange={setSelectedProvince}
+              onChange={(prov) => {
+                setSelectedProvince(prov);
+                setSelectedCity("");
+              }}
               options={provinceOptions}
               placeholder="Semua 38 Provinsi"
               ariaLabel="Filter Provinsi"
@@ -777,7 +890,7 @@ export default function CommandCenter({
                 <button
                   type="button"
                   disabled={page <= 1}
-                  onClick={() => fetchFilteredCameras(page - 1)}
+                  onClick={() => fetchCameraPage(page - 1)}
                   className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#161C2B] hover:bg-[#1C2436] border border-[var(--border-subtle)] disabled:opacity-40 text-xs text-[#E2E8F0] transition-colors"
                 >
                   <ChevronLeft className="w-3.5 h-3.5" />
@@ -789,7 +902,7 @@ export default function CommandCenter({
                 <button
                   type="button"
                   disabled={page >= totalPages}
-                  onClick={() => fetchFilteredCameras(page + 1)}
+                  onClick={() => fetchCameraPage(page + 1)}
                   className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#161C2B] hover:bg-[#1C2436] border border-[var(--border-subtle)] disabled:opacity-40 text-xs text-[#E2E8F0] transition-colors"
                 >
                   <span>Berikutnya</span>
@@ -862,7 +975,7 @@ export default function CommandCenter({
               <button
                 type="button"
                 disabled={page <= 1}
-                onClick={() => fetchFilteredCameras(page - 1)}
+                onClick={() => fetchCameraPage(page - 1)}
                 className="px-3 py-1.5 rounded-xl bg-[#161C2B] hover:bg-[#1C2436] border border-[var(--border-default)] disabled:opacity-40 text-xs font-medium text-[#E2E8F0] transition-colors"
               >
                 ← Sebelumnya
@@ -874,7 +987,7 @@ export default function CommandCenter({
               <button
                 type="button"
                 disabled={page >= totalPages}
-                onClick={() => fetchFilteredCameras(page + 1)}
+                onClick={() => fetchCameraPage(page + 1)}
                 className="px-3 py-1.5 rounded-xl bg-[#161C2B] hover:bg-[#1C2436] border border-[var(--border-default)] disabled:opacity-40 text-xs font-medium text-[#E2E8F0] transition-colors"
               >
                 Berikutnya →
@@ -920,6 +1033,7 @@ export default function CommandCenter({
                         type="button"
                         onClick={() => {
                           setSelectedProvince(p.id);
+                          setSelectedCity("");
                           setActiveTab("map");
                         }}
                         className="text-xs text-[#60A5FA] hover:text-white font-medium transition-colors"

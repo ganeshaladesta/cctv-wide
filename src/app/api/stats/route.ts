@@ -5,7 +5,8 @@ export async function GET() {
   const store = getDataStore();
   return NextResponse.json(store.getStats(), {
     headers: {
-      "Cache-Control": "public, max-age=60, stale-while-revalidate=30"
+      "Cache-Control":
+        "public, max-age=60, s-maxage=300, stale-while-revalidate=60"
     }
   });
 }

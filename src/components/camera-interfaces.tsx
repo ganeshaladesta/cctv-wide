@@ -267,7 +267,16 @@ export function CameraMapPreview({
 
           {/* Compact Live Camera Stream Preview */}
           <div className="h-[195px] w-full bg-black">
-            <CameraVideoPlayer camera={camera} compact />
+            {camera.stream_url ? (
+              <CameraVideoPlayer camera={camera} compact />
+            ) : (
+              <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-zinc-400">
+                <div className="w-6 h-6 border-2 border-sky-500 border-t-transparent rounded-full animate-spin" />
+                <span className="text-[11px] font-mono">
+                  Memuat detail stream kamera...
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Action Buttons: Detail Kamera, Halaman Kamera, Multi-View */}
@@ -429,7 +438,16 @@ export function CameraDetailModal({
             {/* Modal Body: Video Player + Technical Info */}
             <div className="flex-1 overflow-y-auto p-3 sm:p-5 grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-5">
               <div className="lg:col-span-8 h-[220px] xs:h-[260px] sm:h-[380px]">
-                <CameraVideoPlayer camera={camera} />
+                {camera.stream_url ? (
+                  <CameraVideoPlayer camera={camera} />
+                ) : (
+                  <div className="w-full h-full rounded-xl bg-[#07090D] border border-[var(--border-default)] flex flex-col items-center justify-center gap-2 text-[#98A4B8]">
+                    <div className="w-7 h-7 border-2 border-[#3B82F6] border-t-white rounded-full animate-spin" />
+                    <span className="text-xs font-mono">
+                      Memuat detail kamera...
+                    </span>
+                  </div>
+                )}
               </div>
 
               <div className="lg:col-span-4 min-w-0">

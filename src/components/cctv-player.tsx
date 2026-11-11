@@ -17,6 +17,10 @@ import {
 } from "lucide-react";
 import { Camera } from "@/lib/types";
 import { FavoritesButton } from "@/components/motion-ui";
+import {
+  isTokenExchangeWrapperUrl,
+  normalizeLegacyStreamUrl
+} from "@/lib/stream-url";
 
 interface CCTVPlayerProps {
   camera: Camera;
@@ -76,6 +80,11 @@ export function CCTVPlayer({
   const [retryCount, setRetryCount] = useState(0);
   const [usingProxy, setUsingProxy] = useState(false);
   const [snapshotTick, setSnapshotTick] = useState(0);
+  const [isHttpsPage, setIsHttpsPage] = useState(false);
+
+  useEffect(() => {
+    setIsHttpsPage(window.location.protocol === "https:");
+  }, []);
 
   // AMG Sarinah cameras permanently use Direct HLS; other providers preserve camera.protocol
   const activeProtocol = React.useMemo(
@@ -107,42 +116,68 @@ export function CCTVPlayer({
     setLoading(true);
   }, [camera.id, camera.stream_url]);
 
-  const effectiveStreamUrl = React.useMemo(() => {
-    const raw = amgChannelId
+  const rawStreamUrl = React.useMemo(() => {
+    return amgChannelId
       ? `https://stream.amg.id/memfs/${amgChannelId}.m3u8`
-      : camera.stream_url;
-    if (usingProxy && raw.startsWith("http") && activeProtocol !== "EMBED") {
-      return `/api/proxy?url=${encodeURIComponent(raw)}`;
+      : normalizeLegacyStreamUrl(camera.stream_url, camera.source_url);
+  }, [camera.stream_url, camera.source_url, amgChannelId]);
+
+  const requiresManifestWrapperProxy = React.useMemo(
+    () => activeProtocol === "HLS" && isTokenExchangeWrapperUrl(rawStreamUrl),
+    [activeProtocol, rawStreamUrl]
+  );
+
+  const isMixedContentBlocked =
+    isHttpsPage &&
+    rawStreamUrl.startsWith("http://") &&
+    activeProtocol !== "WEBSOCKET";
+
+  const effectiveStreamUrl = React.useMemo(() => {
+    // Only manifest-only CORS/token-wrapper resolution or static snapshots may use /api/proxy;
+    // binary .ts/.m4s segments, MP4, and continuous MJPEG always load directly from the provider.
+    const allowProxy =
+      activeProtocol === "SNAPSHOT" ||
+      (activeProtocol === "HLS" && (usingProxy || requiresManifestWrapperProxy));
+    if (allowProxy && rawStreamUrl.startsWith("https://")) {
+      return `/api/proxy?url=${encodeURIComponent(rawStreamUrl)}`;
     }
-    return raw;
-  }, [camera.stream_url, amgChannelId, usingProxy, activeProtocol]);
+    return rawStreamUrl;
+  }, [rawStreamUrl, usingProxy, requiresManifestWrapperProxy, activeProtocol]);
 
   const reportStatus = useCallback(
     (status: "ONLINE" | "OFFLINE") => {
-      onStatusChange?.(camera.id, status);
-      fetch(`/api/cameras/${encodeURIComponent(camera.id)}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status })
-      }).catch(() => {});
+      if (status !== camera.status) {
+        onStatusChange?.(camera.id, status);
+      }
     },
-    [camera.id, onStatusChange]
+    [camera.id, camera.status, onStatusChange]
   );
 
+  // Stop background loading indicator immediately when browser Mixed Content blocks HTTP-only streams
+  useEffect(() => {
+    if (isMixedContentBlocked) {
+      setLoading(false);
+      setError(
+        "Stream HTTP tidak didukung di halaman HTTPS (Mixed Content) — gunakan tautan langsung atau portal resmi."
+      );
+    }
+  }, [isMixedContentBlocked]);
   // Snapshot polling timer
   useEffect(() => {
-    if (activeProtocol !== "SNAPSHOT" || !isVisible) return;
+    if (activeProtocol !== "SNAPSHOT" || !isVisible || isMixedContentBlocked) {
+      return;
+    }
     const interval = setInterval(() => {
       if (!document.hidden) {
         setSnapshotTick((t) => t + 1);
       }
     }, 6000);
     return () => clearInterval(interval);
-  }, [activeProtocol, isVisible]);
+  }, [activeProtocol, isVisible, isMixedContentBlocked]);
 
-  // HLS & MP4 Video lifecycle
+  // HLS & MP4 Video lifecycle (Direct HLS first; never auto-proxy slow streams or binary video)
   useEffect(() => {
-    if (!isVisible) return;
+    if (!isVisible || isMixedContentBlocked) return;
     if (activeProtocol !== "HLS" && activeProtocol !== "MP4") {
       return;
     }
@@ -156,13 +191,9 @@ export function CCTVPlayer({
 
     const watchdog = setTimeout(() => {
       if (cancelled) return;
-      if (!usingProxy && effectiveStreamUrl.startsWith("http")) {
-        setUsingProxy(true);
-      } else {
-        setLoading(false);
-        setError("Stream timeout — kamera sedang offline atau sibuk");
-      }
-    }, 22000);
+      setLoading(false);
+      setError("Stream timeout — server kamera sedang offline atau sibuk");
+    }, 18000);
 
     const cleanup = () => {
       clearTimeout(watchdog);
@@ -179,7 +210,7 @@ export function CCTVPlayer({
         backBufferLength: 15,
         maxBufferLength: 15,
         manifestLoadingTimeOut: 12000,
-        manifestLoadingMaxRetry: 2,
+        manifestLoadingMaxRetry: 1,
         levelLoadingTimeOut: 12000,
         fragLoadingTimeOut: 15000
       });
@@ -203,7 +234,17 @@ export function CCTVPlayer({
         if (cancelled) return;
         if (data.fatal) {
           clearTimeout(watchdog);
-          if (!usingProxy && effectiveStreamUrl.startsWith("http")) {
+          // Only retry through /api/proxy (manifest-only, direct .ts/.m4s segments)
+          // when manifest loading/parsing hits CORS, never for segment errors or slow timeouts.
+          const isManifestCorsOrParse =
+            data.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR ||
+            data.details === Hls.ErrorDetails.MANIFEST_PARSING_ERROR;
+          if (
+            !usingProxy &&
+            !requiresManifestWrapperProxy &&
+            isManifestCorsOrParse &&
+            rawStreamUrl.startsWith("https://")
+          ) {
             hls.destroy();
             hlsRef.current = null;
             setUsingProxy(true);
@@ -223,7 +264,7 @@ export function CCTVPlayer({
         }
       });
     } else {
-      // Native HLS (Safari) or MP4
+      // Native HLS (Safari) or MP4 — direct provider playback only (never proxy MP4 video)
       video.src = effectiveStreamUrl;
       const onLoaded = () => {
         if (cancelled) return;
@@ -236,12 +277,8 @@ export function CCTVPlayer({
       const onErr = () => {
         if (cancelled) return;
         clearTimeout(watchdog);
-        if (!usingProxy && effectiveStreamUrl.startsWith("http")) {
-          setUsingProxy(true);
-          return;
-        }
         setLoading(false);
-        setError("Gagal memuat video stream");
+        setError("Gagal memuat video stream secara langsung dari sumber");
       };
       video.addEventListener("loadeddata", onLoaded);
       video.addEventListener("error", onErr);
@@ -261,7 +298,10 @@ export function CCTVPlayer({
     camera.id,
     activeProtocol,
     effectiveStreamUrl,
+    rawStreamUrl,
     usingProxy,
+    requiresManifestWrapperProxy,
+    isMixedContentBlocked,
     retryCount,
     isVisible,
     autoPlay,
@@ -371,30 +411,41 @@ export function CCTVPlayer({
             }}
           />
         ) : activeProtocol === "MJPEG" || activeProtocol === "SNAPSHOT" ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={
-              activeProtocol === "SNAPSHOT"
-                ? `${effectiveStreamUrl}${
-                    effectiveStreamUrl.includes("?") ? "&" : "?"
-                  }_t=${snapshotTick}`
-                : effectiveStreamUrl
-            }
-            alt={camera.name}
-            className="w-full h-full object-contain"
-            onLoad={() => {
-              setLoading(false);
-              setError(null);
-            }}
-            onError={() => {
-              if (!usingProxy && effectiveStreamUrl.startsWith("http")) {
-                setUsingProxy(true);
-              } else {
-                setLoading(false);
-                setError("Gagal memuat frame MJPEG/Snapshot");
+          isMixedContentBlocked ? null : (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={
+                activeProtocol === "SNAPSHOT"
+                  ? `${effectiveStreamUrl}${
+                      effectiveStreamUrl.includes("?") ? "&" : "?"
+                    }_t=${snapshotTick}`
+                  : rawStreamUrl
               }
-            }}
-          />
+              alt={camera.name}
+              className="w-full h-full object-contain"
+              onLoad={() => {
+                setLoading(false);
+                setError(null);
+              }}
+              onError={() => {
+                // Only allow single snapshot proxy fallback; NEVER proxy continuous MJPEG streams
+                if (
+                  activeProtocol === "SNAPSHOT" &&
+                  !usingProxy &&
+                  rawStreamUrl.startsWith("https://")
+                ) {
+                  setUsingProxy(true);
+                } else {
+                  setLoading(false);
+                  setError(
+                    activeProtocol === "MJPEG"
+                      ? "Stream MJPEG tidak dapat dimuat langsung — silakan buka sumber atau portal resmi."
+                      : "Gagal memuat frame Snapshot"
+                  );
+                }
+              }}
+            />
+          )
         ) : activeProtocol === "WEBSOCKET" ? (
           <div className="flex flex-col items-center justify-center p-4 text-center">
             <Radio className="w-8 h-8 text-[#10B981] mb-2 animate-pulse" />
@@ -455,6 +506,17 @@ export function CCTVPlayer({
                 <RotateCw className="w-3.5 h-3.5" />
                 <span>Coba Lagi</span>
               </button>
+              {rawStreamUrl.startsWith("http") && (
+                <a
+                  href={rawStreamUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#161C2B] hover:bg-[#1C2436] border border-[var(--border-default)] text-[#E2E8F0] text-xs transition-colors"
+                >
+                  <span>Buka Stream Langsung</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              )}
               <a
                 href={camera.source_url}
                 target="_blank"
