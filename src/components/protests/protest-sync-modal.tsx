@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { X, RefreshCw, CheckCircle2, AlertTriangle, Clock, Database, FileSpreadsheet, Server } from "lucide-react";
 import { ProtestSyncLog } from "@/lib/types/protests";
 
@@ -38,6 +39,33 @@ export function ProtestSyncModal({
     }
   };
 
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+    return () => setMounted(false);
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen, onClose]);
+
   useEffect(() => {
     if (isOpen) {
       fetchSyncStatus();
@@ -46,7 +74,7 @@ export function ProtestSyncModal({
     }
   }, [isOpen]);
 
-  if (!isOpen) return null;
+  if (!isOpen || !mounted || typeof document === "undefined") return null;
 
   const handleRunSync = async (forceFixture: boolean = false) => {
     setLoading(true);
@@ -78,19 +106,38 @@ export function ProtestSyncModal({
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-[600] flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm overflow-y-auto">
-      <div className="relative w-full max-w-2xl bg-[#0D121B] border border-[var(--border-default)] rounded-2xl shadow-2xl p-5 sm:p-6 my-8">
-        {/* Header */}
-        <div className="flex items-center justify-between pb-4 border-b border-[var(--border-subtle)]">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
-              <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-            </div>
-            <div>
-              <h2 className="text-base font-bold text-white tracking-wide">
-                Sinkronisasi Data Unjuk Rasa
-              </h2>
+  const modalContent = (
+    <div
+      className="unras-modal-wrapper"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="unras-sync-title"
+    >
+      <div
+        className="unras-modal-backdrop"
+        onClick={onClose}
+        aria-hidden="true"
+      />
+      <div
+        className="unras-detail-modal"
+        onClick={(e) => {
+          if (e.target === e.currentTarget) onClose();
+        }}
+      >
+        <div
+          className="relative w-full max-w-2xl bg-[#0D121B] border border-[var(--border-default)] rounded-2xl shadow-2xl p-5 sm:p-6 my-auto pointer-events-auto"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between pb-4 border-b border-[var(--border-subtle)]">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+              </div>
+              <div>
+                <h2 id="unras-sync-title" className="text-base font-bold text-white tracking-wide">
+                  Sinkronisasi Data Unjuk Rasa
+                </h2>
               <p className="text-xs text-[#98A4B8]">
                 Integrasi Workbook OneDrive Worksheet 'NEW UNRAS 2022-2026'
               </p>
@@ -254,8 +301,11 @@ export function ProtestSyncModal({
             Tutup
           </button>
         </div>
+        </div>
       </div>
     </div>
   );
+
+  return createPortal(modalContent, document.body);
 }
 

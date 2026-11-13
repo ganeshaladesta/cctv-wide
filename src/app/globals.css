@@ -59,19 +59,66 @@
 
   /* Strictly Isolated Z-Index Hierarchy */
   --z-background: 0;
+  --z-base: 0;
   --z-app-shell: 1;
   --z-map-tiles: 0;
   --z-map-markers: 10;
-  --z-map-controls: 20;
-  --z-map-preview: 30;
-  --z-filter-toolbar: 40;
+  --z-map-controls: 100;
+  --z-map-preview: 120;
+  --z-sticky-header: 200;
+  --z-filter-toolbar: 300;
+  --z-toolbar: 300;
   --z-dropdown-trigger: 300;
   --z-dropdown-panel: 400;
+  --z-dropdown: 400;
   --z-navbar: 500;
-  --z-modal-backdrop: 900;
-  --z-modal-content: 1000;
-  --z-modal-tooltip: 1100;
-  --z-loading-overlay: 2000;
+  --z-modal-backdrop: 9998;
+  --z-modal: 9999;
+  --z-modal-content: 9999;
+  --z-modal-tooltip: 10000;
+  --z-toast: 10000;
+  --z-loading-overlay: 10001;
+}
+
+/* Unras Modal Stacking & Layering Hierarchy */
+.unras-modal-wrapper {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal, 9999);
+  pointer-events: none;
+}
+
+.unras-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal-backdrop, 9998);
+  isolation: isolate;
+  background-color: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  pointer-events: auto;
+}
+
+.unras-detail-modal {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal, 9999);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow-y: auto;
+  padding: 0.75rem;
+  pointer-events: none;
+}
+
+@media (min-width: 640px) {
+  .unras-detail-modal {
+    padding: 1rem;
+  }
+}
+
+.unras-detail-modal > * {
+  pointer-events: auto;
 }
 
 @layer base {

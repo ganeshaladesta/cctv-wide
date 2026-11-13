@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { X, Plus, AlertTriangle, MapPin, Calendar, Clock, Users, Shield } from "lucide-react";
 import { ProtestEvent, ProtestUrgency } from "@/lib/types/protests";
 
@@ -36,8 +37,34 @@ export function ProtestCreateModal({
     validated_lng: "",
     situation_summary: ""
   });
+  const [mounted, setMounted] = useState(false);
 
-  if (!isOpen) return null;
+  useEffect(() => {
+    setMounted(true);
+    return () => setMounted(false);
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen, onClose]);
+
+  if (!isOpen || !mounted || typeof document === "undefined") return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -75,19 +102,38 @@ export function ProtestCreateModal({
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-[600] flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm overflow-y-auto">
-      <div className="relative w-full max-w-2xl bg-[#0D121B] border border-[var(--border-default)] rounded-2xl shadow-2xl p-5 sm:p-6 my-8">
-        {/* Header */}
-        <div className="flex items-center justify-between pb-4 border-b border-[var(--border-subtle)]">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-blue-500/10 border border-blue-500/30 flex items-center justify-center text-blue-400">
-              <Plus className="w-4 h-4" />
-            </div>
-            <div>
-              <h2 className="text-base font-bold text-white tracking-wide">
-                Tambah Aksi Unjuk Rasa Manual
-              </h2>
+  const modalContent = (
+    <div
+      className="unras-modal-wrapper"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="unras-create-title"
+    >
+      <div
+        className="unras-modal-backdrop"
+        onClick={onClose}
+        aria-hidden="true"
+      />
+      <div
+        className="unras-detail-modal"
+        onClick={(e) => {
+          if (e.target === e.currentTarget) onClose();
+        }}
+      >
+        <div
+          className="relative w-full max-w-2xl bg-[#0D121B] border border-[var(--border-default)] rounded-2xl shadow-2xl p-5 sm:p-6 my-auto pointer-events-auto"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between pb-4 border-b border-[var(--border-subtle)]">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-blue-500/10 border border-blue-500/30 flex items-center justify-center text-blue-400">
+                <Plus className="w-4 h-4" />
+              </div>
+              <div>
+                <h2 id="unras-create-title" className="text-base font-bold text-white tracking-wide">
+                  Tambah Aksi Unjuk Rasa Manual
+                </h2>
               <p className="text-xs text-[#98A4B8]">
                 Entri pemantauan situasi lapangan SCC - EAGLE EYES
               </p>
@@ -335,8 +381,11 @@ export function ProtestCreateModal({
             </button>
           </div>
         </form>
+        </div>
       </div>
     </div>
   );
+
+  return createPortal(modalContent, document.body);
 }
 

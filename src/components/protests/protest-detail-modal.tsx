@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import {
   X,
   MapPin,
@@ -50,6 +51,7 @@ export function ProtestDetailModal({
   onSelectCameraToPlay
 }: ProtestDetailModalProps) {
   const [activeTab, setActiveTab] = useState<TabType>("ringkasan");
+  const [mounted, setMounted] = useState(false);
   const [loading, setLoading] = useState(true);
   const [eventData, setEventData] = useState<ProtestEvent | null>(null);
   const [reports, setReports] = useState<ProtestOperatorReport[]>([]);
@@ -111,13 +113,38 @@ export function ProtestDetailModal({
   };
 
   useEffect(() => {
+    setMounted(true);
+    return () => setMounted(false);
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen || !protestId) return;
+
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen, protestId, onClose]);
+
+  useEffect(() => {
     if (isOpen && protestId) {
       setActiveTab("ringkasan");
       fetchDetail(protestId);
     }
   }, [isOpen, protestId]);
 
-  if (!isOpen || !protestId) return null;
+  if (!isOpen || !protestId || !mounted || typeof document === "undefined") return null;
 
   // Add Situational Report
   const handleAddReport = async (e: React.FormEvent) => {
@@ -293,29 +320,51 @@ export function ProtestDetailModal({
     setTimeout(() => setCopied(false), 2000);
   };
 
-  return (
-    <div className="fixed inset-0 z-[600] flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-sm overflow-y-auto">
-      <div className="relative w-full max-w-4xl bg-[#0D121B] border border-[var(--border-default)] rounded-2xl shadow-2xl overflow-hidden flex flex-col my-6 max-h-[90vh]">
-        {/* Modal Top Bar */}
-        <div className="px-5 py-4 border-b border-[var(--border-subtle)] bg-[#111622] flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-3">
-            <span
-              className={`px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${
-                eventData?.status === "ongoing"
-                  ? "bg-red-500/20 text-red-400 border border-red-500/40 animate-pulse"
-                  : eventData?.status === "scheduled"
-                  ? "bg-amber-500/20 text-amber-400 border border-amber-500/40"
-                  : eventData?.status === "monitoring"
-                  ? "bg-purple-500/20 text-purple-400 border border-purple-500/40"
-                  : "bg-slate-500/20 text-slate-300 border border-slate-500/40"
-              }`}
-            >
-              {eventData?.status || "Loading..."}
-            </span>
-            <div>
-              <h2 className="text-sm sm:text-base font-bold text-white line-clamp-1">
-                {eventData?.isu_tuntutan || "Memuat Aksi Unjuk Rasa..."}
-              </h2>
+  const modalContent = (
+    <div
+      className="unras-modal-wrapper"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="unras-detail-title"
+    >
+      {/* Full viewport isolated backdrop */}
+      <div
+        className="unras-modal-backdrop"
+        onClick={onClose}
+        aria-hidden="true"
+      />
+
+      {/* Centered modal container */}
+      <div
+        className="unras-detail-modal"
+        onClick={(e) => {
+          if (e.target === e.currentTarget) onClose();
+        }}
+      >
+        <div
+          className="relative w-full max-w-4xl bg-[#0D121B] border border-[var(--border-default)] rounded-2xl shadow-2xl overflow-hidden flex flex-col my-auto max-h-[90vh] pointer-events-auto"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Modal Top Bar */}
+          <div className="px-5 py-4 border-b border-[var(--border-subtle)] bg-[#111622] flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-3">
+              <span
+                className={`px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${
+                  eventData?.status === "ongoing"
+                    ? "bg-red-500/20 text-red-400 border border-red-500/40 animate-pulse"
+                    : eventData?.status === "scheduled"
+                    ? "bg-amber-500/20 text-amber-400 border border-amber-500/40"
+                    : eventData?.status === "monitoring"
+                    ? "bg-purple-500/20 text-purple-400 border border-purple-500/40"
+                    : "bg-slate-500/20 text-slate-300 border border-slate-500/40"
+                }`}
+              >
+                {eventData?.status || "Loading..."}
+              </span>
+              <div>
+                <h2 id="unras-detail-title" className="text-sm sm:text-base font-bold text-white line-clamp-1">
+                  {eventData?.isu_tuntutan || "Memuat Aksi Unjuk Rasa..."}
+                </h2>
               <p className="text-[11px] text-[#98A4B8]">
                 {eventData?.kode_unras} • {eventData?.tanggal} • {eventData?.lokasi}
               </p>
@@ -939,6 +988,9 @@ export function ProtestDetailModal({
         </div>
       </div>
     </div>
+  </div>
   );
+
+  return createPortal(modalContent, document.body);
 }
 
