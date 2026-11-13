@@ -349,8 +349,7 @@ class ProtestDataStore {
       this.memoryEvents.clear();
       this.memoryReports.clear();
       this.memoryHistory.clear();
-      this.memoryCameraLinks.clear();
-      this.memoryAttachments.clear();
+      this.memoryLinks.clear();
       this.memorySyncLogs = [];
       return { deleted: count };
     }
