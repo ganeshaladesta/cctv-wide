@@ -1,9 +1,19 @@
 @echo off
-title SCC EAGLE EYES - Sinkronisasi Excel Unras Otomatis
+title SCC EAGLE EYES - Sinkronisasi Excel Unjuk Rasa (Opsi Gratis)
 color 0A
-cd /d "d:\MORNINGSTAR\cctv"
-node scripts/sync-local-excel.mjs
+echo =====================================================================
+echo  SCC - EAGLE EYES: Sync Otomatis Excel Unras ke Cloud / Database
+echo  (Solusi 100%% Gratis - Tanpa Power Automate Premium)
+echo =====================================================================
 echo.
-echo Tekan tombol apa saja untuk menutup jendela ini...
-pause >nul
+cd /d "%~dp0"
 
+echo [1/2] Menjalankan sinkronisasi data Excel...
+call npm run sync:unras
+
+echo.
+echo =====================================================================
+echo  Sinkronisasi Selesai!
+echo =====================================================================
+echo.
+pause

@@ -292,9 +292,15 @@ async function run() {
   const periodEndISO = now.toISOString();
   const periodStartISO = new Date(periodStartMs).toISOString();
 
-  console.log("🗓  Jendela Waktu Sinkronisasi (Rolling 7 Hari):");
-  console.log(`   Mulai  : ${periodStartISO} (${new Date(periodStartMs).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })} WIB)`);
-  console.log(`   Selesai: ${periodEndISO} (${now.toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })} WIB)\n`);
+  const isSyncAll = process.argv.includes("--all") || process.env.SYNC_ALL === "true";
+
+  if (isSyncAll) {
+    console.log("🗓  Mode Sinkronisasi: SEMUA DATA (Full Sync --all)\n");
+  } else {
+    console.log("🗓  Jendela Waktu Sinkronisasi (Rolling 7 Hari):");
+    console.log(`   Mulai  : ${periodStartISO} (${new Date(periodStartMs).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })} WIB)`);
+    console.log(`   Selesai: ${periodEndISO} (${now.toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })} WIB)\n`);
+  }
 
   const windowEvents = [];
   let skippedTotal = 0;
@@ -302,17 +308,25 @@ async function run() {
   for (let i = 0; i < rawRows.length; i++) {
     const mapped = mapExcelRow(rawRows[i], i);
     if (!mapped["WAKTU DAN TGL KEJADIAN ISO"]) {
+      if (isSyncAll && mapped["TANGGAL"]) {
+        windowEvents.push(mapped);
+        continue;
+      }
       skippedTotal++;
       continue;
     }
 
     const eventMs = Date.parse(mapped["WAKTU DAN TGL KEJADIAN ISO"]);
     if (isNaN(eventMs)) {
+      if (isSyncAll && mapped["TANGGAL"]) {
+        windowEvents.push(mapped);
+        continue;
+      }
       skippedTotal++;
       continue;
     }
 
-    if (eventMs >= periodStartMs && eventMs < periodEndMs) {
+    if (isSyncAll || (eventMs >= periodStartMs && eventMs < periodEndMs)) {
       windowEvents.push(mapped);
     } else {
       skippedTotal++;
