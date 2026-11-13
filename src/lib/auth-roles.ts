@@ -128,7 +128,12 @@ export function canDeleteProtest(userOrRole: UserProfile | UserRole): boolean {
 
 export function canTriggerSync(userOrRole: UserProfile | UserRole): boolean {
   const role = extractRole(userOrRole);
-  return role === "admin" || role === "operator";
+  return role === "admin";
+}
+
+export function canTriggerManualSync(userOrRole: UserProfile | UserRole): boolean {
+  const role = extractRole(userOrRole);
+  return role === "admin";
 }
 
 export function canViewSyncLogs(userOrRole: UserProfile | UserRole): boolean {

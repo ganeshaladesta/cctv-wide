@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { resolveCurrentUser, canTriggerSync } from '@/lib/auth-roles';
+import { resolveCurrentUser, canTriggerManualSync } from '@/lib/auth-roles';
 import { msGraphSyncService } from '@/lib/ms-graph-sync';
 import { protestStore } from '@/lib/protest-store';
+import {
+  calculateRolling7DayWindow,
+  processRolling7DaySync
+} from '@/lib/unras-rolling-sync';
+import { RollingSyncPayload } from '@/lib/types/protests';
 
 /**
  * GET /api/protests/sync
@@ -14,23 +19,39 @@ export async function GET(request: NextRequest) {
     const cronSecret = process.env.CRON_SECRET;
     const isSecretValid = cronSecret && authHeader === `Bearer ${cronSecret}`;
 
-    // If it's a cron invocation, execute scheduled sync
+    // If it's a cron invocation, execute rolling 7-day scheduled sync
     if (isCron || isSecretValid) {
-      const result = await msGraphSyncService.executeSync({
-        syncType: 'scheduled',
-        triggeredBy: 'system-cron'
-      });
-      return NextResponse.json(result, { status: result.success ? 200 : 500 });
+      const window = calculateRolling7DayWindow();
+      let rows = msGraphSyncService.isConfigured()
+        ? await msGraphSyncService.fetchWorkbookRows().catch(() => msGraphSyncService.loadLocalFixture())
+        : msGraphSyncService.loadLocalFixture();
+
+      const payload: RollingSyncPayload = {
+        sync_type: 'rolling_7d',
+        timezone: 'Asia/Jakarta',
+        period_start: window.period_start,
+        period_end: window.period_end,
+        events: rows
+      };
+
+      const result = await processRolling7DaySync(
+        payload,
+        'scheduler_cron',
+        'System Daily Cron (05:00 WIB)'
+      );
+      return NextResponse.json(result, { status: result.status === 'failed' ? 500 : 200 });
     }
 
-    // Otherwise, regular users can query sync logs
+    // Otherwise, query sync logs & stats
     const user = resolveCurrentUser(request);
     const logs = await protestStore.getSyncLogs(10);
+    const stats = await protestStore.getStats();
     return NextResponse.json({
       success: true,
       user: { role: user.role, id: user.id },
       isGraphConfigured: msGraphSyncService.isConfigured(),
-      latestSyncLogs: logs
+      latestSyncLogs: logs,
+      stats
     });
   } catch (error: any) {
     return NextResponse.json(
@@ -42,8 +63,8 @@ export async function GET(request: NextRequest) {
 
 /**
  * POST /api/protests/sync
- * Triggers manual synchronization with Microsoft Graph / OneDrive
- * Requires Admin or Operator role
+ * Triggers manual synchronization using execution-time rolling 7-day window
+ * Strictly restricted to Admin users
  */
 export async function POST(request: NextRequest) {
   try {
@@ -54,40 +75,50 @@ export async function POST(request: NextRequest) {
 
     const user = resolveCurrentUser(request);
 
-    // If not a valid cron trigger, verify user permissions (Admin or Operator)
-    if (!isCron && !isSecretValid && !canTriggerSync(user)) {
+    // Manual sync is strictly restricted to Admin users
+    if (!isCron && !isSecretValid && !canTriggerManualSync(user)) {
       return NextResponse.json(
         {
           success: false,
-          error: 'Akses ditolak: Hanya Admin atau Operator yang berhak menjalankan sinkronisasi data unjuk rasa.'
+          error: 'Akses ditolak: Hanya Administrator yang berhak menjalankan sinkronisasi data unjuk rasa.'
         },
         { status: 403 }
       );
     }
 
-    // Optional options from request body
+    // Calculate execution-time rolling 7-day window
+    const window = calculateRolling7DayWindow();
+
     let forceFixture = false;
     try {
       const body = await request.json();
       if (body?.forceFixture === true) forceFixture = true;
-    } catch {
-      // Empty body is acceptable
-    }
+    } catch {}
 
-    // Check query params
     const { searchParams } = new URL(request.url);
     if (searchParams.get('fixture') === 'true') {
       forceFixture = true;
     }
 
-    const result = await msGraphSyncService.executeSync({
-      syncType: isCron || isSecretValid ? 'scheduled' : 'manual',
-      triggeredBy: isCron || isSecretValid ? 'system-cron' : `${user.role}:${user.name || user.id}`,
-      forceFixture
-    });
+    let rows = msGraphSyncService.isConfigured() && !forceFixture
+      ? await msGraphSyncService.fetchWorkbookRows().catch(() => msGraphSyncService.loadLocalFixture())
+      : msGraphSyncService.loadLocalFixture();
 
-    const statusCode = result.status === 'skipped' ? 409 : (result.success ? 200 : 500);
+    const payload: RollingSyncPayload = {
+      sync_type: 'rolling_7d',
+      timezone: 'Asia/Jakarta',
+      period_start: window.period_start,
+      period_end: window.period_end,
+      events: rows
+    };
 
+    const result = await processRolling7DaySync(
+      payload,
+      isCron || isSecretValid ? 'scheduler_cron' : 'manual_admin',
+      isCron || isSecretValid ? 'system-cron' : `${user.role}:${user.name || user.id}`
+    );
+
+    const statusCode = result.status === 'skipped' ? 409 : (result.status === 'failed' ? 500 : 200);
     return NextResponse.json(result, { status: statusCode });
   } catch (error: any) {
     return NextResponse.json(
@@ -99,4 +130,5 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
 

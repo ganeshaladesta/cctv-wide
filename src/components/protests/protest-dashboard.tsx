@@ -20,7 +20,14 @@ import {
   ExternalLink,
   Layers
 } from "lucide-react";
-import { ProtestEvent, ProtestFilterParams, ProtestStats, ProtestStatus, ProtestUrgency } from "@/lib/types/protests";
+import {
+  ProtestEvent,
+  ProtestFilterParams,
+  ProtestStats,
+  ProtestStatus,
+  ProtestUrgency,
+  ProtestSyncLog
+} from "@/lib/types/protests";
 import { ProtestDetailModal } from "./protest-detail-modal";
 import { ProtestCreateModal } from "./protest-create-modal";
 import { ProtestSyncModal } from "./protest-sync-modal";
@@ -59,6 +66,11 @@ export function ProtestDashboard({
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isSyncOpen, setIsSyncOpen] = useState(false);
 
+  // Sync state for dedicated sync panel
+  const [syncLogs, setSyncLogs] = useState<ProtestSyncLog[]>([]);
+  const [syncLoading, setSyncLoading] = useState(false);
+  const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
+
   // Fetch KPI Stats
   const fetchStats = async () => {
     try {
@@ -69,6 +81,48 @@ export function ProtestDashboard({
       }
     } catch {
       // Ignored
+    }
+  };
+
+  // Fetch Sync Logs
+  const fetchSyncData = async () => {
+    try {
+      const res = await fetch("/api/protests/sync");
+      const json = await res.json();
+      if (res.ok && json.success) {
+        setSyncLogs(json.latestSyncLogs || []);
+      }
+    } catch {
+      // Ignored
+    }
+  };
+
+  const triggerDashboardManualSync = async () => {
+    setSyncLoading(true);
+    setSyncFeedback(null);
+    try {
+      const res = await fetch("/api/protests/sync", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-scc-user-role": "admin"
+        },
+        body: JSON.stringify({ forceFixture: true })
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        throw new Error(json.error || "Gagal sinkronisasi data unjuk rasa.");
+      }
+      setSyncFeedback(
+        `Sinkronisasi Selesai: +${json.summary?.inserted ?? 0} baru, ~${json.summary?.updated ?? 0} diperbarui, /${json.summary?.skipped ?? 0} dilewati.`
+      );
+      await fetchStats();
+      await fetchSyncData();
+      fetchProtests();
+    } catch (err: any) {
+      setSyncFeedback(`Error: ${err.message}`);
+    } finally {
+      setSyncLoading(false);
     }
   };
 
@@ -107,6 +161,7 @@ export function ProtestDashboard({
   useEffect(() => {
     fetchStats();
     fetchProtests();
+    fetchSyncData();
   }, [fetchProtests]);
 
   const handleOpenDetail = (id: string) => {
@@ -117,6 +172,7 @@ export function ProtestDashboard({
   const handleRefresh = () => {
     fetchStats();
     fetchProtests();
+    fetchSyncData();
   };
 
   return (
@@ -156,9 +212,22 @@ export function ProtestDashboard({
         </div>
       </div>
 
-      {/* KPI Stats Counter Grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-        <div className="p-3.5 rounded-2xl bg-[#0D121B] border border-[var(--border-default)]">
+      {/* Exactly Four Primary KPI Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {/* Card 1: Jumlah Total Unras */}
+        <div className="p-4 rounded-2xl bg-[#0D121B] border border-[var(--border-default)]">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-[#98A4B8] font-medium">Jumlah Total Unras</span>
+            <Layers className="w-3.5 h-3.5 text-blue-400" />
+          </div>
+          <div className="text-2xl font-black text-white mt-1">
+            {stats?.total_events ?? 0}
+          </div>
+          <span className="text-[10px] text-[#64748B] block mt-0.5">Seluruh aksi tercatat</span>
+        </div>
+
+        {/* Card 2: Sedang Berlangsung */}
+        <div className="p-4 rounded-2xl bg-[#0D121B] border border-[var(--border-default)]">
           <div className="flex items-center justify-between">
             <span className="text-xs text-[#98A4B8] font-medium">Sedang Berlangsung</span>
             <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
@@ -166,53 +235,152 @@ export function ProtestDashboard({
           <div className="text-2xl font-black text-red-400 mt-1">
             {stats?.ongoing_events ?? 0}
           </div>
-          <span className="text-[10px] text-[#64748B] block mt-0.5">Prioritas pemantauan</span>
+          <span className="text-[10px] text-[#64748B] block mt-0.5">Prioritas pemantauan aktif</span>
         </div>
 
-        <div className="p-3.5 rounded-2xl bg-[#0D121B] border border-[var(--border-default)]">
+        {/* Card 3: Belum Berlangsung */}
+        <div className="p-4 rounded-2xl bg-[#0D121B] border border-[var(--border-default)]">
           <div className="flex items-center justify-between">
-            <span className="text-xs text-[#98A4B8] font-medium">Terencana Hari Ini</span>
+            <span className="text-xs text-[#98A4B8] font-medium">Belum Berlangsung</span>
             <Clock className="w-3.5 h-3.5 text-amber-400" />
           </div>
           <div className="text-2xl font-black text-amber-400 mt-1">
             {stats?.scheduled_events ?? 0}
           </div>
-          <span className="text-[10px] text-[#64748B] block mt-0.5">Siaga pengamanan</span>
+          <span className="text-[10px] text-[#64748B] block mt-0.5">Terjadwal & siaga pengamanan</span>
         </div>
 
-        <div className="p-3.5 rounded-2xl bg-[#0D121B] border border-[var(--border-default)]">
+        {/* Card 4: Selesai */}
+        <div className="p-4 rounded-2xl bg-[#0D121B] border border-[var(--border-default)]">
           <div className="flex items-center justify-between">
-            <span className="text-xs text-[#98A4B8] font-medium">Dalam Pemantauan</span>
-            <ShieldAlert className="w-3.5 h-3.5 text-purple-400" />
-          </div>
-          <div className="text-2xl font-black text-purple-400 mt-1">
-            {stats?.monitoring_events ?? 0}
-          </div>
-          <span className="text-[10px] text-[#64748B] block mt-0.5">Observasi pasca-audiensi</span>
-        </div>
-
-        <div className="p-3.5 rounded-2xl bg-[#0D121B] border border-[var(--border-default)]">
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-[#98A4B8] font-medium">Selesai / Kondusif</span>
+            <span className="text-xs text-[#98A4B8] font-medium">Selesai</span>
             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
           </div>
           <div className="text-2xl font-black text-emerald-400 mt-1">
-            {stats?.completed_events ?? 0}
+            {(stats?.completed_events ?? 0) + (stats?.monitoring_events ?? 0)}
           </div>
-          <span className="text-[10px] text-[#64748B] block mt-0.5">Arsip terekam</span>
-        </div>
-
-        <div className="p-3.5 rounded-2xl bg-[#0D121B] border border-[var(--border-default)] col-span-2 lg:col-span-1">
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-[#98A4B8] font-medium">Kamera CCTV Tertaut</span>
-            <Video className="w-3.5 h-3.5 text-blue-400" />
-          </div>
-          <div className="text-2xl font-black text-blue-400 mt-1">
-            {stats?.total_camera_links ?? 0}
-          </div>
-          <span className="text-[10px] text-[#64748B] block mt-0.5">Perimeter terawasi</span>
+          <span className="text-[10px] text-[#64748B] block mt-0.5">Kondusif & observasi terekam</span>
         </div>
       </div>
+
+      {/* Dedicated Sync Status Panel */}
+      {(() => {
+        const latestLog = syncLogs[0];
+        const lastSuccessLog = syncLogs.find((l) => l.status === "success");
+        const formatWib = (isoStr?: string | null): string => {
+          if (!isoStr) return "-";
+          try {
+            const d = new Date(isoStr);
+            return (
+              d.toLocaleString("id-ID", {
+                timeZone: "Asia/Jakarta",
+                day: "2-digit",
+                month: "short",
+                year: "numeric",
+                hour: "2-digit",
+                minute: "2-digit"
+              }) + " WIB"
+            );
+          } catch {
+            return isoStr;
+          }
+        };
+
+        return (
+          <div className="p-4 rounded-2xl bg-[#0D121B] border border-[var(--border-default)] space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2.5 border-b border-[var(--border-subtle)]">
+              <div className="flex items-center gap-2">
+                <RefreshCw className={`w-4 h-4 text-emerald-400 ${syncLoading ? "animate-spin" : ""}`} />
+                <div>
+                  <h3 className="text-xs font-bold text-white tracking-wide uppercase">
+                    Status Sinkronisasi Rolling 7-Hari
+                  </h3>
+                  <p className="text-[11px] text-[#98A4B8]">
+                    Alur Otomatis Power Automate (05:00 WIB) & Integrasi Workbook OneDrive
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {latestLog && (
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider ${
+                      latestLog.status === "success"
+                        ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30"
+                        : latestLog.status === "running"
+                        ? "bg-blue-500/15 text-blue-400 border border-blue-500/30 animate-pulse"
+                        : latestLog.status === "partial"
+                        ? "bg-amber-500/15 text-amber-400 border border-amber-500/30"
+                        : "bg-red-500/15 text-red-400 border border-red-500/30"
+                    }`}
+                  >
+                    Status: {latestLog.status}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={triggerDashboardManualSync}
+                  disabled={syncLoading}
+                  className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-500/20 transition-all flex items-center gap-1.5 disabled:opacity-50"
+                  title="Manual sync terbatas untuk peran Administrator"
+                >
+                  <RefreshCw className={`w-3 h-3 ${syncLoading ? "animate-spin" : ""}`} />
+                  <span>{syncLoading ? "Menyelaraskan..." : "Sync Sekarang (Admin)"}</span>
+                </button>
+              </div>
+            </div>
+
+            {syncFeedback && (
+              <div className="p-2.5 rounded-xl bg-blue-500/10 border border-blue-500/30 text-xs text-blue-300">
+                {syncFeedback}
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+              <div className="p-2.5 rounded-xl bg-[#141A28] border border-[var(--border-subtle)]">
+                <span className="text-[10px] text-[#64748B] block">Sinkronisasi Terakhir (Sukses)</span>
+                <span className="text-white font-medium mt-0.5 block truncate">
+                  {formatWib(lastSuccessLog?.completed_at || latestLog?.completed_at)}
+                </span>
+                <span className="text-[10px] text-[#98A4B8]">
+                  Percobaan: {formatWib(latestLog?.started_at)}
+                </span>
+              </div>
+
+              <div className="p-2.5 rounded-xl bg-[#141A28] border border-[var(--border-subtle)] col-span-1 md:col-span-2">
+                <span className="text-[10px] text-[#64748B] block">Jendela Sinkronisasi (Rolling 7 Hari)</span>
+                <div className="text-white font-medium mt-0.5 flex flex-wrap items-center gap-1">
+                  <span>{formatWib(latestLog?.period_start)}</span>
+                  <span className="text-[#64748B]">s/d</span>
+                  <span>{formatWib(latestLog?.period_end)}</span>
+                </div>
+                <span className="text-[10px] text-[#98A4B8]">Inklusi: start ≤ event &lt; end (Asia/Jakarta)</span>
+              </div>
+
+              <div className="p-2.5 rounded-xl bg-[#141A28] border border-[var(--border-subtle)]">
+                <span className="text-[10px] text-[#64748B] block">Rangkuman Rekaman Batch</span>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="text-emerald-400 font-bold" title="Baru Dibuat">
+                    +{latestLog?.records_created ?? 0}
+                  </span>
+                  <span className="text-blue-400 font-bold" title="Diperbarui">
+                    ~{latestLog?.records_updated ?? 0}
+                  </span>
+                  <span className="text-amber-400 font-bold" title="Dilewati (di luar 7 hari / invalid)">
+                    /{latestLog?.records_skipped ?? 0}
+                  </span>
+                  <span className="text-red-400 font-bold" title="Gagal">
+                    !{latestLog?.records_failed ?? 0}
+                  </span>
+                </div>
+                <span className="text-[10px] text-[#64748B] block mt-0.5">
+                  Total diterima: {latestLog?.records_received ?? 0} baris
+                </span>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Filter and Search Bar */}
       <div className="p-4 rounded-2xl bg-[#0D121B] border border-[var(--border-default)] space-y-3">

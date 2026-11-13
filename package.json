@@ -11,6 +11,8 @@
     "start": "next start",
     "lint": "next lint",
     "test": "node scripts/self-test.mjs",
+    "test:rolling-sync": "tsx scripts/test-rolling-sync.mjs",
+    "verify:protest": "node scripts/verify-protest-monitoring.mjs",
     "db:init": "node scripts/init-sqlite.mjs",
     "sync:sources": "node scripts/sync-sources.mjs",
     "verify:e2e": "node scripts/e2e-verify.mjs"
@@ -37,6 +39,7 @@
     "postcss": "^8.4.49",
     "sharp": "^0.35.5",
     "tailwindcss": "^3.4.17",
+    "tsx": "^4.23.15",
     "typescript": "^5.7.2"
   }
 }

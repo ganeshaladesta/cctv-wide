@@ -2,7 +2,8 @@
   {
     "ID KEJADIAN": "UNRAS-2026-JKT-001",
     "KODE_UNRAS": "UR-JKT-01",
-    "TANGGAL": "13/11/2026",
+    "WAKTU DAN TGL KEJADIAN ISO": "2026-11-12T09:00:00+07:00",
+    "TANGGAL": "2026-11-12",
     "WAKTU": "09:00 - selesai",
     "LOKASI": "Depan Gedung DPR/MPR RI, Jl. Gatot Subroto",
     "TITIK KUMPUL": "TVRI Senayan & Flyover Ladokgi",
@@ -22,8 +23,9 @@
   {
     "ID KEJADIAN": "UNRAS-2026-JKT-002",
     "KODE_UNRAS": "UR-JKT-02",
-    "TANGGAL": "13/11/2026",
-    "WAKTU": "10:30 WIB",
+    "WAKTU DAN TGL KEJADIAN ISO": "2026-11-13T06:30:00+07:00",
+    "TANGGAL": "2026-11-13",
+    "WAKTU": "06:30 WIB",
     "LOKASI": "Patung Kuda Arjuna Wiwaha, Jl. Medan Merdeka Barat",
     "TITIK KUMPUL": "Sarinah & Halte Bank Indonesia",
     "SASARAN": "Istana Merdeka / Mahkamah Konstitusi",
@@ -42,8 +44,9 @@
   {
     "ID KEJADIAN": "UNRAS-2026-BDG-003",
     "KODE_UNRAS": "UR-BDG-01",
-    "TANGGAL": "14/11/2026",
-    "WAKTU": "13:00 WIB",
+    "WAKTU DAN TGL KEJADIAN ISO": "2026-11-10T10:00:00+07:00",
+    "TANGGAL": "2026-11-10",
+    "WAKTU": "10:00 WIB",
     "LOKASI": "Gedung Sate, Jl. Diponegoro No. 22",
     "TITIK KUMPUL": "Monumen Perjuangan Rakyat Jawa Barat",
     "SASARAN": "Kantor Gubernur Jawa Barat",
@@ -62,7 +65,8 @@
   {
     "ID KEJADIAN": "UNRAS-2026-SBY-004",
     "KODE_UNRAS": "UR-SBY-01",
-    "TANGGAL": "13/11/2026",
+    "WAKTU DAN TGL KEJADIAN ISO": "2026-11-11T08:30:00+07:00",
+    "TANGGAL": "2026-11-11",
     "WAKTU": "08:30 WIB",
     "LOKASI": "Kantor Gubernur Jawa Timur, Jl. Pahlawan No. 110",
     "TITIK KUMPUL": "Kebun Binatang Surabaya (KBS)",
@@ -82,7 +86,8 @@
   {
     "ID KEJADIAN": "UNRAS-2026-SMG-005",
     "KODE_UNRAS": "UR-SMG-01",
-    "TANGGAL": "12/11/2026",
+    "WAKTU DAN TGL KEJADIAN ISO": "2026-11-09T10:00:00+07:00",
+    "TANGGAL": "2026-11-09",
     "WAKTU": "10:00 WIB",
     "LOKASI": "Kantor DPRD Jawa Tengah, Jl. Pahlawan",
     "TITIK KUMPUL": "Simpang Lima Semarang",
@@ -102,7 +107,8 @@
   {
     "ID KEJADIAN": "UNRAS-2026-MED-006",
     "KODE_UNRAS": "UR-MED-01",
-    "TANGGAL": "15/11/2026",
+    "WAKTU DAN TGL KEJADIAN ISO": "2026-11-18T09:00:00+07:00",
+    "TANGGAL": "2026-11-18",
     "WAKTU": "09:00 WIB",
     "LOKASI": "Kantor Walikota Medan, Jl. Kapten Maulana Lubis",
     "TITIK KUMPUL": "Lapangan Merdeka Medan",
@@ -117,12 +123,13 @@
     "LATITUDE": 3.5907,
     "LONGITUDE": 98.6756,
     "STATUS": "scheduled",
-    "KETERANGAN": "Rencana aksi damai pembagian selebaran dan orasi"
+    "KETERANGAN": "Rencana aksi damai pembagian selebaran dan orasi di masa depan"
   },
   {
     "ID KEJADIAN": "UNRAS-2026-UNMAPPED-007",
     "KODE_UNRAS": "UR-UNM-01",
-    "TANGGAL": "14/11/2026",
+    "WAKTU DAN TGL KEJADIAN ISO": "2026-11-12T11:00:00+07:00",
+    "TANGGAL": "2026-11-12",
     "WAKTU": "11:00 WIB",
     "LOKASI": "Kawasan Industri MM2100 Cikarang",
     "TITIK KUMPUL": "Bundaran Kawasan MM2100",
@@ -138,4 +145,3 @@
     "KETERANGAN": "Titik koordinat persis masih dalam konfirmasi intelkam lapangan (unmapped test case)"
   }
 ]
-

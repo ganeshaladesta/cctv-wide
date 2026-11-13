@@ -58,7 +58,7 @@ export function ProtestSyncModal({
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-scc-user-role": "operator"
+          "x-scc-user-role": "admin"
         },
         body: JSON.stringify({ forceFixture })
       });

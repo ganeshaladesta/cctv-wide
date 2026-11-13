@@ -63,6 +63,7 @@ const SEED_PROTESTS: Array<Omit<ProtestEvent, "id"> & { id?: string }> = [
     tanggal: "2026-11-14",
     waktu_mulai: "09:00:00",
     waktu_selesai: "16:00:00",
+    event_datetime: "2026-11-14T09:00:00+07:00",
     lokasi: "Gedung DPR/MPR RI, Jl. Gatot Subroto No.1",
     titik_kumpul: "Depan TVRI & Pintu Utama GBK Senayan",
     sasaran_aksi: "Gedung DPR/MPR RI & Gerbang Tol Senayan",
@@ -101,6 +102,7 @@ const SEED_PROTESTS: Array<Omit<ProtestEvent, "id"> & { id?: string }> = [
     tanggal: "2026-11-13",
     waktu_mulai: "13:30:00",
     waktu_selesai: "18:00:00",
+    event_datetime: "2026-11-13T13:30:00+07:00",
     lokasi: "Kantor KPU RI, Jl. Imam Bonjol No.29, Menteng",
     titik_kumpul: "Taman Suropati & Bunderan HI",
     sasaran_aksi: "Kantor KPU RI",
@@ -139,6 +141,7 @@ const SEED_PROTESTS: Array<Omit<ProtestEvent, "id"> & { id?: string }> = [
     tanggal: "2026-11-13",
     waktu_mulai: "10:00:00",
     waktu_selesai: "15:00:00",
+    event_datetime: "2026-11-13T10:00:00+07:00",
     lokasi: "Gedung Sate Bandung, Jl. Diponegoro No.22",
     titik_kumpul: "Lapangan Gasibu",
     sasaran_aksi: "Kantor Gubernur Jawa Barat (Gedung Sate)",
@@ -177,6 +180,7 @@ const SEED_PROTESTS: Array<Omit<ProtestEvent, "id"> & { id?: string }> = [
     tanggal: "2026-11-12",
     waktu_mulai: "08:30:00",
     waktu_selesai: "14:00:00",
+    event_datetime: "2026-11-12T08:30:00+07:00",
     lokasi: "Gedung Negara Grahadi, Jl. Gubernur Suryo No.7",
     titik_kumpul: "Taman Apsari Surabaya",
     sasaran_aksi: "Gedung Negara Grahadi Surabaya",
@@ -215,6 +219,7 @@ const SEED_PROTESTS: Array<Omit<ProtestEvent, "id"> & { id?: string }> = [
     tanggal: "2026-11-15",
     waktu_mulai: "10:00:00",
     waktu_selesai: "15:00:00",
+    event_datetime: "2026-11-15T10:00:00+07:00",
     lokasi: "Kantor Disnakertrans Jawa Tengah, Semarang",
     titik_kumpul: null,
     sasaran_aksi: "Kantor Disnakertrans",
@@ -281,6 +286,27 @@ class ProtestDataStore {
         this.db.exec(schemaSql);
       }
 
+      // Self-healing migration for SQLite columns
+      const syncCols = (this.db.prepare("PRAGMA table_info(protest_sync_logs)").all() as Array<{ name: string }>).map((c) => c.name);
+      if (!syncCols.includes("period_start")) {
+        this.db.exec("ALTER TABLE protest_sync_logs ADD COLUMN period_start TEXT;");
+      }
+      if (!syncCols.includes("period_end")) {
+        this.db.exec("ALTER TABLE protest_sync_logs ADD COLUMN period_end TEXT;");
+      }
+      if (!syncCols.includes("records_received")) {
+        this.db.exec("ALTER TABLE protest_sync_logs ADD COLUMN records_received INTEGER DEFAULT 0;");
+      }
+      if (!syncCols.includes("records_failed")) {
+        this.db.exec("ALTER TABLE protest_sync_logs ADD COLUMN records_failed INTEGER DEFAULT 0;");
+      }
+
+      const protestCols = (this.db.prepare("PRAGMA table_info(protests)").all() as Array<{ name: string }>).map((c) => c.name);
+      if (!protestCols.includes("event_datetime")) {
+        this.db.exec("ALTER TABLE protests ADD COLUMN event_datetime TEXT;");
+        this.db.exec("CREATE INDEX IF NOT EXISTS idx_protests_event_datetime ON protests(event_datetime);");
+      }
+
       // Check if protests table has records; if not, seed defaults
       const row = this.db.prepare("SELECT COUNT(*) as count FROM protests").get() as { count: number };
       if (row.count === 0) {
@@ -306,7 +332,7 @@ class ProtestDataStore {
     if (!this.db) return;
     const stmt = this.db.prepare(`
       INSERT INTO protests (
-        id, id_kejadian, kode_unras, tanggal, waktu_mulai, waktu_selesai,
+        id, id_kejadian, kode_unras, tanggal, waktu_mulai, waktu_selesai, event_datetime,
         lokasi, titik_kumpul, sasaran_aksi, isu_tuntutan, estimasi_massa_source,
         organisasi_kelompok, korlap_pimpinan, wilayah_hukum, provinsi, kota_kabupaten,
         keterangan_source, status, urgency, category_id, validated_lat, validated_lng,
@@ -314,7 +340,7 @@ class ProtestDataStore {
         editorial_final, is_archived, completed_at, completed_by_id, completed_by_name,
         created_at, updated_at, deleted_at, last_synced_at
       ) VALUES (
-        ?, ?, ?, ?, ?, ?,
+        ?, ?, ?, ?, ?, ?, ?,
         ?, ?, ?, ?, ?,
         ?, ?, ?, ?, ?,
         ?, ?, ?, ?, ?, ?,
@@ -333,6 +359,7 @@ class ProtestDataStore {
         p.tanggal,
         p.waktu_mulai,
         p.waktu_selesai,
+        p.event_datetime || null,
         p.lokasi,
         p.titik_kumpul,
         p.sasaran_aksi,
@@ -601,6 +628,7 @@ class ProtestDataStore {
       tanggal: input.tanggal,
       waktu_mulai: input.waktu_mulai || null,
       waktu_selesai: input.waktu_selesai || null,
+      event_datetime: input.event_datetime || null,
       lokasi: input.lokasi,
       titik_kumpul: input.titik_kumpul || null,
       sasaran_aksi: input.sasaran_aksi || null,
@@ -637,7 +665,7 @@ class ProtestDataStore {
     if (this.db) {
       const stmt = this.db.prepare(`
         INSERT INTO protests (
-          id, id_kejadian, kode_unras, tanggal, waktu_mulai, waktu_selesai,
+          id, id_kejadian, kode_unras, tanggal, waktu_mulai, waktu_selesai, event_datetime,
           lokasi, titik_kumpul, sasaran_aksi, isu_tuntutan, estimasi_massa_source,
           organisasi_kelompok, korlap_pimpinan, wilayah_hukum, provinsi, kota_kabupaten,
           keterangan_source, raw_source_payload, status, urgency, category_id,
@@ -645,7 +673,7 @@ class ProtestDataStore {
           editorial_draft, editorial_final, is_archived, completed_at, completed_by_id,
           completed_by_name, created_at, updated_at, deleted_at, last_synced_at
         ) VALUES (
-          ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?, ?,
           ?, ?, ?, ?, ?,
           ?, ?, ?, ?, ?,
           ?, ?, ?, ?, ?,
@@ -662,6 +690,7 @@ class ProtestDataStore {
         newEvent.tanggal,
         newEvent.waktu_mulai,
         newEvent.waktu_selesai,
+        newEvent.event_datetime || null,
         newEvent.lokasi,
         newEvent.titik_kumpul,
         newEvent.sasaran_aksi,
@@ -740,6 +769,7 @@ class ProtestDataStore {
           tanggal = ?,
           waktu_mulai = ?,
           waktu_selesai = ?,
+          event_datetime = ?,
           lokasi = ?,
           titik_kumpul = ?,
           sasaran_aksi = ?,
@@ -769,6 +799,7 @@ class ProtestDataStore {
         updatedEvent.tanggal,
         updatedEvent.waktu_mulai,
         updatedEvent.waktu_selesai,
+        updatedEvent.event_datetime || null,
         updatedEvent.lokasi,
         updatedEvent.titik_kumpul,
         updatedEvent.sasaran_aksi,
@@ -793,10 +824,10 @@ class ProtestDataStore {
         updatedEvent.completed_by_id,
         updatedEvent.completed_by_name,
         now,
-        id
+        existing.id
       );
     } else {
-      this.memoryEvents.set(id, updatedEvent);
+      this.memoryEvents.set(existing.id, updatedEvent);
     }
 
     if (updates.status && updates.status !== existing.status) {
@@ -808,7 +839,7 @@ class ProtestDataStore {
         agency: "SCC - EAGLE EYES"
       };
       this.recordStatusHistory({
-        protest_id: id,
+        protest_id: existing.id,
         from_status: existing.status,
         to_status: updates.status,
         reason: updates.situation_summary || `Perubahan status oleh ${effectiveUser.name}`,
@@ -1202,6 +1233,7 @@ class ProtestDataStore {
       tanggal: string;
       waktu_mulai?: string | null;
       waktu_selesai?: string | null;
+      event_datetime?: string | null;
       lokasi: string;
       titik_kumpul?: string | null;
       sasaran_aksi?: string | null;
@@ -1243,6 +1275,7 @@ class ProtestDataStore {
               tanggal = ?,
               waktu_mulai = ?,
               waktu_selesai = ?,
+              event_datetime = ?,
               lokasi = ?,
               titik_kumpul = ?,
               sasaran_aksi = ?,
@@ -1263,6 +1296,7 @@ class ProtestDataStore {
             rec.tanggal || existing.tanggal,
             rec.waktu_mulai ?? existing.waktu_mulai,
             rec.waktu_selesai ?? existing.waktu_selesai,
+            (rec.event_datetime ?? existing.event_datetime) || null,
             rec.lokasi || existing.lokasi,
             rec.titik_kumpul ?? existing.titik_kumpul,
             rec.sasaran_aksi ?? existing.sasaran_aksi,
@@ -1284,6 +1318,7 @@ class ProtestDataStore {
           existing.tanggal = rec.tanggal || existing.tanggal;
           existing.waktu_mulai = rec.waktu_mulai ?? existing.waktu_mulai;
           existing.waktu_selesai = rec.waktu_selesai ?? existing.waktu_selesai;
+          existing.event_datetime = rec.event_datetime ?? existing.event_datetime;
           existing.lokasi = rec.lokasi || existing.lokasi;
           existing.titik_kumpul = rec.titik_kumpul ?? existing.titik_kumpul;
           existing.sasaran_aksi = rec.sasaran_aksi ?? existing.sasaran_aksi;
@@ -1310,6 +1345,7 @@ class ProtestDataStore {
           tanggal: rec.tanggal,
           waktu_mulai: rec.waktu_mulai || null,
           waktu_selesai: rec.waktu_selesai || null,
+          event_datetime: rec.event_datetime || null,
           lokasi: rec.lokasi,
           titik_kumpul: rec.titik_kumpul || null,
           sasaran_aksi: rec.sasaran_aksi || null,
@@ -1346,7 +1382,7 @@ class ProtestDataStore {
         if (this.db) {
           this.db.prepare(`
             INSERT INTO protests (
-              id, id_kejadian, kode_unras, tanggal, waktu_mulai, waktu_selesai,
+              id, id_kejadian, kode_unras, tanggal, waktu_mulai, waktu_selesai, event_datetime,
               lokasi, titik_kumpul, sasaran_aksi, isu_tuntutan, estimasi_massa_source,
               organisasi_kelompok, korlap_pimpinan, wilayah_hukum, provinsi, kota_kabupaten,
               keterangan_source, raw_source_payload, status, urgency, category_id,
@@ -1354,7 +1390,7 @@ class ProtestDataStore {
               editorial_draft, editorial_final, is_archived, completed_at, completed_by_id,
               completed_by_name, created_at, updated_at, deleted_at, last_synced_at
             ) VALUES (
-              ?, ?, ?, ?, ?, ?,
+              ?, ?, ?, ?, ?, ?, ?,
               ?, ?, ?, ?, ?,
               ?, ?, ?, ?, ?,
               ?, ?, ?, ?, ?,
@@ -1369,6 +1405,7 @@ class ProtestDataStore {
             newEvent.tanggal,
             newEvent.waktu_mulai,
             newEvent.waktu_selesai,
+            newEvent.event_datetime || null,
             newEvent.lokasi,
             newEvent.titik_kumpul,
             newEvent.sasaran_aksi,
@@ -1420,47 +1457,69 @@ class ProtestDataStore {
   // ---------------------------------------------------------------------------
 
   createSyncLog(initial: {
-    triggered_by: "scheduler_cron" | "manual_admin" | "system";
+    id?: string;
+    started_at?: string;
+    completed_at?: string | null;
+    period_start?: string | null;
+    period_end?: string | null;
+    status?: ProtestSyncLog["status"];
+    triggered_by: ProtestSyncLog["triggered_by"];
     triggered_by_user?: string | null;
     source_worksheet?: string;
+    records_received?: number;
+    records_processed?: number;
+    records_created?: number;
+    records_updated?: number;
+    records_skipped?: number;
+    records_failed?: number;
+    error_details?: string | null;
+    duration_ms?: number | null;
   }): ProtestSyncLog {
-    const id = crypto.randomUUID();
-    const now = new Date().toISOString();
+    const id = initial.id || crypto.randomUUID();
+    const now = initial.started_at || new Date().toISOString();
     const log: ProtestSyncLog = {
       id,
       started_at: now,
-      completed_at: null,
-      status: "running",
+      completed_at: initial.completed_at || null,
+      period_start: initial.period_start || null,
+      period_end: initial.period_end || null,
+      status: initial.status || "running",
       triggered_by: initial.triggered_by,
       triggered_by_user: initial.triggered_by_user || null,
       source_worksheet: initial.source_worksheet || "NEW UNRAS 2022-2026",
-      records_processed: 0,
-      records_created: 0,
-      records_updated: 0,
-      records_skipped: 0,
-      error_details: null,
-      duration_ms: null
+      records_received: initial.records_received || 0,
+      records_processed: initial.records_processed || 0,
+      records_created: initial.records_created || 0,
+      records_updated: initial.records_updated || 0,
+      records_skipped: initial.records_skipped || 0,
+      records_failed: initial.records_failed || 0,
+      error_details: initial.error_details || null,
+      duration_ms: initial.duration_ms ?? null
     };
 
     if (this.db) {
       this.db.prepare(`
         INSERT INTO protest_sync_logs (
-          id, started_at, completed_at, status, triggered_by, triggered_by_user,
-          source_worksheet, records_processed, records_created, records_updated, records_skipped,
-          error_details, duration_ms
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          id, started_at, completed_at, period_start, period_end, status, triggered_by, triggered_by_user,
+          source_worksheet, records_received, records_processed, records_created, records_updated, records_skipped,
+          records_failed, error_details, duration_ms
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         log.id,
         log.started_at,
         log.completed_at || null,
+        log.period_start || null,
+        log.period_end || null,
         log.status,
         log.triggered_by,
         log.triggered_by_user || null,
         log.source_worksheet,
+        log.records_received || 0,
         log.records_processed,
         log.records_created,
         log.records_updated,
         log.records_skipped,
+        log.records_failed || 0,
         log.error_details || null,
         log.duration_ms ?? null
       );
@@ -1487,21 +1546,29 @@ class ProtestDataStore {
       this.db.prepare(`
         UPDATE protest_sync_logs SET
           completed_at = ?,
+          period_start = ?,
+          period_end = ?,
           status = ?,
+          records_received = ?,
           records_processed = ?,
           records_created = ?,
           records_updated = ?,
           records_skipped = ?,
+          records_failed = ?,
           error_details = ?,
           duration_ms = ?
         WHERE id = ?
       `).run(
         completedAt,
+        updates.period_start !== undefined ? updates.period_start : (existing.period_start ? String(existing.period_start) : null),
+        updates.period_end !== undefined ? updates.period_end : (existing.period_end ? String(existing.period_end) : null),
         String(updates.status || existing.status),
+        Number(updates.records_received ?? existing.records_received ?? 0),
         Number(updates.records_processed ?? existing.records_processed ?? 0),
         Number(updates.records_created ?? existing.records_created ?? 0),
         Number(updates.records_updated ?? existing.records_updated ?? 0),
         Number(updates.records_skipped ?? existing.records_skipped ?? 0),
+        Number(updates.records_failed ?? existing.records_failed ?? 0),
         updates.error_details !== undefined ? updates.error_details : (existing.error_details ? String(existing.error_details) : null),
         durationMs,
         id
@@ -1512,14 +1579,18 @@ class ProtestDataStore {
         id: String(updated.id),
         started_at: String(updated.started_at),
         completed_at: updated.completed_at ? String(updated.completed_at) : null,
+        period_start: updated.period_start ? String(updated.period_start) : null,
+        period_end: updated.period_end ? String(updated.period_end) : null,
         status: updated.status as ProtestSyncLog["status"],
         triggered_by: updated.triggered_by as ProtestSyncLog["triggered_by"],
         triggered_by_user: updated.triggered_by_user ? String(updated.triggered_by_user) : null,
         source_worksheet: String(updated.source_worksheet),
+        records_received: Number(updated.records_received || 0),
         records_processed: Number(updated.records_processed || 0),
         records_created: Number(updated.records_created || 0),
         records_updated: Number(updated.records_updated || 0),
         records_skipped: Number(updated.records_skipped || 0),
+        records_failed: Number(updated.records_failed || 0),
         error_details: updated.error_details ? String(updated.error_details) : null,
         duration_ms: updated.duration_ms != null ? Number(updated.duration_ms) : null
       };
@@ -1545,14 +1616,18 @@ class ProtestDataStore {
         id: String(r.id),
         started_at: String(r.started_at),
         completed_at: r.completed_at ? String(r.completed_at) : null,
+        period_start: r.period_start ? String(r.period_start) : null,
+        period_end: r.period_end ? String(r.period_end) : null,
         status: r.status as ProtestSyncLog["status"],
         triggered_by: r.triggered_by as ProtestSyncLog["triggered_by"],
         triggered_by_user: r.triggered_by_user ? String(r.triggered_by_user) : null,
         source_worksheet: String(r.source_worksheet),
+        records_received: Number(r.records_received || 0),
         records_processed: Number(r.records_processed || 0),
         records_created: Number(r.records_created || 0),
         records_updated: Number(r.records_updated || 0),
         records_skipped: Number(r.records_skipped || 0),
+        records_failed: Number(r.records_failed || 0),
         error_details: r.error_details ? String(r.error_details) : null,
         duration_ms: r.duration_ms != null ? Number(r.duration_ms) : null
       }));
@@ -1665,6 +1740,7 @@ class ProtestDataStore {
       tanggal: String(r.tanggal),
       waktu_mulai: r.waktu_mulai ? String(r.waktu_mulai) : null,
       waktu_selesai: r.waktu_selesai ? String(r.waktu_selesai) : null,
+      event_datetime: r.event_datetime ? String(r.event_datetime) : null,
       lokasi: String(r.lokasi),
       titik_kumpul: r.titik_kumpul ? String(r.titik_kumpul) : null,
       sasaran_aksi: r.sasaran_aksi ? String(r.sasaran_aksi) : null,

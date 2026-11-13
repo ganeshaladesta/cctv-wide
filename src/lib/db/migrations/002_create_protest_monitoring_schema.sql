@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS public.protests (
     tanggal DATE NOT NULL,
     waktu_mulai TIME,
     waktu_selesai TIME,
+    event_datetime TIMESTAMPTZ,
     lokasi TEXT NOT NULL,
     titik_kumpul TEXT,
     sasaran_aksi TEXT,
@@ -83,6 +84,7 @@ CREATE TABLE IF NOT EXISTS public.protests (
 CREATE INDEX IF NOT EXISTS idx_protests_id_kejadian ON public.protests(id_kejadian);
 CREATE INDEX IF NOT EXISTS idx_protests_kode_unras ON public.protests(kode_unras);
 CREATE INDEX IF NOT EXISTS idx_protests_tanggal ON public.protests(tanggal);
+CREATE INDEX IF NOT EXISTS idx_protests_event_datetime ON public.protests(event_datetime);
 CREATE INDEX IF NOT EXISTS idx_protests_status ON public.protests(status);
 CREATE INDEX IF NOT EXISTS idx_protests_urgency ON public.protests(urgency);
 CREATE INDEX IF NOT EXISTS idx_protests_category ON public.protests(category_id);
@@ -170,14 +172,18 @@ CREATE TABLE IF NOT EXISTS public.protest_sync_logs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     completed_at TIMESTAMPTZ,
-    status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'success', 'partial', 'failed')),
-    triggered_by TEXT NOT NULL DEFAULT 'scheduler_cron' CHECK (triggered_by IN ('scheduler_cron', 'manual_admin', 'system')),
+    period_start TIMESTAMPTZ,
+    period_end TIMESTAMPTZ,
+    status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'success', 'partial', 'failed', 'skipped')),
+    triggered_by TEXT NOT NULL DEFAULT 'power_automate' CHECK (triggered_by IN ('power_automate', 'scheduler_cron', 'manual_admin', 'system')),
     triggered_by_user TEXT,
     source_worksheet TEXT NOT NULL DEFAULT 'NEW UNRAS 2022-2026',
+    records_received INTEGER NOT NULL DEFAULT 0,
     records_processed INTEGER NOT NULL DEFAULT 0,
     records_created INTEGER NOT NULL DEFAULT 0,
     records_updated INTEGER NOT NULL DEFAULT 0,
     records_skipped INTEGER NOT NULL DEFAULT 0,
+    records_failed INTEGER NOT NULL DEFAULT 0,
     error_details TEXT,
     duration_ms INTEGER
 );

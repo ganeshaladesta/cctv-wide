@@ -52,6 +52,7 @@ export interface ProtestEvent {
   tanggal: string; // YYYY-MM-DD
   waktu_mulai: string | null; // HH:mm:ss or HH:mm
   waktu_selesai: string | null; // HH:mm:ss or HH:mm
+  event_datetime?: string | null; // ISO 8601 timestamp from 'WAKTU DAN TGL KEJADIAN ISO'
   lokasi: string; // Lokasi / Tempat Aksi
   titik_kumpul: string | null; // Titik Kumpul massa
   sasaran_aksi: string | null; // Sasaran / Objek Aksi
@@ -154,6 +155,7 @@ export interface ExcelProtestRow {
   'KODE_UNRAS'?: string;
   'TANGGAL': string;
   'WAKTU'?: string;
+  'WAKTU DAN TGL KEJADIAN ISO'?: string;
   'LOKASI': string;
   'TITIK KUMPUL'?: string;
   'SASARAN'?: string;
@@ -177,16 +179,50 @@ export interface ProtestSyncLog {
   id: string; // UUID
   started_at: string;
   completed_at: string | null;
+  period_start?: string | null; // Rolling 7-day start boundary (ISO)
+  period_end?: string | null; // Rolling 7-day end boundary (ISO)
   status: "running" | "success" | "partial" | "failed" | "skipped";
-  triggered_by: "scheduler_cron" | "manual_admin" | "system";
+  triggered_by: "power_automate" | "scheduler_cron" | "manual_admin" | "system";
   triggered_by_user?: string | null;
   source_worksheet: string;
+  records_received?: number;
   records_processed: number;
   records_created: number;
   records_updated: number;
   records_skipped: number;
+  records_failed?: number;
   error_details: string | null;
   duration_ms: number | null;
+}
+
+/**
+ * Contract for POST /api/integrations/unras/sync
+ * Power Automate Scheduled Cloud Flow -> Vercel API
+ */
+export interface RollingSyncPayload {
+  sync_type: "rolling_7d";
+  timezone: "Asia/Jakarta";
+  period_start: string; // ISO 8601 string
+  period_end: string; // ISO 8601 string
+  events: ExcelProtestRow[];
+}
+
+export interface RollingSyncResult {
+  success: boolean;
+  status: "success" | "partial" | "failed" | "skipped";
+  execution_id: string;
+  period_start: string;
+  period_end: string;
+  summary: {
+    received: number;
+    processed: number;
+    inserted: number;
+    updated: number;
+    skipped: number;
+    failed: number;
+  };
+  errors?: string[];
+  duration_ms: number;
 }
 
 /**

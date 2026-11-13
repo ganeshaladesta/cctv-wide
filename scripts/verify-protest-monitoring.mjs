@@ -231,8 +231,11 @@ if (countCheck.count === 0) {
       sp.has_coordinates, sp.situation_summary || null, sp.is_archived, sp.created_at, sp.updated_at
     );
   }
+}
 
-  // Insert linked camera test case
+// Ensure linked camera test case exists
+const linkCheck = db.prepare("SELECT COUNT(*) as count FROM protest_camera_links").get();
+if (linkCheck.count === 0) {
   db.prepare(`
     INSERT OR IGNORE INTO protest_camera_links (
       id, protest_id, camera_id, camera_name, camera_status, distance_meters,
