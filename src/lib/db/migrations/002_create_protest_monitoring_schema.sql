@@ -275,3 +275,4 @@ CREATE POLICY "Operators and admins can view sync logs"
 CREATE POLICY "Admin or service role can manage sync logs"
     ON public.protest_sync_logs FOR ALL
     USING (public.current_user_role() = 'admin' OR auth.role() = 'service_role');
+

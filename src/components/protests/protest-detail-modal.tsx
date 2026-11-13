@@ -941,3 +941,4 @@ export function ProtestDetailModal({
     </div>
   );
 }
+
