@@ -427,7 +427,7 @@ class ProtestDataStore {
 
     if (this.db) {
       let whereClauses = ["deleted_at IS NULL"];
-      const params: unknown[] = [];
+      const params: (string | number | null)[] = [];
 
       if (filters.status) {
         if (filters.status === "active") {
@@ -910,7 +910,7 @@ class ProtestDataStore {
         report.crowd_estimate,
         report.is_pinned ? 1 : 0,
         report.created_at,
-        report.updated_at
+        report.updated_at || null
       );
     } else {
       const list = this.memoryReports.get(input.protest_id) || [];
@@ -1082,11 +1082,11 @@ class ProtestDataStore {
         link.protest_id,
         link.camera_id,
         link.camera_name,
-        link.camera_stream_url,
-        link.camera_protocol,
-        link.camera_status,
+        link.camera_stream_url || null,
+        link.camera_protocol || null,
+        link.camera_status || null,
         link.distance_meters,
-        link.notes,
+        link.notes || null,
         link.is_recommended ? 1 : 0,
         link.linked_by_id,
         link.linked_by_name,
@@ -1445,17 +1445,17 @@ class ProtestDataStore {
       `).run(
         log.id,
         log.started_at,
-        log.completed_at,
+        log.completed_at || null,
         log.status,
         log.triggered_by,
-        log.triggered_by_user,
+        log.triggered_by_user || null,
         log.source_worksheet,
         log.records_processed,
         log.records_created,
         log.records_updated,
         log.records_skipped,
-        log.error_details,
-        log.duration_ms
+        log.error_details || null,
+        log.duration_ms ?? null
       );
     } else {
       this.memorySyncLogs.unshift(log);
@@ -1490,12 +1490,12 @@ class ProtestDataStore {
         WHERE id = ?
       `).run(
         completedAt,
-        updates.status || existing.status,
-        updates.records_processed ?? existing.records_processed,
-        updates.records_created ?? existing.records_created,
-        updates.records_updated ?? existing.records_updated,
-        updates.records_skipped ?? existing.records_skipped,
-        updates.error_details ?? existing.error_details,
+        String(updates.status || existing.status),
+        Number(updates.records_processed ?? existing.records_processed ?? 0),
+        Number(updates.records_created ?? existing.records_created ?? 0),
+        Number(updates.records_updated ?? existing.records_updated ?? 0),
+        Number(updates.records_skipped ?? existing.records_skipped ?? 0),
+        updates.error_details !== undefined ? updates.error_details : (existing.error_details ? String(existing.error_details) : null),
         durationMs,
         id
       );
@@ -1701,3 +1701,5 @@ export function getProtestStore(): ProtestDataStore {
   }
   return globalProtestStore;
 }
+
+export const protestStore = getProtestStore();

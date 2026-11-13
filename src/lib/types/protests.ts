@@ -147,13 +147,37 @@ export interface ProtestCameraLink {
 }
 
 /**
+ * Raw Row Format from Microsoft OneDrive Worksheet 'NEW UNRAS 2022-2026'
+ */
+export interface ExcelProtestRow {
+  'ID KEJADIAN'?: string;
+  'KODE_UNRAS'?: string;
+  'TANGGAL': string;
+  'WAKTU'?: string;
+  'LOKASI': string;
+  'TITIK KUMPUL'?: string;
+  'SASARAN'?: string;
+  'ISU': string;
+  'JUMLAH MASSA'?: string | number;
+  'ORGANISASI'?: string;
+  'KORLAP'?: string;
+  'WILAYAH HUKUM'?: string;
+  'PROVINSI'?: string;
+  'KOTA/KABUPATEN'?: string;
+  'LATITUDE'?: number;
+  'LONGITUDE'?: number;
+  'STATUS'?: string;
+  'KETERANGAN'?: string;
+}
+
+/**
  * Sync History & Audit Logs
  */
 export interface ProtestSyncLog {
   id: string; // UUID
   started_at: string;
   completed_at: string | null;
-  status: "running" | "success" | "partial" | "failed";
+  status: "running" | "success" | "partial" | "failed" | "skipped";
   triggered_by: "scheduler_cron" | "manual_admin" | "system";
   triggered_by_user?: string | null;
   source_worksheet: string;

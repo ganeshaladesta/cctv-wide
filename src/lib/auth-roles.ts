@@ -97,30 +97,41 @@ export function resolveCurrentUser(req?: NextRequest | Request): UserProfile {
   return DEFAULT_OPERATOR;
 }
 
-export function canCreateProtest(role: UserRole): boolean {
+function extractRole(userOrRole: UserProfile | UserRole): UserRole {
+  return typeof userOrRole === "string" ? userOrRole : userOrRole.role;
+}
+
+export function canCreateProtest(userOrRole: UserProfile | UserRole): boolean {
+  const role = extractRole(userOrRole);
   return role === "admin" || role === "operator";
 }
 
-export function canEditProtest(role: UserRole): boolean {
+export function canEditProtest(userOrRole: UserProfile | UserRole): boolean {
+  const role = extractRole(userOrRole);
   return role === "admin" || role === "operator";
 }
 
-export function canUpdateStatus(role: UserRole): boolean {
+export function canUpdateStatus(userOrRole: UserProfile | UserRole): boolean {
+  const role = extractRole(userOrRole);
   return role === "admin" || role === "operator";
 }
 
-export function canLinkCCTV(role: UserRole): boolean {
+export function canLinkCCTV(userOrRole: UserProfile | UserRole): boolean {
+  const role = extractRole(userOrRole);
   return role === "admin" || role === "operator";
 }
 
-export function canDeleteProtest(role: UserRole): boolean {
+export function canDeleteProtest(userOrRole: UserProfile | UserRole): boolean {
+  const role = extractRole(userOrRole);
   return role === "admin";
 }
 
-export function canTriggerSync(role: UserRole): boolean {
-  return role === "admin";
+export function canTriggerSync(userOrRole: UserProfile | UserRole): boolean {
+  const role = extractRole(userOrRole);
+  return role === "admin" || role === "operator";
 }
 
-export function canViewSyncLogs(role: UserRole): boolean {
-  return role === "admin" || role === "operator";
+export function canViewSyncLogs(userOrRole: UserProfile | UserRole): boolean {
+  const role = extractRole(userOrRole);
+  return role === "admin" || role === "operator" || role === "viewer";
 }
