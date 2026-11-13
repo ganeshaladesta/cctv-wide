@@ -712,7 +712,7 @@ class ProtestDataStore {
   updateProtest(
     id: string,
     updates: Partial<ProtestEvent>,
-    user: UserProfile
+    user?: UserProfile
   ): ProtestEvent | null {
     const existing = this.getProtestById(id);
     if (!existing) return null;
@@ -800,12 +800,19 @@ class ProtestDataStore {
     }
 
     if (updates.status && updates.status !== existing.status) {
+      const effectiveUser = user || {
+        id: "usr-system-admin",
+        email: "admin@scc.go.id",
+        name: "Petugas Operator SCC",
+        role: "operator" as const,
+        agency: "SCC - EAGLE EYES"
+      };
       this.recordStatusHistory({
         protest_id: id,
         from_status: existing.status,
         to_status: updates.status,
-        reason: updates.situation_summary || `Perubahan status oleh ${user.name}`,
-        user
+        reason: updates.situation_summary || `Perubahan status oleh ${effectiveUser.name}`,
+        user: effectiveUser
       });
     }
 
@@ -849,7 +856,7 @@ class ProtestDataStore {
     return updated;
   }
 
-  softDeleteProtest(id: string, user: UserProfile): boolean {
+  softDeleteProtest(id: string, user?: UserProfile): boolean {
     const now = new Date().toISOString();
     if (this.db) {
       const res = this.db.prepare("UPDATE protests SET deleted_at = ?, updated_at = ? WHERE id = ?").run(now, now, id);
