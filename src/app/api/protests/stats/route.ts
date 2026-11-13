@@ -1,13 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { protestStore } from '@/lib/protest-store';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 /**
  * GET /api/protests/stats
  * Dashboard KPI Summary Counters
  */
 export async function GET(_request: NextRequest) {
   try {
-    const stats = protestStore.getStats();
+    const stats = await protestStore.getStats();
     return NextResponse.json({
       success: true,
       data: stats

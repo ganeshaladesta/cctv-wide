@@ -390,7 +390,7 @@ export async function processRolling7DaySync(
 
     // 5. Execute Idempotent Batch Upsert
     if (validBatchForStore.length > 0) {
-      const upsertStats = protestStore.upsertFromExcelBatch(validBatchForStore);
+      const upsertStats = await protestStore.upsertFromExcelBatch(validBatchForStore);
       inserted = upsertStats.created;
       updated = upsertStats.updated;
       failed += (validBatchForStore.length - (inserted + updated));

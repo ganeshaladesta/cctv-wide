@@ -8,6 +8,9 @@ import {
 } from '@/lib/unras-rolling-sync';
 import { RollingSyncPayload } from '@/lib/types/protests';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 /**
  * GET /api/protests/sync
  * Allows Vercel Cron or authenticated polling to check status or trigger scheduled sync

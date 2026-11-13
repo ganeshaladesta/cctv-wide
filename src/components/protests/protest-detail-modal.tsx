@@ -32,6 +32,12 @@ import {
   ReportType
 } from "@/lib/types/protests";
 import { Camera } from "@/lib/types";
+import dynamic from "next/dynamic";
+
+const ProtestLocationPicker = dynamic(
+  () => import("./protest-location-picker").then((mod) => mod.ProtestLocationPicker),
+  { ssr: false }
+);
 
 interface ProtestDetailModalProps {
   protestId: string | null;
@@ -81,6 +87,7 @@ export function ProtestDetailModal({
   const [actualCrowd, setActualCrowd] = useState("");
   const [latInput, setLatInput] = useState("");
   const [lngInput, setLngInput] = useState("");
+  const [isPickerOpen, setIsPickerOpen] = useState(false);
   const [savingSummary, setSavingSummary] = useState(false);
 
   const fetchDetail = async (id: string) => {
@@ -543,6 +550,21 @@ export function ProtestDetailModal({
                       />
                     </div>
 
+                    <div className="flex items-center justify-between col-span-1 sm:col-span-3 pt-1 pb-1 border-b border-[var(--border-subtle)]">
+                      <span className="text-xs font-semibold text-white flex items-center gap-1.5">
+                        <MapPin className="w-3.5 h-3.5 text-blue-400" />
+                        Verifikasi Koordinat Geospasial
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setIsPickerOpen(true)}
+                        className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 transition-colors flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <MapPin className="w-3 h-3" />
+                        <span>Pilih di Peta Interaktif</span>
+                      </button>
+                    </div>
+
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                       <div>
                         <label className="block text-[11px] text-[#98A4B8] mb-1 font-semibold">
@@ -988,6 +1010,21 @@ export function ProtestDetailModal({
         </div>
       </div>
     </div>
+
+    {/* Interactive Geocoding & Map Location Picker Submodal */}
+    {isPickerOpen && (
+      <ProtestLocationPicker
+        initialLat={latInput ? parseFloat(latInput) : (eventData?.validated_lat ?? null)}
+        initialLng={lngInput ? parseFloat(lngInput) : (eventData?.validated_lng ?? null)}
+        initialLocationName={eventData?.lokasi}
+        onSelectLocation={(pickedLat, pickedLng) => {
+          setLatInput(pickedLat !== null ? String(pickedLat) : "");
+          setLngInput(pickedLng !== null ? String(pickedLng) : "");
+          setIsPickerOpen(false);
+        }}
+        onClose={() => setIsPickerOpen(false)}
+      />
+    )}
   </div>
   );
 

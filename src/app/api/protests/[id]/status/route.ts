@@ -3,6 +3,9 @@ import { protestStore } from '@/lib/protest-store';
 import { resolveCurrentUser, canUpdateStatus } from '@/lib/auth-roles';
 import { ProtestStatus } from '@/lib/types/protests';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 interface Params {
   params: Promise<{ id: string }>;
 }
@@ -22,7 +25,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     }
 
     const { id } = await params;
-    const existing = protestStore.getProtestById(id);
+    const existing = await protestStore.getProtestById(id);
     if (!existing) {
       return NextResponse.json(
         { success: false, error: 'Aksi unjuk rasa tidak ditemukan' },
@@ -45,7 +48,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       );
     }
 
-    const updated = protestStore.updateProtestStatus(
+    const updated = await protestStore.updateProtestStatus(
       existing.id,
       toStatus,
       reason,

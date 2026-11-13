@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { protestStore } from '@/lib/protest-store';
 import { resolveCurrentUser, canEditProtest } from '@/lib/auth-roles';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 interface Params {
   params: Promise<{ id: string }>;
 }
@@ -123,7 +126,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     }
 
     const { id } = await params;
-    const protest = protestStore.getProtestById(id);
+    const protest = await protestStore.getProtestById(id);
     if (!protest) {
       return NextResponse.json(
         { success: false, error: 'Aksi unjuk rasa tidak ditemukan' },
@@ -137,13 +140,13 @@ export async function POST(request: NextRequest, { params }: Params) {
       if (body?.custom_notes) customNotes = body.custom_notes;
     } catch {}
 
-    const reports = protestStore.getOperatorReports(protest.id);
-    const cameraLinks = protestStore.getCameraLinks(protest.id);
+    const reports = await protestStore.getOperatorReports(protest.id);
+    const cameraLinks = await protestStore.getCameraLinks(protest.id);
 
     const generatedDraft = buildEditorialContent(protest, reports, cameraLinks, customNotes);
 
     // Save as editorial_draft
-    const updated = protestStore.updateProtest(protest.id, {
+    const updated = await protestStore.updateProtest(protest.id, {
       editorial_draft: generatedDraft
     }, user);
 

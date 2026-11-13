@@ -72,19 +72,89 @@ interface CommandCenterProps {
   initialStats: DashboardStats;
   initialProvinces: Province[];
   initialCameras: Camera[];
+  initialTab?: DashboardTab;
 }
 
 export default function CommandCenter({
   initialStats,
   initialProvinces,
-  initialCameras
+  initialCameras,
+  initialTab
 }: CommandCenterProps) {
   const [stats] = useState<DashboardStats>(initialStats);
   const [provinces] = useState<Province[]>(initialProvinces);
   const [allCities, setAllCities] = useState<City[]>([]);
   const [allSources, setAllSources] = useState<CCTVSource[]>([]);
 
-  const [activeTab, setActiveTab] = useState<DashboardTab>("map");
+  const [activeTab, setActiveTab] = useState<DashboardTab>(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get("tab") as DashboardTab | null;
+      const validTabs: DashboardTab[] = ["map", "multiview", "directory", "provinces", "favorites", "protests"];
+      if (tabParam && validTabs.includes(tabParam)) {
+        return tabParam;
+      }
+      if (window.location.pathname === "/unras" || window.location.pathname === "/protests") {
+        return "protests";
+      }
+    }
+    return initialTab || "map";
+  });
+
+  // Navigation state URL synchronization
+  const isInitialMount = useRef(true);
+
+  // Sync tab on popstate (browser back/forward)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const handlePopState = () => {
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get("tab") as DashboardTab | null;
+      const validTabs: DashboardTab[] = ["map", "multiview", "directory", "provinces", "favorites", "protests"];
+      if (tabParam && validTabs.includes(tabParam)) {
+        setActiveTab(tabParam);
+      } else if (window.location.pathname === "/unras" || window.location.pathname === "/protests") {
+        setActiveTab("protests");
+      } else {
+        setActiveTab("map");
+      }
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  // Sync URL when activeTab changes
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      const params = new URLSearchParams(window.location.search);
+      const currentParam = params.get("tab");
+      if (activeTab !== "map" && currentParam !== activeTab && window.location.pathname === "/") {
+        const url = new URL(window.location.href);
+        url.searchParams.set("tab", activeTab);
+        window.history.replaceState({ tab: activeTab }, "", url.pathname + url.search);
+      }
+      return;
+    }
+
+    const url = new URL(window.location.href);
+    if (activeTab === "map") {
+      url.searchParams.delete("tab");
+    } else {
+      url.searchParams.set("tab", activeTab);
+    }
+    const targetPath = window.location.pathname === "/unras" || window.location.pathname === "/protests"
+      ? window.location.pathname
+      : "/";
+    const newUrl = targetPath + (url.search ? url.search : "");
+    if (window.location.pathname + window.location.search !== newUrl) {
+      window.history.pushState({ tab: activeTab }, "", newUrl);
+    }
+  }, [activeTab]);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedProvince, setSelectedProvince] = useState("");
   const [selectedCity, setSelectedCity] = useState("");

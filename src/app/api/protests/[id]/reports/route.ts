@@ -3,6 +3,9 @@ import { protestStore } from '@/lib/protest-store';
 import { resolveCurrentUser, canEditProtest } from '@/lib/auth-roles';
 import { ReportType } from '@/lib/types/protests';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 interface Params {
   params: Promise<{ id: string }>;
 }
@@ -14,7 +17,7 @@ interface Params {
 export async function GET(_request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
-    const protest = protestStore.getProtestById(id);
+    const protest = await protestStore.getProtestById(id);
     if (!protest) {
       return NextResponse.json(
         { success: false, error: 'Aksi unjuk rasa tidak ditemukan' },
@@ -22,7 +25,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
       );
     }
 
-    const reports = protestStore.getOperatorReports(protest.id);
+    const reports = await protestStore.getOperatorReports(protest.id);
     return NextResponse.json({
       success: true,
       data: reports
@@ -50,7 +53,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     }
 
     const { id } = await params;
-    const protest = protestStore.getProtestById(id);
+    const protest = await protestStore.getProtestById(id);
     if (!protest) {
       return NextResponse.json(
         { success: false, error: 'Aksi unjuk rasa tidak ditemukan' },
@@ -68,7 +71,7 @@ export async function POST(request: NextRequest, { params }: Params) {
 
     const reportType: ReportType = body.report_type || 'progress';
 
-    const newReport = protestStore.addOperatorReport({
+    const newReport = await protestStore.addOperatorReport({
       protest_id: protest.id,
       report_type: reportType,
       content: body.content.trim(),

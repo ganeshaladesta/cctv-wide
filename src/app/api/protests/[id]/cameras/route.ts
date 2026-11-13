@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { protestStore } from '@/lib/protest-store';
 import { resolveCurrentUser, canLinkCCTV } from '@/lib/auth-roles';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 interface Params {
   params: Promise<{ id: string }>;
 }
@@ -13,7 +16,7 @@ interface Params {
 export async function GET(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
-    const protest = protestStore.getProtestById(id);
+    const protest = await protestStore.getProtestById(id);
     if (!protest) {
       return NextResponse.json(
         { success: false, error: 'Aksi unjuk rasa tidak ditemukan' },
@@ -25,7 +28,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     const radiusMeters = parseInt(searchParams.get('radius') || '1500', 10);
     const limit = parseInt(searchParams.get('limit') || '15', 10);
 
-    const linked = protestStore.getCameraLinks(protest.id);
+    const linked = await protestStore.getCameraLinks(protest.id);
 
     let nearby: any[] = [];
     if (protest.validated_lat !== null && protest.validated_lng !== null) {
@@ -67,7 +70,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     }
 
     const { id } = await params;
-    const protest = protestStore.getProtestById(id);
+    const protest = await protestStore.getProtestById(id);
     if (!protest) {
       return NextResponse.json(
         { success: false, error: 'Aksi unjuk rasa tidak ditemukan' },
@@ -83,7 +86,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       );
     }
 
-    const link = protestStore.linkCamera(
+    const link = await protestStore.linkCamera(
       {
         protest_id: protest.id,
         camera_id: body.camera_id,
@@ -130,7 +133,7 @@ export async function DELETE(request: NextRequest, { params }: Params) {
     }
 
     const { id } = await params;
-    const protest = protestStore.getProtestById(id);
+    const protest = await protestStore.getProtestById(id);
     if (!protest) {
       return NextResponse.json(
         { success: false, error: 'Aksi unjuk rasa tidak ditemukan' },
@@ -148,7 +151,7 @@ export async function DELETE(request: NextRequest, { params }: Params) {
       );
     }
 
-    const removed = protestStore.unlinkCamera(protest.id, cameraId);
+    const removed = await protestStore.unlinkCamera(protest.id, cameraId);
 
     return NextResponse.json({
       success: true,

@@ -45,6 +45,8 @@ export function ProtestDashboard({
   // Data states
   const [events, setEvents] = useState<ProtestEvent[]>([]);
   const [stats, setStats] = useState<ProtestStats | null>(null);
+  const [statsLoading, setStatsLoading] = useState(true);
+  const [dataRefreshing, setDataRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -71,23 +73,26 @@ export function ProtestDashboard({
   const [syncLoading, setSyncLoading] = useState(false);
   const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
 
-  // Fetch KPI Stats
+  // Fetch KPI Stats (never flash fake 0)
   const fetchStats = async () => {
+    setStatsLoading(true);
     try {
-      const res = await fetch("/api/protests/stats");
+      const res = await fetch("/api/protests/stats", { cache: "no-store" });
       const json = await res.json();
-      if (res.ok && json.success) {
+      if (res.ok && json.success && json.data) {
         setStats(json.data);
       }
-    } catch {
-      // Ignored
+    } catch (err) {
+      console.warn("[ProtestDashboard] Gagal memuat statistik unras:", err);
+    } finally {
+      setStatsLoading(false);
     }
   };
 
   // Fetch Sync Logs
   const fetchSyncData = async () => {
     try {
-      const res = await fetch("/api/protests/sync");
+      const res = await fetch("/api/protests/sync", { cache: "no-store" });
       const json = await res.json();
       if (res.ok && json.success) {
         setSyncLogs(json.latestSyncLogs || []);
@@ -107,7 +112,7 @@ export function ProtestDashboard({
           "Content-Type": "application/json",
           "x-scc-user-role": "admin"
         },
-        body: JSON.stringify({ forceFixture: true })
+        body: JSON.stringify({})
       });
       const json = await res.json();
       if (!res.ok) {
@@ -116,9 +121,11 @@ export function ProtestDashboard({
       setSyncFeedback(
         `Sinkronisasi Selesai: +${json.summary?.inserted ?? 0} baru, ~${json.summary?.updated ?? 0} diperbarui, /${json.summary?.skipped ?? 0} dilewati.`
       );
-      await fetchStats();
-      await fetchSyncData();
-      fetchProtests();
+      await Promise.all([
+        fetchStats(),
+        fetchSyncData(),
+        fetchProtests()
+      ]);
     } catch (err: any) {
       setSyncFeedback(`Error: ${err.message}`);
     } finally {
@@ -141,7 +148,7 @@ export function ProtestDashboard({
       if (hasCoordsFilter === "true") params.set("has_coords", "true");
       if (hasCoordsFilter === "false") params.set("has_coords", "false");
 
-      const res = await fetch(`/api/protests?${params.toString()}`);
+      const res = await fetch(`/api/protests?${params.toString()}`, { cache: "no-store" });
       const json = await res.json();
 
       if (!res.ok || !json.success) {
@@ -169,11 +176,20 @@ export function ProtestDashboard({
     setIsDetailOpen(true);
   };
 
-  const handleRefresh = () => {
-    fetchStats();
-    fetchProtests();
-    fetchSyncData();
+  const handleDataRefresh = async () => {
+    setDataRefreshing(true);
+    try {
+      await Promise.all([
+        fetchStats(),
+        fetchProtests(),
+        fetchSyncData()
+      ]);
+    } finally {
+      setDataRefreshing(false);
+    }
   };
+
+  const handleRefresh = handleDataRefresh;
 
   return (
     <div className="w-full space-y-5">
@@ -191,7 +207,20 @@ export function ProtestDashboard({
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2.5 flex-wrap">
+          {/* Data Refresh Button */}
+          <button
+            type="button"
+            onClick={handleDataRefresh}
+            disabled={dataRefreshing}
+            className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-[#161C2B] hover:bg-[#1E2638] text-[#98A4B8] hover:text-white border border-[var(--border-default)] transition-colors flex items-center gap-1.5"
+            title="Muat ulang data terbaru dari database (tanpa mengubah data sumber)"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 text-blue-400 ${dataRefreshing ? "animate-spin" : ""}`} />
+            <span>{dataRefreshing ? "Memuat..." : "Segarkan Tampilan"}</span>
+          </button>
+
+          {/* OneDrive Sync Modal Button */}
           <button
             type="button"
             onClick={() => setIsSyncOpen(true)}
@@ -201,6 +230,7 @@ export function ProtestDashboard({
             <span>Sinkronisasi OneDrive</span>
           </button>
 
+          {/* Add Manual Protest Button */}
           <button
             type="button"
             onClick={() => setIsCreateOpen(true)}
@@ -221,7 +251,11 @@ export function ProtestDashboard({
             <Layers className="w-3.5 h-3.5 text-blue-400" />
           </div>
           <div className="text-2xl font-black text-white mt-1">
-            {stats?.total_events ?? 0}
+            {statsLoading && !stats ? (
+              <div className="h-8 w-16 bg-white/10 rounded-lg animate-pulse my-1" />
+            ) : (
+              stats?.total_events ?? 0
+            )}
           </div>
           <span className="text-[10px] text-[#64748B] block mt-0.5">Seluruh aksi tercatat</span>
         </div>
@@ -233,7 +267,11 @@ export function ProtestDashboard({
             <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
           </div>
           <div className="text-2xl font-black text-red-400 mt-1">
-            {stats?.ongoing_events ?? 0}
+            {statsLoading && !stats ? (
+              <div className="h-8 w-16 bg-red-500/10 rounded-lg animate-pulse my-1" />
+            ) : (
+              stats?.ongoing_events ?? 0
+            )}
           </div>
           <span className="text-[10px] text-[#64748B] block mt-0.5">Prioritas pemantauan aktif</span>
         </div>
@@ -245,7 +283,11 @@ export function ProtestDashboard({
             <Clock className="w-3.5 h-3.5 text-amber-400" />
           </div>
           <div className="text-2xl font-black text-amber-400 mt-1">
-            {stats?.scheduled_events ?? 0}
+            {statsLoading && !stats ? (
+              <div className="h-8 w-16 bg-amber-500/10 rounded-lg animate-pulse my-1" />
+            ) : (
+              stats?.scheduled_events ?? 0
+            )}
           </div>
           <span className="text-[10px] text-[#64748B] block mt-0.5">Terjadwal & siaga pengamanan</span>
         </div>
@@ -257,7 +299,11 @@ export function ProtestDashboard({
             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
           </div>
           <div className="text-2xl font-black text-emerald-400 mt-1">
-            {(stats?.completed_events ?? 0) + (stats?.monitoring_events ?? 0)}
+            {statsLoading && !stats ? (
+              <div className="h-8 w-16 bg-emerald-500/10 rounded-lg animate-pulse my-1" />
+            ) : (
+              (stats?.completed_events ?? 0) + (stats?.monitoring_events ?? 0)
+            )}
           </div>
           <span className="text-[10px] text-[#64748B] block mt-0.5">Kondusif & observasi terekam</span>
         </div>

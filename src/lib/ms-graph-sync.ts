@@ -465,7 +465,7 @@ export class MsGraphSyncService {
     isSyncInProgress = true;
     syncStartedAt = Date.now();
 
-    const initialLog = protestStore.createSyncLog({
+    const initialLog = await protestStore.createSyncLog({
       triggered_by: triggerType,
       triggered_by_user: triggeredBy,
       source_worksheet: this.config.worksheetName || 'NEW UNRAS 2022-2026'
@@ -526,7 +526,7 @@ export class MsGraphSyncService {
       });
 
       // Perform idempotent upsert into store
-      const upsertResult = protestStore.upsertFromExcelBatch(mappedRecords);
+      const upsertResult = await protestStore.upsertFromExcelBatch(mappedRecords);
 
       const durationMs = Date.now() - startTime;
       const finalStatus: ProtestSyncLog["status"] =
@@ -550,7 +550,7 @@ export class MsGraphSyncService {
         duration_ms: durationMs
       };
 
-      protestStore.updateSyncLog(initialLog.id, finalLog);
+      await protestStore.updateSyncLog(initialLog.id, finalLog);
 
       return {
         success: finalStatus !== 'failed',
@@ -578,7 +578,7 @@ export class MsGraphSyncService {
         duration_ms: durationMs
       };
 
-      protestStore.updateSyncLog(initialLog.id, failedLog);
+      await protestStore.updateSyncLog(initialLog.id, failedLog);
 
       return {
         success: false,

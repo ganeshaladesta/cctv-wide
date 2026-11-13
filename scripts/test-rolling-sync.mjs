@@ -171,7 +171,7 @@ async function runTests() {
   const secondSync = await processRolling7DaySync(payloadDup, "power_automate", "Test Runner");
   assert.equal(secondSync.summary.updated, 1, "Second sync must update existing record, NOT insert duplicate");
 
-  const stored = protestStore.getProtestById(dupId);
+  const stored = await protestStore.getProtestById(dupId);
   assert.ok(stored, "Record must exist in store");
   assert.equal(stored.lokasi, "Lokasi Versi 2 Terkoreksi", "Excel text field must update");
   console.log("  ✔ Idempotensi duplikat ID KEJADIAN valid: tidak ada duplikasi row di database.");
@@ -201,7 +201,7 @@ async function runTests() {
   await processRolling7DaySync(initialPayload, "power_automate", "Test Runner");
 
   // Operator field updates via application UI
-  protestStore.updateProtest(protectId, {
+  await protestStore.updateProtest(protectId, {
     status: "ongoing",
     actual_crowd_size: 500,
     situation_summary: "CATATAN_OPERATOR_SANGAT_PENTING",
@@ -231,7 +231,7 @@ async function runTests() {
   };
   await processRolling7DaySync(resyncPayload, "power_automate", "Test Runner");
 
-  const postSyncRecord = protestStore.getProtestById(protectId);
+  const postSyncRecord = await protestStore.getProtestById(protectId);
   assert.equal(postSyncRecord.situation_summary, "CATATAN_OPERATOR_SANGAT_PENTING", "Operator summary must NOT be overwritten");
   assert.equal(postSyncRecord.actual_crowd_size, 500, "Operator crowd count must NOT be overwritten");
   assert.equal(postSyncRecord.editorial_draft, "DRAFT_BERITA_OPERATOR", "Operator editorial draft must NOT be overwritten");

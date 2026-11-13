@@ -34,3 +34,4 @@ try {
   console.error("❌ Gagal membersihkan database:", err.message);
   process.exit(1);
 }
+

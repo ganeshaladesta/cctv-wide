@@ -3,6 +3,9 @@ import { protestStore } from '@/lib/protest-store';
 import { resolveCurrentUser, canCreateProtest } from '@/lib/auth-roles';
 import { ProtestFilterParams, ProtestStatus, ProtestUrgency } from '@/lib/types/protests';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 /**
  * GET /api/protests
  * Query protest events with rich filtering, search, pagination, and sorting
@@ -28,7 +31,7 @@ export async function GET(request: NextRequest) {
       sort_order: (searchParams.get('sort_order') as any) || 'desc'
     };
 
-    const result = protestStore.queryProtests(filters);
+    const result = await protestStore.queryProtests(filters);
 
     return NextResponse.json({
       success: true,
@@ -73,7 +76,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const created = protestStore.createProtest({
+    const created = await protestStore.createProtest({
       id_kejadian: body.id_kejadian,
       kode_unras: body.kode_unras,
       tanggal: body.tanggal,
@@ -95,7 +98,8 @@ export async function POST(request: NextRequest) {
       category_id: body.category_id || null,
       validated_lat: body.validated_lat !== undefined && body.validated_lat !== null ? Number(body.validated_lat) : null,
       validated_lng: body.validated_lng !== undefined && body.validated_lng !== null ? Number(body.validated_lng) : null,
-      situation_summary: body.situation_summary || null
+      situation_summary: body.situation_summary || null,
+      source_type: "manual"
     }, user);
 
     return NextResponse.json(

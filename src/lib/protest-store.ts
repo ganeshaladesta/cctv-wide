@@ -32,6 +32,25 @@ import {
 } from "@/lib/types/protests";
 import { getDataStore } from "@/lib/data-store";
 import { Camera } from "@/lib/types";
+import {
+  isSupabaseConfigured,
+  queryProtestsFromSupabase,
+  getProtestByIdFromSupabase,
+  createProtestInSupabase,
+  updateProtestInSupabase,
+  updateStatusInSupabase,
+  fetchReportsFromSupabase,
+  addReportInSupabase,
+  fetchCameraLinksFromSupabase,
+  linkCameraInSupabase,
+  unlinkCameraInSupabase,
+  fetchStatusHistoryFromSupabase,
+  fetchStatsFromSupabase,
+  fetchSyncLogsFromSupabase,
+  createSyncLogInSupabase,
+  updateSyncLogInSupabase,
+  upsertExcelBatchInSupabase
+} from "./supabase-protest-service";
 
 // Haversine distance in meters
 export function calculateDistanceMeters(
@@ -469,7 +488,23 @@ class ProtestDataStore {
   // Queries
   // ---------------------------------------------------------------------------
 
-  queryProtests(filters: ProtestFilterParams = {}): {
+  async queryProtests(filters: ProtestFilterParams = {}): Promise<{
+    total: number;
+    page: number;
+    limit: number;
+    data: ProtestEvent[];
+  }> {
+    if (isSupabaseConfigured()) {
+      try {
+        return await queryProtestsFromSupabase(filters);
+      } catch (err) {
+        console.error("[ProtestDataStore] Supabase queryProtests failed, falling back to local SQLite:", err);
+      }
+    }
+    return this.queryProtestsLocal(filters);
+  }
+
+  queryProtestsLocal(filters: ProtestFilterParams = {}): {
     total: number;
     page: number;
     limit: number;
@@ -600,7 +635,23 @@ class ProtestDataStore {
     return { total, page, limit, data };
   }
 
-  getProtestById(idOrIdentity: string): ProtestEvent | null {
+  async getProtestById(idOrIdentity: string): Promise<ProtestEvent | null> {
+    if (isSupabaseConfigured()) {
+      try {
+        const item = await getProtestByIdFromSupabase(idOrIdentity);
+        if (item) return item;
+      } catch (err) {
+        console.error("[ProtestDataStore] Supabase getProtestById failed, falling back to local SQLite:", err);
+      }
+    }
+    return this.getProtestByIdLocal(idOrIdentity);
+  }
+
+  getProtestByIdSync(idOrIdentity: string): ProtestEvent | null {
+    return this.getProtestByIdLocal(idOrIdentity);
+  }
+
+  getProtestByIdLocal(idOrIdentity: string): ProtestEvent | null {
     if (this.db) {
       const row = this.db.prepare(`
         SELECT * FROM protests
@@ -612,9 +663,9 @@ class ProtestDataStore {
       const protest = this.mapRowToProtest(row);
 
       // Attach relations
-      protest.reports = this.getOperatorReports(protest.id);
-      protest.status_history = this.getStatusHistory(protest.id);
-      protest.camera_links = this.getCameraLinks(protest.id);
+      protest.reports = this.getOperatorReportsLocal(protest.id);
+      protest.status_history = this.getStatusHistoryLocal(protest.id);
+      protest.camera_links = this.getCameraLinksLocal(protest.id);
       return protest;
     }
 
@@ -635,7 +686,30 @@ class ProtestDataStore {
   // Mutators & Operator Workflows
   // ---------------------------------------------------------------------------
 
-  createProtest(
+  async createProtest(
+    input: Partial<ProtestEvent> & {
+      id_kejadian: string;
+      tanggal: string;
+      lokasi: string;
+      isu_tuntutan: string;
+    },
+    user: UserProfile
+  ): Promise<ProtestEvent> {
+    if (isSupabaseConfigured()) {
+      try {
+        const created = await createProtestInSupabase(input, user);
+        if (this.db) {
+          try { this.createProtestLocal(input, user); } catch {}
+        }
+        return created;
+      } catch (err) {
+        console.error("[ProtestDataStore] Supabase createProtest failed, falling back to local SQLite:", err);
+      }
+    }
+    return this.createProtestLocal(input, user);
+  }
+
+  createProtestLocal(
     input: Partial<ProtestEvent> & {
       id_kejadian: string;
       tanggal: string;
@@ -765,12 +839,31 @@ class ProtestDataStore {
     return newEvent;
   }
 
-  updateProtest(
+  async updateProtest(
+    id: string,
+    updates: Partial<ProtestEvent>,
+    user?: UserProfile
+  ): Promise<ProtestEvent | null> {
+    if (isSupabaseConfigured()) {
+      try {
+        const res = await updateProtestInSupabase(id, updates);
+        if (this.db) {
+          try { this.updateProtestLocal(id, updates, user); } catch {}
+        }
+        return res;
+      } catch (err) {
+        console.error("[ProtestDataStore] Supabase updateProtest failed, falling back to local SQLite:", err);
+      }
+    }
+    return this.updateProtestLocal(id, updates, user);
+  }
+
+  updateProtestLocal(
     id: string,
     updates: Partial<ProtestEvent>,
     user?: UserProfile
   ): ProtestEvent | null {
-    const existing = this.getProtestById(id);
+    const existing = this.getProtestByIdLocal(id);
     if (!existing) return null;
 
     const now = new Date().toISOString();
@@ -877,19 +970,39 @@ class ProtestDataStore {
     return updatedEvent;
   }
 
-  updateProtestStatus(
+  async updateProtestStatus(
+    id: string,
+    newStatus: ProtestStatus,
+    reason: string | null,
+    user: UserProfile
+  ): Promise<ProtestEvent | null> {
+    if (isSupabaseConfigured()) {
+      try {
+        const res = await updateStatusInSupabase(id, newStatus, reason, user);
+        if (this.db) {
+          try { this.updateProtestStatusLocal(id, newStatus, reason, user); } catch {}
+        }
+        return res;
+      } catch (err) {
+        console.error("[ProtestDataStore] Supabase updateProtestStatus failed, falling back to local SQLite:", err);
+      }
+    }
+    return this.updateProtestStatusLocal(id, newStatus, reason, user);
+  }
+
+  updateProtestStatusLocal(
     id: string,
     newStatus: ProtestStatus,
     reason: string | null,
     user: UserProfile
   ): ProtestEvent | null {
-    const existing = this.getProtestById(id);
+    const existing = this.getProtestByIdLocal(id);
     if (!existing) return null;
 
     const isArchived = newStatus === "completed" || newStatus === "cancelled";
     const completedAt = newStatus === "completed" ? new Date().toISOString() : existing.completed_at;
 
-    const updated = this.updateProtest(
+    const updated = this.updateProtestLocal(
       id,
       {
         status: newStatus,
@@ -932,7 +1045,31 @@ class ProtestDataStore {
   // Reports, CCTV Links & Status History
   // ---------------------------------------------------------------------------
 
-  addOperatorReport(
+  async addOperatorReport(
+    input: {
+      protest_id: string;
+      report_type: "initial" | "progress" | "summary";
+      content: string;
+      crowd_estimate?: number | null;
+      is_pinned?: boolean;
+    },
+    user: UserProfile
+  ): Promise<ProtestOperatorReport> {
+    if (isSupabaseConfigured()) {
+      try {
+        const res = await addReportInSupabase(input, user);
+        if (this.db) {
+          try { this.addOperatorReportLocal(input, user); } catch {}
+        }
+        return res;
+      } catch (err) {
+        console.error("[ProtestDataStore] Supabase addReport failed, falling back to local SQLite:", err);
+      }
+    }
+    return this.addOperatorReportLocal(input, user);
+  }
+
+  addOperatorReportLocal(
     input: {
       protest_id: string;
       report_type: "initial" | "progress" | "summary";
@@ -998,7 +1135,18 @@ class ProtestDataStore {
     return report;
   }
 
-  getOperatorReports(protestId: string): ProtestOperatorReport[] {
+  async getOperatorReports(protestId: string): Promise<ProtestOperatorReport[]> {
+    if (isSupabaseConfigured()) {
+      try {
+        return await fetchReportsFromSupabase(protestId);
+      } catch (err) {
+        console.error("[ProtestDataStore] Supabase getOperatorReports failed, falling back to local SQLite:", err);
+      }
+    }
+    return this.getOperatorReportsLocal(protestId);
+  }
+
+  getOperatorReportsLocal(protestId: string): ProtestOperatorReport[] {
     if (this.db) {
       const rows = this.db.prepare(`
         SELECT * FROM protest_operator_reports
@@ -1066,7 +1214,18 @@ class ProtestDataStore {
     }
   }
 
-  getStatusHistory(protestId: string): ProtestStatusHistory[] {
+  async getStatusHistory(protestId: string): Promise<ProtestStatusHistory[]> {
+    if (isSupabaseConfigured()) {
+      try {
+        return await fetchStatusHistoryFromSupabase(protestId);
+      } catch (err) {
+        console.error("[ProtestDataStore] Supabase getStatusHistory failed, falling back to local SQLite:", err);
+      }
+    }
+    return this.getStatusHistoryLocal(protestId);
+  }
+
+  getStatusHistoryLocal(protestId: string): ProtestStatusHistory[] {
     if (this.db) {
       const rows = this.db.prepare(`
         SELECT * FROM protest_status_history
@@ -1089,7 +1248,54 @@ class ProtestDataStore {
     return this.memoryHistory.get(protestId) || [];
   }
 
-  linkCamera(
+  async linkCamera(
+    input: {
+      protest_id: string;
+      camera_id: string;
+      notes?: string | null;
+      is_recommended?: boolean;
+    },
+    user: UserProfile
+  ): Promise<ProtestCameraLink | null> {
+    if (isSupabaseConfigured()) {
+      try {
+        const cctvStore = getDataStore();
+        const camera = cctvStore.getCameraById(input.camera_id);
+        const protest = await this.getProtestById(input.protest_id);
+        let distanceMeters = 0;
+        if (protest && protest.validated_lat != null && protest.validated_lng != null && camera) {
+          distanceMeters = calculateDistanceMeters(
+            protest.validated_lat,
+            protest.validated_lng,
+            camera.latitude,
+            camera.longitude
+          );
+        }
+        const res = await linkCameraInSupabase({
+          protest_id: input.protest_id,
+          camera_id: input.camera_id,
+          camera_name: camera?.name || input.camera_id,
+          camera_stream_url: camera?.stream_url,
+          camera_protocol: camera?.protocol,
+          camera_status: camera?.status,
+          distance_meters: distanceMeters,
+          notes: input.notes,
+          is_recommended: input.is_recommended,
+          linked_by_id: user.id,
+          linked_by_name: user.name
+        });
+        if (this.db) {
+          try { this.linkCameraLocal(input, user); } catch {}
+        }
+        return res;
+      } catch (err) {
+        console.error("[ProtestDataStore] Supabase linkCamera failed, falling back to local SQLite:", err);
+      }
+    }
+    return this.linkCameraLocal(input, user);
+  }
+
+  linkCameraLocal(
     input: {
       protest_id: string;
       camera_id: string;
@@ -1100,7 +1306,7 @@ class ProtestDataStore {
   ): ProtestCameraLink | null {
     const cctvStore = getDataStore();
     const camera = cctvStore.getCameraById(input.camera_id);
-    const protest = this.getProtestById(input.protest_id);
+    const protest = this.getProtestByIdLocal(input.protest_id);
     if (!camera || !protest) return null;
 
     let distanceMeters = 0;
@@ -1167,7 +1373,22 @@ class ProtestDataStore {
     return link;
   }
 
-  unlinkCamera(protestId: string, cameraId: string): boolean {
+  async unlinkCamera(protestId: string, cameraId: string): Promise<boolean> {
+    if (isSupabaseConfigured()) {
+      try {
+        const res = await unlinkCameraInSupabase(protestId, cameraId);
+        if (this.db) {
+          try { this.unlinkCameraLocal(protestId, cameraId); } catch {}
+        }
+        return res;
+      } catch (err) {
+        console.error("[ProtestDataStore] Supabase unlinkCamera failed, falling back to local SQLite:", err);
+      }
+    }
+    return this.unlinkCameraLocal(protestId, cameraId);
+  }
+
+  unlinkCameraLocal(protestId: string, cameraId: string): boolean {
     if (this.db) {
       const res = this.db.prepare("DELETE FROM protest_camera_links WHERE protest_id = ? AND camera_id = ?").run(protestId, cameraId);
       return res.changes > 0;
@@ -1178,7 +1399,18 @@ class ProtestDataStore {
     return true;
   }
 
-  getCameraLinks(protestId: string): ProtestCameraLink[] {
+  async getCameraLinks(protestId: string): Promise<ProtestCameraLink[]> {
+    if (isSupabaseConfigured()) {
+      try {
+        return await fetchCameraLinksFromSupabase(protestId);
+      } catch (err) {
+        console.error("[ProtestDataStore] Supabase getCameraLinks failed, falling back to local SQLite:", err);
+      }
+    }
+    return this.getCameraLinksLocal(protestId);
+  }
+
+  getCameraLinksLocal(protestId: string): ProtestCameraLink[] {
     const cctvStore = getDataStore();
     if (this.db) {
       const rows = this.db.prepare(`
@@ -1253,7 +1485,49 @@ class ProtestDataStore {
    * Upsert records parsed from OneDrive worksheet 'NEW UNRAS 2022-2026'
    * CRITICAL GUARANTEE: Never overwrites operator-managed fields!
    */
-  upsertFromExcelBatch(
+  async upsertFromExcelBatch(
+    records: Array<{
+      id_kejadian: string;
+      kode_unras: string;
+      tanggal: string;
+      waktu_mulai?: string | null;
+      waktu_selesai?: string | null;
+      event_datetime?: string | null;
+      lokasi: string;
+      titik_kumpul?: string | null;
+      sasaran_aksi?: string | null;
+      isu_tuntutan: string;
+      estimasi_massa_source?: number | null;
+      organisasi_kelompok?: string | null;
+      korlap_pimpinan?: string | null;
+      wilayah_hukum?: string | null;
+      provinsi?: string | null;
+      kota_kabupaten?: string | null;
+      keterangan_source?: string | null;
+      raw_source_payload?: Record<string, unknown>;
+    }>
+  ): Promise<{
+    processed: number;
+    created: number;
+    updated: number;
+    skipped: number;
+    failed?: number;
+  }> {
+    if (isSupabaseConfigured()) {
+      try {
+        const res = await upsertExcelBatchInSupabase(records as any);
+        if (this.db) {
+          try { this.upsertFromExcelBatchLocal(records); } catch {}
+        }
+        return res;
+      } catch (err) {
+        console.error("[ProtestDataStore] Supabase upsertExcelBatch failed, falling back to local SQLite:", err);
+      }
+    }
+    return this.upsertFromExcelBatchLocal(records);
+  }
+
+  upsertFromExcelBatchLocal(
     records: Array<{
       id_kejadian: string;
       kode_unras: string;
@@ -1291,7 +1565,7 @@ class ProtestDataStore {
         continue;
       }
 
-      const existing = this.getProtestById(rec.id_kejadian);
+      const existing = this.getProtestByIdLocal(rec.id_kejadian);
 
       if (existing) {
         // UPDATE ONLY EXCEL FIELDS — PRESERVE OPERATOR FIELDS
@@ -1483,7 +1757,37 @@ class ProtestDataStore {
   // Sync Logs
   // ---------------------------------------------------------------------------
 
-  createSyncLog(initial: {
+  async createSyncLog(initial: {
+    id?: string;
+    started_at?: string;
+    completed_at?: string | null;
+    period_start?: string | null;
+    period_end?: string | null;
+    status?: ProtestSyncLog["status"];
+    triggered_by: ProtestSyncLog["triggered_by"];
+    triggered_by_user?: string | null;
+    source_worksheet?: string;
+    records_received?: number;
+    records_processed?: number;
+    records_created?: number;
+    records_updated?: number;
+    records_skipped?: number;
+    records_failed?: number;
+    error_details?: string | null;
+    duration_ms?: number | null;
+  }): Promise<ProtestSyncLog> {
+    const local = this.createSyncLogLocal(initial);
+    if (isSupabaseConfigured()) {
+      try {
+        await createSyncLogInSupabase(local);
+      } catch (err) {
+        console.error("[ProtestDataStore] Supabase createSyncLog failed:", err);
+      }
+    }
+    return local;
+  }
+
+  createSyncLogLocal(initial: {
     id?: string;
     started_at?: string;
     completed_at?: string | null;
@@ -1557,7 +1861,22 @@ class ProtestDataStore {
     return log;
   }
 
-  updateSyncLog(
+  async updateSyncLog(
+    id: string,
+    updates: Partial<ProtestSyncLog>
+  ): Promise<ProtestSyncLog | null> {
+    const local = this.updateSyncLogLocal(id, updates);
+    if (isSupabaseConfigured()) {
+      try {
+        await updateSyncLogInSupabase(id, updates);
+      } catch (err) {
+        console.error("[ProtestDataStore] Supabase updateSyncLog failed:", err);
+      }
+    }
+    return local;
+  }
+
+  updateSyncLogLocal(
     id: string,
     updates: Partial<ProtestSyncLog>
   ): ProtestSyncLog | null {
@@ -1631,7 +1950,18 @@ class ProtestDataStore {
     return log;
   }
 
-  getSyncLogs(limit = 20): ProtestSyncLog[] {
+  async getSyncLogs(limit = 20): Promise<ProtestSyncLog[]> {
+    if (isSupabaseConfigured()) {
+      try {
+        return await fetchSyncLogsFromSupabase(limit);
+      } catch (err) {
+        console.error("[ProtestDataStore] Supabase getSyncLogs failed, falling back to local SQLite:", err);
+      }
+    }
+    return this.getSyncLogsLocal(limit);
+  }
+
+  getSyncLogsLocal(limit = 20): ProtestSyncLog[] {
     if (this.db) {
       const rows = this.db.prepare(`
         SELECT * FROM protest_sync_logs
@@ -1667,7 +1997,18 @@ class ProtestDataStore {
   // Statistics & KPIs
   // ---------------------------------------------------------------------------
 
-  getStats(): ProtestStats {
+  async getStats(): Promise<ProtestStats> {
+    if (isSupabaseConfigured()) {
+      try {
+        return await fetchStatsFromSupabase();
+      } catch (err) {
+        console.error("[ProtestDataStore] Supabase getStats failed, falling back to local SQLite:", err);
+      }
+    }
+    return this.getStatsLocal();
+  }
+
+  getStatsLocal(): ProtestStats {
     const todayStr = new Date().toISOString().slice(0, 10);
 
     if (this.db) {

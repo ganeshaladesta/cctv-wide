@@ -88,6 +88,7 @@ export interface ProtestEvent {
   updated_at: string;
   deleted_at: string | null; // Soft delete timestamp
   last_synced_at: string | null;
+  source_type?: "manual" | "excel_sync";
 
   // Joined relations (optional in queries)
   reports?: ProtestOperatorReport[];
