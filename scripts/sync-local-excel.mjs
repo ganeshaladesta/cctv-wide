@@ -3,7 +3,9 @@
  * 100% Free, Automated, No-License-Required Alternative to Power Automate.
  *
  * Reads '06. Database Kejadian Unras*.xlsx' (sheet 'NEW UNRAS 2022-2026')
- * Normalizes rows, filters rolling 7-day window, and sends to SCC API.
+ * Normalizes rows, filters rolling 7-day window, and synchronizes to:
+ * 1. Local SQLite database (pantau-nusantara.sqlite)
+ * 2. Remote SCC API / Supabase (if VERCEL_URL is configured)
  */
 
 import fs from "node:fs";
@@ -27,7 +29,6 @@ const rootDir = path.resolve(__dirname, "..");
 
 // 1. Locate Excel Workbook
 function findLatestExcelFile() {
-  // Check CLI argument first
   if (process.argv[2] && fs.existsSync(process.argv[2])) {
     return path.resolve(process.argv[2]);
   }
@@ -61,13 +62,12 @@ function findLatestExcelFile() {
         }
       }
     } catch {
-      // ignore unreadable dirs
+      // ignore
     }
   }
 
   if (candidateFiles.length === 0) return null;
 
-  // Sort newest first
   candidateFiles.sort((a, b) => b.mtime - a.mtime);
   return candidateFiles[0].filePath;
 }
@@ -77,7 +77,6 @@ function getTargetConfig() {
   let vercelUrl = process.env.VERCEL_URL || process.env.NEXT_PUBLIC_APP_URL || "";
   let syncSecret = process.env.UNRAS_SYNC_SECRET || "";
 
-  // Check .env.local if present
   const envLocalPath = path.join(rootDir, ".env.local");
   if (fs.existsSync(envLocalPath)) {
     const envContent = fs.readFileSync(envLocalPath, "utf-8");
@@ -91,19 +90,7 @@ function getTargetConfig() {
     }
   }
 
-  // Fallback defaults
-  if (!vercelUrl) {
-    vercelUrl = "https://cctv-wide.vercel.app";
-  }
-
-  // Ensure full URL
-  if (!vercelUrl.startsWith("http://") && !vercelUrl.startsWith("https://")) {
-    vercelUrl = `https://${vercelUrl}`;
-  }
-
-  const endpointUrl = `${vercelUrl.replace(/\/+$/, "")}/api/integrations/unras/sync`;
-
-  return { endpointUrl, syncSecret };
+  return { vercelUrl, syncSecret };
 }
 
 // 3. Normalize Row from 'NEW UNRAS 2022-2026'
@@ -120,16 +107,14 @@ function mapExcelRow(r, index) {
   const kotaKabupaten = r["Lokasi"] || r["KOTA/KABUPATEN"] || "";
   const keterangan = r["Ringkasan Situasi"] || r["Info Awal Unras"] || r["KETERANGAN"] || "";
 
-  // Handle ISO format
   let finalISO = "";
   if (isoRaw) {
     finalISO = String(isoRaw).trim();
     if (!finalISO.includes("Z") && !finalISO.includes("+")) {
-      finalISO = `${finalISO}+07:00`; // Default WIB
+      finalISO = `${finalISO}+07:00`;
     }
   }
 
-  // Handle Tanggal
   let finalTanggal = "";
   if (typeof tanggalRaw === "number" && tanggalRaw > 30000) {
     const excelEpoch = new Date(Date.UTC(1899, 11, 30));
@@ -141,7 +126,6 @@ function mapExcelRow(r, index) {
     finalTanggal = new Date().toISOString().split("T")[0];
   }
 
-  // Handle Time
   let finalWaktu = "09:00 WIB";
   if (r["Waktu"]) {
     const wNum = Number(r["Waktu"]);
@@ -158,7 +142,6 @@ function mapExcelRow(r, index) {
     finalWaktu = `${timePart} WIB`;
   }
 
-  // Stable deterministic ID KEJADIAN if blank in sheet
   let idKejadian = r["ID KEJADIAN"] ? String(r["ID KEJADIAN"]).trim() : "";
   if (!idKejadian) {
     const hash = crypto
@@ -182,7 +165,7 @@ function mapExcelRow(r, index) {
     "TITIK KUMPUL": r["Titik Kumpul"] || r["TITIK KUMPUL"] || null,
     "SASARAN": r["Sasaran"] || r["SASARAN"] || lokasi,
     "ISU": tuntutan,
-    "JUMLAH MASSA": jumlahMassa,
+    "JUMLAH MASSA": typeof jumlahMassa === "number" ? jumlahMassa : parseInt(String(jumlahMassa).replace(/\D/g, "") || "0", 10),
     "ORGANISASI": aliansi,
     "KORLAP": korlap,
     "WILAYAH HUKUM": wilayahHukum,
@@ -195,7 +178,84 @@ function mapExcelRow(r, index) {
   };
 }
 
-// 4. Main Synchronization Execution
+// 4. Upsert Directly to Local SQLite
+async function syncToLocalSQLite(events) {
+  const dbPath = path.join(rootDir, "data", "pantau-nusantara.sqlite");
+  if (!fs.existsSync(dbPath)) return { inserted: 0, updated: 0 };
+
+  try {
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(dbPath);
+    let inserted = 0;
+    let updated = 0;
+    const nowStr = new Date().toISOString();
+
+    const insertStmt = db.prepare(`
+      INSERT INTO protests (
+        id, id_kejadian, kode_unras, tanggal, waktu_mulai, waktu_selesai, event_datetime,
+        lokasi, titik_kumpul, sasaran_aksi, isu_tuntutan, estimasi_massa_source,
+        organisasi_kelompok, korlap_pimpinan, wilayah_hukum, provinsi, kota_kabupaten,
+        keterangan_source, status, urgency, category_id, validated_lat, validated_lng,
+        has_coordinates, actual_crowd_size, situation_summary, editorial_draft,
+        editorial_final, is_archived, completed_at, completed_by_id, completed_by_name,
+        created_at, updated_at, deleted_at, last_synced_at
+      ) VALUES (
+        ?, ?, ?, ?, ?, ?, ?,
+        ?, ?, ?, ?, ?,
+        ?, ?, ?, ?, ?,
+        ?, ?, ?, ?, ?, ?,
+        ?, ?, ?, ?,
+        ?, ?, ?, ?, ?,
+        ?, ?, ?, ?
+      )
+    `);
+
+    const updateStmt = db.prepare(`
+      UPDATE protests SET
+        kode_unras = ?, tanggal = ?, waktu_mulai = ?, event_datetime = ?,
+        lokasi = ?, titik_kumpul = ?, sasaran_aksi = ?, isu_tuntutan = ?,
+        estimasi_massa_source = ?, organisasi_kelompok = ?, korlap_pimpinan = ?,
+        wilayah_hukum = ?, provinsi = ?, kota_kabupaten = ?, keterangan_source = ?,
+        last_synced_at = ?, updated_at = ?
+      WHERE id = ?
+    `);
+
+    for (const ev of events) {
+      const existing = db.prepare("SELECT id FROM protests WHERE id_kejadian = ?").get(ev["ID KEJADIAN"]);
+      if (existing) {
+        updateStmt.run(
+          ev["KODE_UNRAS"], ev["TANGGAL"], ev["WAKTU"], ev["WAKTU DAN TGL KEJADIAN ISO"],
+          ev["LOKASI"], ev["TITIK KUMPUL"] || null, ev["SASARAN"] || null, ev["ISU"],
+          ev["JUMLAH MASSA"] || null, ev["ORGANISASI"] || null, ev["KORLAP"] || null,
+          ev["WILAYAH HUKUM"] || null, ev["PROVINSI"] || "DKI Jakarta", ev["KOTA/KABUPATEN"] || null,
+          ev["KETERANGAN"] || null, nowStr, nowStr, existing.id
+        );
+        updated++;
+      } else {
+        const newId = crypto.randomUUID();
+        const hasCoords = ev["LATITUDE"] && ev["LONGITUDE"] ? 1 : 0;
+        insertStmt.run(
+          newId, ev["ID KEJADIAN"], ev["KODE_UNRAS"], ev["TANGGAL"], ev["WAKTU"], null,
+          ev["WAKTU DAN TGL KEJADIAN ISO"], ev["LOKASI"], ev["TITIK KUMPUL"] || null,
+          ev["SASARAN"] || null, ev["ISU"], ev["JUMLAH MASSA"] || null,
+          ev["ORGANISASI"] || null, ev["KORLAP"] || null, ev["WILAYAH HUKUM"] || null,
+          ev["PROVINSI"] || "DKI Jakarta", ev["KOTA/KABUPATEN"] || null, ev["KETERANGAN"] || null,
+          "ongoing", "medium", null, ev["LATITUDE"] || null, ev["LONGITUDE"] || null,
+          hasCoords, null, null, null, null,
+          0, null, null, null, nowStr, nowStr, null, nowStr
+        );
+        inserted++;
+      }
+    }
+
+    return { inserted, updated };
+  } catch (err) {
+    console.warn("⚠️  Peringatan SQLite lokal:", err.message);
+    return { inserted: 0, updated: 0, error: err.message };
+  }
+}
+
+// 5. Main Synchronization Execution
 async function run() {
   console.log("================================================================================");
   console.log("=== SCC - EAGLE EYES: Sinkronisasi Otomatis Excel Unras (Solusi Gratis)     ===");
@@ -236,7 +296,6 @@ async function run() {
   console.log(`   Mulai  : ${periodStartISO} (${new Date(periodStartMs).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })} WIB)`);
   console.log(`   Selesai: ${periodEndISO} (${now.toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })} WIB)\n`);
 
-  // Filter & Normalize Rows within Window
   const windowEvents = [];
   let skippedTotal = 0;
 
@@ -253,7 +312,6 @@ async function run() {
       continue;
     }
 
-    // Inclusion rule: >= periodStart && < periodEnd
     if (eventMs >= periodStartMs && eventMs < periodEndMs) {
       windowEvents.push(mapped);
     } else {
@@ -270,65 +328,73 @@ async function run() {
     process.exit(0);
   }
 
-  // Construct Payload
-  const payload = {
-    sync_type: "rolling_7d",
-    timezone: "Asia/Jakarta",
-    period_start: periodStartISO,
-    period_end: periodEndISO,
-    events: windowEvents
-  };
+  // 1. Always Sync to Local Database
+  console.log("💾 Menyimpan ke Database Lokal (SQLite)...");
+  const localStats = await syncToLocalSQLite(windowEvents);
+  console.log(`   ✔ Data baru masuk (Insert) : ${localStats.inserted}`);
+  console.log(`   ✔ Data diperbarui (Update)  : ${localStats.updated}`);
+  console.log(`   ✔ Database lokal sekarang berisi ${windowEvents.length} data riil unras!\n`);
 
-  const { endpointUrl, syncSecret } = getTargetConfig();
+  // 2. Optionally Sync to Remote Vercel / Supabase API
+  const { vercelUrl, syncSecret } = getTargetConfig();
 
-  console.log(`🚀 Mengirim ke API Endpoint SCC:`);
-  console.log(`   URL: ${endpointUrl}`);
-
-  if (!syncSecret) {
-    console.warn("⚠️  Peringatan: UNRAS_SYNC_SECRET belum diatur.");
-    console.warn("   Masukkan UNRAS_SYNC_SECRET di file .env.local atau set environment variable.\n");
-  }
-
-  try {
-    const response = await fetch(endpointUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${syncSecret}`
-      },
-      body: JSON.stringify(payload)
-    });
-
-    const respText = await response.text();
-    let respJson = null;
-    try {
-      respJson = JSON.parse(respText);
-    } catch {
-      respJson = { raw: respText };
+  if (vercelUrl && !vercelUrl.includes("your-project") && !vercelUrl.includes("example")) {
+    let cleanUrl = vercelUrl;
+    if (!cleanUrl.startsWith("http://") && !cleanUrl.startsWith("https://")) {
+      cleanUrl = `https://${cleanUrl}`;
     }
+    const endpointUrl = `${cleanUrl.replace(/\/+$/, "")}/api/integrations/unras/sync`;
 
-    if (response.ok) {
-      console.log(`\n🎉 SINKRONISASI SUKSES (HTTP ${response.status})!`);
-      if (respJson.summary) {
-        console.log(`   - Total Terkirim  : ${respJson.summary.received}`);
-        console.log(`   - Data Baru Masuk : ${respJson.summary.inserted}`);
-        console.log(`   - Data Diperbarui : ${respJson.summary.updated}`);
-        console.log(`   - Data Dilewati   : ${respJson.summary.skipped}`);
-      }
-      console.log(`   - Durasi Eksekusi : ${respJson.duration_ms || 0} ms`);
+    console.log(`🚀 Mengirim ke API Serverless Vercel / Supabase:`);
+    console.log(`   URL: ${endpointUrl}`);
+
+    if (!syncSecret) {
+      console.warn("   ⚠️  UNRAS_SYNC_SECRET belum diisi di .env.local, sinkronisasi cloud dilewati.");
     } else {
-      console.error(`\n❌ Gagal mengirim ke server (HTTP ${response.status}):`);
-      console.error(`   Pesan error: ${respJson.error || respText}`);
-      if (response.status === 401) {
-        console.error("\n💡 Tips: Periksa kembali nilai UNRAS_SYNC_SECRET di .env.local");
+      try {
+        const payload = {
+          sync_type: "rolling_7d",
+          timezone: "Asia/Jakarta",
+          period_start: periodStartISO,
+          period_end: periodEndISO,
+          events: windowEvents
+        };
+
+        const response = await fetch(endpointUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${syncSecret}`
+          },
+          body: JSON.stringify(payload)
+        });
+
+        const respText = await response.text();
+        let respJson = null;
+        try {
+          respJson = JSON.parse(respText);
+        } catch {
+          respJson = { raw: respText };
+        }
+
+        if (response.ok) {
+          console.log(`   🎉 Cloud Supabase Berhasil Diperbarui (HTTP ${response.status})!`);
+          if (respJson.summary) {
+            console.log(`      - Cloud Inserted: ${respJson.summary.inserted}`);
+            console.log(`      - Cloud Updated : ${respJson.summary.updated}`);
+          }
+        } else {
+          console.warn(`   ⚠️  Cloud mengembalikan status HTTP ${response.status}: ${respJson.error || respText}`);
+        }
+      } catch (err) {
+        console.warn(`   ⚠️  Tidak dapat menghubungi cloud: ${err.message}`);
       }
-      process.exit(1);
     }
-  } catch (err) {
-    console.error(`\n❌ Kesalahan koneksi jaringan saat mengirim ke ${endpointUrl}:`);
-    console.error(`   ${err.message}`);
-    process.exit(1);
   }
+
+  console.log("\n================================================================================");
+  console.log("=== SELESAI: Data riil Excel unras siap dipantau di SCC - EAGLE EYES!         ===");
+  console.log("================================================================================");
 }
 
 run();

@@ -307,24 +307,52 @@ class ProtestDataStore {
         this.db.exec("CREATE INDEX IF NOT EXISTS idx_protests_event_datetime ON protests(event_datetime);");
       }
 
-      // Check if protests table has records; if not, seed defaults
-      const row = this.db.prepare("SELECT COUNT(*) as count FROM protests").get() as { count: number };
-      if (row.count === 0) {
-        this.seedInitialData();
+      // Only seed dummy data if explicitly enabled via SEED_DUMMY_DATA=true
+      if (process.env.SEED_DUMMY_DATA === "true") {
+        const row = this.db.prepare("SELECT COUNT(*) as count FROM protests").get() as { count: number };
+        if (row.count === 0) {
+          this.seedInitialData();
+        }
       }
 
       this.dbInitialized = true;
     } catch (err) {
       console.warn("[ProtestDataStore] SQLite unavailable, falling back to In-Memory mode:", err);
-      // Fallback in-memory seed
-      for (const p of SEED_PROTESTS) {
-        const item: ProtestEvent = {
-          ...p,
-          id: p.id || crypto.randomUUID()
-        };
-        this.memoryEvents.set(item.id, item);
+      // Fallback in-memory seed (only if explicitly enabled)
+      if (process.env.SEED_DUMMY_DATA === "true") {
+        for (const p of SEED_PROTESTS) {
+          const item: ProtestEvent = {
+            ...p,
+            id: p.id || crypto.randomUUID()
+          };
+          this.memoryEvents.set(item.id, item);
+        }
       }
       this.dbInitialized = true;
+    }
+  }
+
+  public clearAllProtests(): { deleted: number } {
+    this.init();
+    if (this.db) {
+      const countRow = this.db.prepare("SELECT COUNT(*) as count FROM protests").get() as { count: number };
+      const count = countRow?.count || 0;
+      this.db.exec("DELETE FROM protest_operator_reports;");
+      this.db.exec("DELETE FROM protest_status_history;");
+      this.db.exec("DELETE FROM protest_camera_links;");
+      this.db.exec("DELETE FROM protest_attachments;");
+      this.db.exec("DELETE FROM protest_sync_logs;");
+      this.db.exec("DELETE FROM protests;");
+      return { deleted: count };
+    } else {
+      const count = this.memoryEvents.size;
+      this.memoryEvents.clear();
+      this.memoryReports.clear();
+      this.memoryHistory.clear();
+      this.memoryCameraLinks.clear();
+      this.memoryAttachments.clear();
+      this.memorySyncLogs = [];
+      return { deleted: count };
     }
   }
 
