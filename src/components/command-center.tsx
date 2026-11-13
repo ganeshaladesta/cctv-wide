@@ -51,6 +51,9 @@ import {
   CameraVideoPlayer
 } from "@/components/camera-interfaces";
 import MultiViewGrid from "@/components/multi-view-grid";
+import { ProtestDashboard } from "@/components/protests/protest-dashboard";
+import { ProtestDetailModal } from "@/components/protests/protest-detail-modal";
+import { ProtestEvent } from "@/lib/types/protests";
 
 const InteractiveMap = dynamic(() => import("@/components/interactive-map"), {
   ssr: false,
@@ -104,6 +107,11 @@ export default function CommandCenter({
   const [multiViewCameras, setMultiViewCameras] = useState<Camera[]>(
     initialCameras.slice(0, 4)
   );
+
+  // Unjuk Rasa Monitoring States
+  const [protestEvents, setProtestEvents] = useState<ProtestEvent[]>([]);
+  const [selectedProtestForModal, setSelectedProtestForModal] = useState<string | null>(null);
+  const [isProtestModalOpen, setIsProtestModalOpen] = useState(false);
 
   // Mutually Exclusive Camera Interaction State Machine
   const [cameraInteraction, setCameraInteraction] =
@@ -180,6 +188,15 @@ export default function CommandCenter({
       .then((j) => {
         if (!controller.signal.aborted) {
           setAllSources(j.data || []);
+        }
+      })
+      .catch(() => {});
+
+    fetch("/api/protests?status=active&limit=100", { signal: controller.signal })
+      .then((r) => r.json())
+      .then((j) => {
+        if (!controller.signal.aborted && j.success && Array.isArray(j.data)) {
+          setProtestEvents(j.data);
         }
       })
       .catch(() => {});
@@ -471,6 +488,27 @@ export default function CommandCenter({
     setCameraInteraction({ type: "none" });
     setActiveTab("multiview");
   }, []);
+
+  // Protest Monitoring Handlers
+  const handleProtestMarkerClick = useCallback((event: ProtestEvent) => {
+    setSelectedProtestForModal(event.id);
+    setIsProtestModalOpen(true);
+  }, []);
+
+  const handleViewProtestOnMap = useCallback((event: ProtestEvent) => {
+    setActiveTab("map");
+    if (event.validated_lat !== null && event.validated_lng !== null) {
+      setSelectedProtestForModal(event.id);
+      setIsProtestModalOpen(true);
+    }
+  }, []);
+
+  const handleSelectCameraToPlay = useCallback(
+    (camera: Camera) => {
+      handleDirectoryCameraClick(camera.id, camera);
+    },
+    [handleDirectoryCameraClick]
+  );
 
   const handleVerifyStreamLive = useCallback(async (cam: Camera) => {
     setProbeStatus({ loading: true });
@@ -802,6 +840,8 @@ export default function CommandCenter({
                 onClosePreview={handleCloseCameraInterface}
                 onOpenFullDetail={handleOpenFullDetail}
                 onAddToMultiView={handleAddToMultiView}
+                protestEvents={protestEvents}
+                onProtestMarkerClick={handleProtestMarkerClick}
               />
             </div>
 
@@ -1097,6 +1137,13 @@ export default function CommandCenter({
             multiViewIds={multiViewIdSet}
           />
         )}
+
+        {activeTab === "protests" && (
+          <ProtestDashboard
+            onViewOnMap={handleViewProtestOnMap}
+            onSelectCameraToPlay={handleSelectCameraToPlay}
+          />
+        )}
       </main>
 
       {/* Portaled Full Camera Detail Modal — Rendered ONLY when interaction.type === "camera-detail" */}
@@ -1109,6 +1156,17 @@ export default function CommandCenter({
         onVerifyStreamLive={handleVerifyStreamLive}
         onAddToMultiView={handleAddToMultiView}
         onSelectNearbyCamera={(nc) => handleDirectoryCameraClick(nc.id, nc)}
+      />
+
+      {/* Portaled Protest Detail Modal for Map Click or Dashboard Click */}
+      <ProtestDetailModal
+        protestId={selectedProtestForModal}
+        isOpen={isProtestModalOpen}
+        onClose={() => {
+          setIsProtestModalOpen(false);
+          setSelectedProtestForModal(null);
+        }}
+        onSelectCameraToPlay={handleSelectCameraToPlay}
       />
 
       {/* Breathing Footer */}

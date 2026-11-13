@@ -27,7 +27,8 @@ export type DashboardTab =
   | "multiview"
   | "directory"
   | "provinces"
-  | "favorites";
+  | "favorites"
+  | "protests";
 
 interface AppBrandingProps {
   compact?: boolean;
@@ -160,6 +161,19 @@ export function MobileNavigation({
               >
                 <Building2 className="w-3.5 h-3.5 shrink-0" />
                 <span className="truncate">38 Provinsi & Sumber</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleTabClick("protests")}
+                className={`w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold transition-colors ${
+                  activeTab === "protests"
+                    ? "bg-red-500/20 border border-red-500/45 text-white"
+                    : "bg-[#111622] border border-[var(--border-subtle)] text-[#98A4B8] hover:text-white hover:bg-[#161C2B]"
+                }`}
+              >
+                <Radio className="w-3.5 h-3.5 shrink-0 text-red-400" />
+                <span className="truncate">Monitoring Unjuk Rasa</span>
               </button>
 
               <button
@@ -308,6 +322,11 @@ export function ResponsiveHeader({
       tab: "provinces",
       label: "38 Provinsi",
       icon: <Building2 className="w-3.5 h-3.5" />
+    },
+    {
+      tab: "protests",
+      label: "Unjuk Rasa",
+      icon: <Radio className="w-3.5 h-3.5 text-red-400" />
     },
     {
       tab: "favorites",

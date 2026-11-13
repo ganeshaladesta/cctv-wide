@@ -14,6 +14,7 @@ import {
   Navigation
 } from "lucide-react";
 import { Camera, CompactMarker, Province } from "@/lib/types";
+import { ProtestEvent } from "@/lib/types/protests";
 import { CameraMapPreview } from "@/components/camera-interfaces";
 
 interface InteractiveMapProps {
@@ -27,6 +28,8 @@ interface InteractiveMapProps {
   onClosePreview: () => void;
   onOpenFullDetail: (cameraId: string, camera: Camera) => void;
   onAddToMultiView: (camera: Camera) => void;
+  protestEvents?: ProtestEvent[];
+  onProtestMarkerClick?: (protest: ProtestEvent) => void;
 }
 
 const OSM_TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
@@ -99,18 +102,24 @@ export default function InteractiveMap({
   onMarkerClick,
   onClosePreview,
   onOpenFullDetail,
-  onAddToMultiView
+  onAddToMultiView,
+  protestEvents,
+  onProtestMarkerClick
 }: InteractiveMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const clusterGroupRef = useRef<L.MarkerClusterGroup | null>(null);
   const plainLayerGroupRef = useRef<L.LayerGroup | null>(null);
+  const protestLayerGroupRef = useRef<L.LayerGroup | null>(null);
   const onMarkerClickRef = useRef(onMarkerClick);
   onMarkerClickRef.current = onMarkerClick;
+  const onProtestMarkerClickRef = useRef(onProtestMarkerClick);
+  onProtestMarkerClickRef.current = onProtestMarkerClick;
 
   const [darkFilter, setDarkFilter] = useState(true);
   const [clustering, setClustering] = useState(true);
+  const [showProtestLayer, setShowProtestLayer] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Strict coordinate validation:
@@ -176,11 +185,14 @@ export default function InteractiveMap({
     });
 
     const plainGroup = L.layerGroup();
+    const protestGroup = L.layerGroup();
     map.addLayer(clusterGroup);
+    map.addLayer(protestGroup);
 
     mapRef.current = map;
     clusterGroupRef.current = clusterGroup;
     plainLayerGroupRef.current = plainGroup;
+    protestLayerGroupRef.current = protestGroup;
 
     // Automatically invalidate map size when container or navigation resizes
     const containerEl = mapContainerRef.current;
@@ -337,6 +349,61 @@ export default function InteractiveMap({
     });
   }, [previewCamera]);
 
+  // Render Protest Markers with strict coordinate validation
+  useEffect(() => {
+    const group = protestLayerGroupRef.current;
+    const map = mapRef.current;
+    if (!group || !map) return;
+    group.clearLayers();
+
+    if (!showProtestLayer || !protestEvents || protestEvents.length === 0) return;
+
+    for (const p of protestEvents) {
+      if (
+        p.validated_lat === null ||
+        p.validated_lng === null ||
+        !isValidLatLng(p.validated_lat, p.validated_lng)
+      ) {
+        continue; // Unmapped protests MUST NOT be plotted on the live map
+      }
+
+      const isOngoing = p.status === "ongoing";
+      const isScheduled = p.status === "scheduled";
+      const isMonitoring = p.status === "monitoring";
+
+      const iconHtml = isOngoing
+        ? `<div class="relative flex items-center justify-center cursor-pointer" style="width:34px;height:34px;"><div class="absolute w-8 h-8 rounded-full bg-red-500/50 animate-ping"></div><div class="w-6 h-6 rounded-full bg-red-600 border-2 border-white text-white flex items-center justify-center font-bold text-xs shadow-xl">🚨</div></div>`
+        : isScheduled
+        ? `<div class="relative flex items-center justify-center cursor-pointer" style="width:30px;height:30px;"><div class="w-6 h-6 rounded-full bg-amber-500 border-2 border-black text-black flex items-center justify-center font-bold text-xs shadow-lg">⚠️</div></div>`
+        : isMonitoring
+        ? `<div class="relative flex items-center justify-center cursor-pointer" style="width:30px;height:30px;"><div class="w-6 h-6 rounded-full bg-purple-600 border-2 border-white text-white flex items-center justify-center font-bold text-xs shadow-lg">👁️</div></div>`
+        : `<div class="relative flex items-center justify-center cursor-pointer" style="width:26px;height:26px;"><div class="w-5 h-5 rounded-full bg-slate-600 border border-white text-white flex items-center justify-center font-bold text-[10px] shadow">✓</div></div>`;
+
+      const icon = L.divIcon({
+        className: "protest-pin-marker",
+        html: iconHtml,
+        iconSize: [34, 34],
+        iconAnchor: [17, 17]
+      });
+
+      const marker = L.marker([p.validated_lat, p.validated_lng], {
+        icon,
+        zIndexOffset: 2000
+      });
+
+      marker.bindTooltip(
+        `[${p.status.toUpperCase()}] ${p.isu_tuntutan} • ${p.estimasi_massa_source ? p.estimasi_massa_source.toLocaleString('id-ID') + ' org' : 'Estimasi massa belum ada'}`,
+        { direction: "top", offset: [0, -18] }
+      );
+
+      marker.on("click", () => {
+        onProtestMarkerClickRef.current?.(p);
+      });
+
+      group.addLayer(marker);
+    }
+  }, [protestEvents, showProtestLayer]);
+
   const handleResetView = () => {
     mapRef.current?.flyTo([-2.5489, 118.0149], 5, { duration: 1.0 });
   };
@@ -424,6 +491,28 @@ export default function InteractiveMap({
           >
             Cluster: {clustering ? "AKTIF" : "NONAKTIF"}
           </button>
+
+          {protestEvents && protestEvents.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowProtestLayer((l) => !l)}
+              title="Toggle Layer Unjuk Rasa"
+              className={`px-2.5 py-1.5 rounded-xl text-[11px] sm:text-xs font-semibold border backdrop-blur-md transition-colors shadow-lg flex items-center gap-1.5 ${
+                showProtestLayer
+                  ? "bg-red-500/20 border-red-500/45 text-red-400"
+                  : "bg-[#090C12]/92 border-[var(--border-default)] text-[#98A4B8] hover:text-white"
+              }`}
+            >
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  showProtestLayer ? "bg-red-500 animate-pulse" : "bg-[#64748B]"
+                }`}
+              />
+              <span>
+                Unras ({protestEvents.filter((p) => p.validated_lat !== null).length})
+              </span>
+            </button>
+          )}
         </div>
 
         {/* Right: OSM Basemap Switcher & Navigation Controls (z-index: 20) */}
