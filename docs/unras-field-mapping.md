@@ -11,7 +11,7 @@ Dokumen ini menyajikan pemetaan komprehensif antara kolom berkas Excel sumber pa
 |---------------------|---------------------------------|--------------|-----------------------------------|
 | `ID KEJADIAN` | `id_kejadian` | `TEXT UNIQUE` | **Identitas Kunci Sumber (Immutable).** Baris tanpa ID KEJADIAN wajib dilewati (*skipped*). |
 | `KODE_UNRAS` | `kode_unras` | `TEXT` | Kode register aksi unjuk rasa. Jika kosong, gunakan `id_kejadian`. |
-| `WAKTU DAN TGL KEJADIAN ISO` | `event_datetime` | `TIMESTAMPTZ` / `TEXT` | **Cap waktu utama untuk penyaringan jendela rolling 7 hari.** Format standar ISO 8601. |
+| `WAKTU DAN TGL KEJADIAN ISO` | `event_datetime` | `TIMESTAMPTZ` / `TEXT` | **Cap waktu utama untuk penyaringan jendela Same-Day H-0 (00:00 - 24:00 WIB).** Format standar ISO 8601. |
 | `TANGGAL` | `tanggal` | `DATE` / `TEXT` | Tanggal kejadian terformat `YYYY-MM-DD`. Dihasilkan dari parsing tanggal Indonesia/Excel serial number. |
 | `WAKTU` | `waktu_mulai` | `TEXT` | Waktu mulai unjuk rasa (misal: `"09:00 WIB"`). |
 | `LOKASI` | `lokasi` | `TEXT` | Lokasi spesifik aksi (gedung, jalan, bundaran). Default: `"Lokasi Belum Ditentukan"`. |
@@ -33,7 +33,7 @@ Dokumen ini menyajikan pemetaan komprehensif antara kolom berkas Excel sumber pa
 
 ## 2. Spesifikasi Format Cap Waktu ISO (`WAKTU DAN TGL KEJADIAN ISO`)
 
-Kolom ini merupakan **acuan tunggal** untuk penentuan inklusi jendela rolling 7 hari:
+Kolom ini merupakan **acuan tunggal** untuk penentuan inklusi jendela Same-Day (H-0):
 - **Format yang Diterima:**
   - `2026-11-13T09:00:00+07:00` (ISO 8601 dengan offset zona waktu WIB)
   - `2026-11-13T02:00:00.000Z` (ISO 8601 UTC)

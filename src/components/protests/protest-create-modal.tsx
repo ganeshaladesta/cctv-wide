@@ -329,44 +329,93 @@ export function ProtestCreateModal({
             </div>
           </div>
 
-          {/* Optional Coordinates */}
-          <div className="p-3 bg-[#111622] border border-[var(--border-subtle)] rounded-xl">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-semibold text-[#98A4B8] flex items-center gap-1.5">
-                <MapPin className="w-3.5 h-3.5 text-blue-400" /> Koordinat Geospasial
+          {/* Pilih Lokasi Aksi (Interactive Map Picker) */}
+          <div className="p-3.5 bg-[#111622] border border-[var(--border-subtle)] rounded-xl space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-white flex items-center gap-1.5 uppercase tracking-wide">
+                <MapPin className="w-4 h-4 text-red-400" />
+                Pilih Lokasi Aksi
               </span>
-              <button
-                type="button"
-                onClick={() => setIsPickerOpen(true)}
-                className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 transition-colors flex items-center gap-1 cursor-pointer"
-              >
-                <MapPin className="w-3 h-3" />
-                <span>Pilih di Peta Interaktif</span>
-              </button>
+              {formData.validated_lat && formData.validated_lng ? (
+                <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                  Terpetakan
+                </span>
+              ) : (
+                <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-500/10 text-[#98A4B8] border border-white/10">
+                  Belum Terpetakan
+                </span>
+              )}
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <input
-                  type="text"
-                  placeholder="Latitude (cth: -6.2115)"
-                  value={formData.validated_lat}
-                  onChange={(e) => setFormData({ ...formData, validated_lat: e.target.value })}
-                  className="w-full bg-[#161C2B] border border-[var(--border-default)] rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
+
+            {isPickerOpen ? (
+              <div className="pt-1">
+                <ProtestLocationPicker
+                  initialLat={formData.validated_lat ? parseFloat(formData.validated_lat) : null}
+                  initialLng={formData.validated_lng ? parseFloat(formData.validated_lng) : null}
+                  initialLocationName={formData.lokasi}
+                  compact={true}
+                  onSelectLocation={(pickedLat, pickedLng, label) => {
+                    setFormData((prev) => ({
+                      ...prev,
+                      validated_lat: pickedLat !== null ? String(pickedLat) : "",
+                      validated_lng: pickedLng !== null ? String(pickedLng) : "",
+                      lokasi: (!prev.lokasi || prev.lokasi.trim() === "") && label ? label : prev.lokasi
+                    }));
+                    setIsPickerOpen(false);
+                  }}
+                  onClose={() => setIsPickerOpen(false)}
                 />
               </div>
-              <div>
-                <input
-                  type="text"
-                  placeholder="Longitude (cth: 106.8016)"
-                  value={formData.validated_lng}
-                  onChange={(e) => setFormData({ ...formData, validated_lng: e.target.value })}
-                  className="w-full bg-[#161C2B] border border-[var(--border-default)] rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
-                />
+            ) : formData.validated_lat && formData.validated_lng ? (
+              <div className="p-3 bg-[#161C2B] border border-emerald-500/30 rounded-xl flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5 text-emerald-400 text-xs font-semibold">
+                    <MapPin className="w-3.5 h-3.5 shrink-0" />
+                    <span>Titik Lokasi Terpilih di Peta</span>
+                  </div>
+                  <p className="text-white text-xs font-medium truncate mt-0.5">
+                    {formData.lokasi || "Lokasi Aksi Terpetakan"}
+                  </p>
+                  <p className="text-[10px] text-[#98A4B8] font-mono mt-0.5">
+                    Koordinat: {formData.validated_lat}, {formData.validated_lng}
+                  </p>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setIsPickerOpen(true)}
+                    className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 transition-colors cursor-pointer"
+                  >
+                    Ubah di Peta
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFormData((prev) => ({ ...prev, validated_lat: "", validated_lng: "" }))}
+                    className="p-1 rounded-lg text-[#98A4B8] hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer"
+                    title="Hapus koordinat"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
-            </div>
-            <p className="text-[10px] text-[#64748B] mt-1">
-              Jika dikosongkan, aksi akan berstatus belum terpetakan (unmapped) dan tidak ditampilkan di layer peta sampai koordinat divalidasi.
-            </p>
+            ) : (
+              <div className="p-3 bg-[#161C2B] border border-dashed border-[var(--border-default)] rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div className="text-xs text-[#98A4B8]">
+                  <p className="text-white font-medium">Titik Geospasial Belum Ditentukan</p>
+                  <p className="text-[11px] text-[#64748B]">
+                    Klik tombol untuk mencari gedung/landmark atau menandai titik langsung di peta.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsPickerOpen(true)}
+                  className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-500/20 transition-all flex items-center gap-1.5 shrink-0 cursor-pointer"
+                >
+                  <MapPin className="w-3.5 h-3.5" />
+                  <span>Pilih di Peta Interaktif</span>
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Action buttons */}
@@ -400,25 +449,6 @@ export function ProtestCreateModal({
         </form>
         </div>
       </div>
-
-      {/* Interactive Geocoding & Map Location Picker Submodal */}
-      {isPickerOpen && (
-        <ProtestLocationPicker
-          initialLat={formData.validated_lat ? parseFloat(formData.validated_lat) : null}
-          initialLng={formData.validated_lng ? parseFloat(formData.validated_lng) : null}
-          initialLocationName={formData.lokasi}
-          onSelectLocation={(pickedLat, pickedLng, label) => {
-            setFormData((prev) => ({
-              ...prev,
-              validated_lat: pickedLat !== null ? String(pickedLat) : "",
-              validated_lng: pickedLng !== null ? String(pickedLng) : "",
-              lokasi: (!prev.lokasi || prev.lokasi.trim() === "") && label ? label : prev.lokasi
-            }));
-            setIsPickerOpen(false);
-          }}
-          onClose={() => setIsPickerOpen(false)}
-        />
-      )}
     </div>
   );
 

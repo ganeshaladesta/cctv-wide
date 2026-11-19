@@ -3,10 +3,10 @@ import { resolveCurrentUser, canTriggerManualSync } from '@/lib/auth-roles';
 import { msGraphSyncService } from '@/lib/ms-graph-sync';
 import { protestStore } from '@/lib/protest-store';
 import {
-  calculateRolling7DayWindow,
-  processRolling7DaySync
+  calculateSameDayWindow,
+  processSameDaySync
 } from '@/lib/unras-rolling-sync';
-import { RollingSyncPayload } from '@/lib/types/protests';
+import { ProtestSyncPayload } from '@/lib/types/protests';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -22,22 +22,22 @@ export async function GET(request: NextRequest) {
     const cronSecret = process.env.CRON_SECRET;
     const isSecretValid = cronSecret && authHeader === `Bearer ${cronSecret}`;
 
-    // If it's a cron invocation, execute rolling 7-day scheduled sync
+    // If it's a cron invocation, execute Same-Day (H-0) scheduled sync
     if (isCron || isSecretValid) {
-      const window = calculateRolling7DayWindow();
+      const window = calculateSameDayWindow();
       let rows = msGraphSyncService.isConfigured()
         ? await msGraphSyncService.fetchWorkbookRows().catch(() => msGraphSyncService.loadLocalFixture())
         : msGraphSyncService.loadLocalFixture();
 
-      const payload: RollingSyncPayload = {
-        sync_type: 'rolling_7d',
+      const payload: ProtestSyncPayload = {
+        sync_type: 'same_day',
         timezone: 'Asia/Jakarta',
         period_start: window.period_start,
         period_end: window.period_end,
         events: rows
       };
 
-      const result = await processRolling7DaySync(
+      const result = await processSameDaySync(
         payload,
         'scheduler_cron',
         'System Daily Cron (05:00 WIB)'
@@ -89,8 +89,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Calculate execution-time rolling 7-day window
-    const window = calculateRolling7DayWindow();
+    // Calculate execution-time Same-Day (H-0) window
+    const window = calculateSameDayWindow();
 
     let forceFixture = false;
     try {
@@ -107,15 +107,15 @@ export async function POST(request: NextRequest) {
       ? await msGraphSyncService.fetchWorkbookRows().catch(() => msGraphSyncService.loadLocalFixture())
       : msGraphSyncService.loadLocalFixture();
 
-    const payload: RollingSyncPayload = {
-      sync_type: 'rolling_7d',
+    const payload: ProtestSyncPayload = {
+      sync_type: 'same_day',
       timezone: 'Asia/Jakarta',
       period_start: window.period_start,
       period_end: window.period_end,
       events: rows
     };
 
-    const result = await processRolling7DaySync(
+    const result = await processSameDaySync(
       payload,
       isCron || isSecretValid ? 'scheduler_cron' : 'manual_admin',
       isCron || isSecretValid ? 'system-cron' : `${user.role}:${user.name || user.id}`

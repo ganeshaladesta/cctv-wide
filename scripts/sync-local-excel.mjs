@@ -284,22 +284,30 @@ async function run() {
   const rawRows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
   console.log(`✔ Berhasil membaca total ${rawRows.length} baris dari Excel.\n`);
 
-  // Calculate Rolling 7-Day Window
-  const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+  // Calculate Same-Day (H-0) Window in Asia/Jakarta
   const now = new Date();
-  const periodEndMs = now.getTime();
-  const periodStartMs = periodEndMs - SEVEN_DAYS_MS;
-  const periodEndISO = now.toISOString();
-  const periodStartISO = new Date(periodStartMs).toISOString();
+  const dateWIB = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(now);
+
+  const startWIB = new Date(`${dateWIB}T00:00:00+07:00`);
+  const endWIB = new Date(startWIB.getTime() + 24 * 60 * 60 * 1000);
+  const periodStartMs = startWIB.getTime();
+  const periodEndMs = endWIB.getTime();
+  const periodStartISO = startWIB.toISOString();
+  const periodEndISO = endWIB.toISOString();
 
   const isSyncAll = process.argv.includes("--all") || process.env.SYNC_ALL === "true";
 
   if (isSyncAll) {
     console.log("🗓  Mode Sinkronisasi: SEMUA DATA (Full Sync --all)\n");
   } else {
-    console.log("🗓  Jendela Waktu Sinkronisasi (Rolling 7 Hari):");
-    console.log(`   Mulai  : ${periodStartISO} (${new Date(periodStartMs).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })} WIB)`);
-    console.log(`   Selesai: ${periodEndISO} (${now.toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })} WIB)\n`);
+    console.log(`🗓  Jendela Waktu Sinkronisasi: Hari Ini H-0 (${dateWIB}):`);
+    console.log(`   Mulai  : ${periodStartISO} (${startWIB.toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })} WIB)`);
+    console.log(`   Selesai: ${periodEndISO} (${endWIB.toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })} WIB)\n`);
   }
 
   const windowEvents = [];
@@ -333,12 +341,12 @@ async function run() {
     }
   }
 
-  console.log(`🎯 Hasil Filter Jendela 7 Hari:`);
-  console.log(`   - Data masuk jendela 7 hari : ${windowEvents.length} kejadian unras`);
-  console.log(`   - Data di luar jendela 7 hari: ${skippedTotal} baris dilewati (arsip/historis)\n`);
+  console.log(`🎯 Hasil Filter Jendela H-0 (Hari Ini):`);
+  console.log(`   - Data masuk hari ini       : ${windowEvents.length} kejadian unras`);
+  console.log(`   - Data di luar hari ini     : ${skippedTotal} baris dilewati (kemarin/historis/masa depan)\n`);
 
   if (windowEvents.length === 0) {
-    console.log("ℹ  Tidak ada kejadian unras dalam jendela 7 hari terakhir.");
+    console.log("ℹ  Tidak ada kejadian unras dalam jendela hari ini (H-0).");
     process.exit(0);
   }
 
@@ -367,7 +375,7 @@ async function run() {
     } else {
       try {
         const payload = {
-          sync_type: "rolling_7d",
+          sync_type: "same_day",
           timezone: "Asia/Jakarta",
           period_start: periodStartISO,
           period_end: periodEndISO,

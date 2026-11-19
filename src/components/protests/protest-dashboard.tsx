@@ -339,10 +339,10 @@ export function ProtestDashboard({
                 <RefreshCw className={`w-4 h-4 text-emerald-400 ${syncLoading ? "animate-spin" : ""}`} />
                 <div>
                   <h3 className="text-xs font-bold text-white tracking-wide uppercase">
-                    Status Sinkronisasi Rolling 7-Hari
+                    Status Sinkronisasi H-0 (Hari Ini)
                   </h3>
                   <p className="text-[11px] text-[#98A4B8]">
-                    Alur Otomatis Power Automate (05:00 WIB) & Integrasi Workbook OneDrive
+                    Sinkronisasi Otomatis Harian (05:00 WIB) & Integrasi Workbook
                   </p>
                 </div>
               </div>
@@ -394,13 +394,13 @@ export function ProtestDashboard({
               </div>
 
               <div className="p-2.5 rounded-xl bg-[#141A28] border border-[var(--border-subtle)] col-span-1 md:col-span-2">
-                <span className="text-[10px] text-[#64748B] block">Jendela Sinkronisasi (Rolling 7 Hari)</span>
+                <span className="text-[10px] text-[#64748B] block">Jendela Sinkronisasi H-0 (Hari Ini)</span>
                 <div className="text-white font-medium mt-0.5 flex flex-wrap items-center gap-1">
                   <span>{formatWib(latestLog?.period_start)}</span>
                   <span className="text-[#64748B]">s/d</span>
                   <span>{formatWib(latestLog?.period_end)}</span>
                 </div>
-                <span className="text-[10px] text-[#98A4B8]">Inklusi: start ≤ event &lt; end (Asia/Jakarta)</span>
+                <span className="text-[10px] text-[#98A4B8]">Inklusi: 00:00:00 s/d 24:00:00 WIB (Asia/Jakarta)</span>
               </div>
 
               <div className="p-2.5 rounded-xl bg-[#141A28] border border-[var(--border-subtle)]">
@@ -412,7 +412,7 @@ export function ProtestDashboard({
                   <span className="text-blue-400 font-bold" title="Diperbarui">
                     ~{latestLog?.records_updated ?? 0}
                   </span>
-                  <span className="text-amber-400 font-bold" title="Dilewati (di luar 7 hari / invalid)">
+                  <span className="text-amber-400 font-bold" title="Dilewati (di luar hari ini / invalid)">
                     /{latestLog?.records_skipped ?? 0}
                   </span>
                   <span className="text-red-400 font-bold" title="Gagal">

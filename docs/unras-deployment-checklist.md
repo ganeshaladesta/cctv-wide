@@ -1,5 +1,5 @@
 # Daftar Periksa Penerapan & Verifikasi (Deployment Checklist)
-## Modul Pemantauan Unjuk Rasa Rolling 7-Hari — SCC - EAGLE EYES
+## Modul Pemantauan Unjuk Rasa Same-Day (H-0) — SCC - EAGLE EYES
 
 Daftar periksa ini wajib dipenuhi oleh administrator sistem dan teknisi operasional sebelum mengaktifkan sinkronisasi otomatis di lingkungan staging maupun production.
 
@@ -49,11 +49,11 @@ File migrasi resmi terletak di:
 
 Sebelum melakukan deployment, jalankan seluruh pengujian regresi dan verifikasi tipe di terminal lokal:
 
-### 1. Verifikasi Jendela Rolling 7-Hari (14 Kasus Uji)
+### 1. Verifikasi Jendela Same-Day H-0 (15 Kasus Uji)
 ```bash
-npm run test:rolling-sync
+npm run test:same-day-sync
 ```
-*Kriteria Lolos:* Seluruh 14 pengujian lulus 100% (inklusi batas awal, eksklusi batas akhir, perlindungan catatan operator, timing-safe token, dsb).
+*Kriteria Lolos:* Seluruh 15 pengujian lulus 100% (inklusi batas awal tengah malam 00:00 WIB, eksklusi kemarin & besok, preservasi data historis, perlindungan catatan operator, timing-safe token, dsb).
 
 ### 2. Verifikasi Komprehensif Arsitektur Unjuk Rasa
 ```bash

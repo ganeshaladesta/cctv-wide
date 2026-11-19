@@ -1,0 +1,44 @@
+name: Unjuk Rasa Daily Sync (Same-Day H-0)
+
+on:
+  schedule:
+    # 05:00 Asia/Jakarta (WIB) = 22:00 UTC previous day
+    - cron: '0 22 * * *'
+  workflow_dispatch:
+    inputs:
+      sync_all:
+        description: 'Sinkronisasi seluruh data Excel (--all)'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  sync:
+    name: Sync Unras Events (Same-Day H-0)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Same-Day H-0 Sync
+        env:
+          VERCEL_URL: ${{ secrets.VERCEL_URL }}
+          UNRAS_SYNC_SECRET: ${{ secrets.UNRAS_SYNC_SECRET }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          if [ "${{ github.event.inputs.sync_all }}" = "true" ]; then
+            node scripts/sync-local-excel.mjs --all
+          else
+            node scripts/sync-local-excel.mjs
+          fi

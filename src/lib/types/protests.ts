@@ -180,8 +180,8 @@ export interface ProtestSyncLog {
   id: string; // UUID
   started_at: string;
   completed_at: string | null;
-  period_start?: string | null; // Rolling 7-day start boundary (ISO)
-  period_end?: string | null; // Rolling 7-day end boundary (ISO)
+  period_start?: string | null; // Same-day (H-0) start boundary (ISO)
+  period_end?: string | null; // Same-day (H-0) end boundary (ISO)
   status: "running" | "success" | "partial" | "failed" | "skipped";
   triggered_by: "power_automate" | "scheduler_cron" | "manual_admin" | "system";
   triggered_by_user?: string | null;
@@ -197,18 +197,22 @@ export interface ProtestSyncLog {
 }
 
 /**
- * Contract for POST /api/integrations/unras/sync
- * Power Automate Scheduled Cloud Flow -> Vercel API
+ * Contract for POST /api/integrations/unras/sync & /api/protests/sync
+ * Scheduled Sync (Same-Day H-0 Asia/Jakarta) -> Vercel API
  */
-export interface RollingSyncPayload {
-  sync_type: "rolling_7d";
+export type ProtestSyncType = "same_day" | "same_day_h0" | "rolling_7d";
+
+export interface ProtestSyncPayload {
+  sync_type: ProtestSyncType;
   timezone: "Asia/Jakarta";
-  period_start: string; // ISO 8601 string
-  period_end: string; // ISO 8601 string
+  period_start: string; // ISO 8601 string (00:00:00 WIB today)
+  period_end: string; // ISO 8601 string (00:00:00 WIB tomorrow)
   events: ExcelProtestRow[];
 }
 
-export interface RollingSyncResult {
+export type RollingSyncPayload = ProtestSyncPayload;
+
+export interface ProtestSyncResult {
   success: boolean;
   status: "success" | "partial" | "failed" | "skipped";
   execution_id: string;
@@ -225,6 +229,8 @@ export interface RollingSyncResult {
   errors?: string[];
   duration_ms: number;
 }
+
+export type RollingSyncResult = ProtestSyncResult;
 
 /**
  * Protest File Attachments
