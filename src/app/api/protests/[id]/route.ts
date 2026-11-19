@@ -92,6 +92,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       suggested_lat: body.suggested_lat,
       suggested_lng: body.suggested_lng,
       suggested_address: body.suggested_address,
+      validated_by_id: body.validated_lat !== undefined && body.validated_lat !== null ? user.id : body.validated_by_id,
+      validated_by_name: body.validated_lat !== undefined && body.validated_lat !== null ? user.name : body.validated_by_name,
       urgency: body.urgency,
       category_id: body.category_id,
       editorial_draft: body.editorial_draft,

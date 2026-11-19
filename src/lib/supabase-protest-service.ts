@@ -6,6 +6,7 @@
 import { getSupabaseAdminClient, isSupabaseConfigured } from "./supabase";
 import { normalizeTimeString } from "./time-normalization";
 import { geocodingService } from "./geocoding/geocoding-service";
+import { ensureValidUuid } from "./auth-roles";
 import {
   ProtestEvent,
   ProtestFilterParams,
@@ -218,8 +219,8 @@ export async function createProtestInSupabase(
     id_kejadian: payload.id_kejadian || `MANUAL-${Date.now()}`,
     kode_unras: payload.kode_unras || `UR-${Date.now().toString().slice(-6)}`,
     tanggal: payload.tanggal,
-    waktu_mulai: payload.waktu_mulai ? payload.waktu_mulai.slice(0, 8) : null,
-    waktu_selesai: payload.waktu_selesai ? payload.waktu_selesai.slice(0, 8) : null,
+    waktu_mulai: payload.waktu_mulai ? normalizeTimeString(payload.waktu_mulai).time : null,
+    waktu_selesai: payload.waktu_selesai ? normalizeTimeString(payload.waktu_selesai).time : null,
     event_datetime: payload.event_datetime || (payload.tanggal ? `${payload.tanggal}T09:00:00+07:00` : new Date().toISOString()),
     lokasi: payload.lokasi,
     titik_kumpul: payload.titik_kumpul || null,
@@ -315,12 +316,14 @@ export async function updateProtestInSupabase(
   if (updates.geocoding_provider !== undefined) patch.geocoding_provider = updates.geocoding_provider;
   if (updates.geocoding_confidence !== undefined) patch.geocoding_confidence = updates.geocoding_confidence;
   if (updates.geocoding_alternatives !== undefined) patch.geocoding_alternatives = updates.geocoding_alternatives;
-  if (updates.validated_by_id !== undefined) patch.validated_by_id = updates.validated_by_id;
+  if (updates.validated_by_id !== undefined) patch.validated_by_id = updates.validated_by_id ? ensureValidUuid(updates.validated_by_id) : null;
   if (updates.validated_by_name !== undefined) patch.validated_by_name = updates.validated_by_name;
   if (updates.is_archived !== undefined) patch.is_archived = updates.is_archived;
   if (updates.lokasi !== undefined) patch.lokasi = updates.lokasi;
   if (updates.isu_tuntutan !== undefined) patch.isu_tuntutan = updates.isu_tuntutan;
   if (updates.tanggal !== undefined) patch.tanggal = updates.tanggal;
+  if (updates.waktu_mulai !== undefined) patch.waktu_mulai = updates.waktu_mulai ? normalizeTimeString(updates.waktu_mulai).time : null;
+  if (updates.waktu_selesai !== undefined) patch.waktu_selesai = updates.waktu_selesai ? normalizeTimeString(updates.waktu_selesai).time : null;
   if (updates.titik_kumpul !== undefined) patch.titik_kumpul = updates.titik_kumpul;
   if (updates.sasaran_aksi !== undefined) patch.sasaran_aksi = updates.sasaran_aksi;
   if (updates.organisasi_kelompok !== undefined) patch.organisasi_kelompok = updates.organisasi_kelompok;
@@ -329,7 +332,7 @@ export async function updateProtestInSupabase(
   if (updates.provinsi !== undefined) patch.provinsi = updates.provinsi;
   if (updates.kota_kabupaten !== undefined) patch.kota_kabupaten = updates.kota_kabupaten;
   if (updates.completed_at !== undefined) patch.completed_at = updates.completed_at;
-  if (updates.completed_by_id !== undefined) patch.completed_by_id = updates.completed_by_id;
+  if (updates.completed_by_id !== undefined) patch.completed_by_id = updates.completed_by_id ? ensureValidUuid(updates.completed_by_id) : null;
   if (updates.completed_by_name !== undefined) patch.completed_by_name = updates.completed_by_name;
 
   const { data, error } = await supabase
@@ -363,14 +366,17 @@ export async function updateStatusInSupabase(
 
   const fromStatus = existing.status;
   const isCompleted = toStatus === "completed";
+  const isArchived = toStatus === "completed" || toStatus === "cancelled";
+  const validUserId = ensureValidUuid(user.id);
 
   // Update status in protests
   const { data: updated, error: updateErr } = await supabase
     .from("protests")
     .update({
       status: toStatus,
+      is_archived: isArchived,
       completed_at: isCompleted ? new Date().toISOString() : null,
-      completed_by_id: isCompleted ? user.id : null,
+      completed_by_id: isCompleted ? validUserId : null,
       completed_by_name: isCompleted ? user.name : null,
       updated_at: new Date().toISOString()
     })
@@ -383,14 +389,17 @@ export async function updateStatusInSupabase(
   }
 
   // Insert status history audit log
-  await supabase.from("protest_status_history").insert({
+  const { error: histErr } = await supabase.from("protest_status_history").insert({
     protest_id: existing.id,
     from_status: fromStatus,
     to_status: toStatus,
     reason: reason || null,
-    changed_by_id: user.id,
+    changed_by_id: validUserId,
     changed_by_name: user.name
   });
+  if (histErr) {
+    console.error("[updateStatusInSupabase] Warning: Failed to insert status history:", histErr.message);
+  }
 
   return mapRowToProtest(updated);
 }
@@ -440,7 +449,7 @@ export async function addReportInSupabase(
   const row = {
     protest_id: protest.id,
     report_type: data.report_type || "progress",
-    author_id: user?.id || data.author_id,
+    author_id: ensureValidUuid(user?.id || data.author_id),
     author_name: user?.name || data.author_name,
     author_role: user?.role || data.author_role || "operator",
     content: data.content,
@@ -533,7 +542,7 @@ export async function linkCameraInSupabase(link: Partial<ProtestCameraLink>): Pr
     distance_meters: link.distance_meters || 0,
     notes: link.notes || null,
     is_recommended: Boolean(link.is_recommended),
-    linked_by_id: link.linked_by_id,
+    linked_by_id: ensureValidUuid(link.linked_by_id),
     linked_by_name: link.linked_by_name
   };
 

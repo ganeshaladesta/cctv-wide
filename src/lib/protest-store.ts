@@ -325,6 +325,36 @@ class ProtestDataStore {
         this.db.exec("ALTER TABLE protests ADD COLUMN event_datetime TEXT;");
         this.db.exec("CREATE INDEX IF NOT EXISTS idx_protests_event_datetime ON protests(event_datetime);");
       }
+      if (!protestCols.includes("suggested_lat")) {
+        this.db.exec("ALTER TABLE protests ADD COLUMN suggested_lat REAL;");
+      }
+      if (!protestCols.includes("suggested_lng")) {
+        this.db.exec("ALTER TABLE protests ADD COLUMN suggested_lng REAL;");
+      }
+      if (!protestCols.includes("suggested_address")) {
+        this.db.exec("ALTER TABLE protests ADD COLUMN suggested_address TEXT;");
+      }
+      if (!protestCols.includes("geocoding_provider")) {
+        this.db.exec("ALTER TABLE protests ADD COLUMN geocoding_provider TEXT;");
+      }
+      if (!protestCols.includes("geocoding_confidence")) {
+        this.db.exec("ALTER TABLE protests ADD COLUMN geocoding_confidence TEXT;");
+      }
+      if (!protestCols.includes("location_validation_status")) {
+        this.db.exec("ALTER TABLE protests ADD COLUMN location_validation_status TEXT DEFAULT 'unmapped';");
+      }
+      if (!protestCols.includes("geocoding_alternatives")) {
+        this.db.exec("ALTER TABLE protests ADD COLUMN geocoding_alternatives TEXT DEFAULT '[]';");
+      }
+      if (!protestCols.includes("validated_at")) {
+        this.db.exec("ALTER TABLE protests ADD COLUMN validated_at TEXT;");
+      }
+      if (!protestCols.includes("validated_by_id")) {
+        this.db.exec("ALTER TABLE protests ADD COLUMN validated_by_id TEXT;");
+      }
+      if (!protestCols.includes("validated_by_name")) {
+        this.db.exec("ALTER TABLE protests ADD COLUMN validated_by_name TEXT;");
+      }
 
       // Only seed dummy data if explicitly enabled via SEED_DUMMY_DATA=true
       if (process.env.SEED_DUMMY_DATA === "true") {
@@ -703,7 +733,8 @@ class ProtestDataStore {
         }
         return created;
       } catch (err) {
-        console.error("[ProtestDataStore] Supabase createProtest failed, falling back to local SQLite:", err);
+        console.error("[ProtestDataStore] Supabase createProtest failed:", err);
+        throw err;
       }
     }
     return this.createProtestLocal(input, user);
@@ -749,6 +780,16 @@ class ProtestDataStore {
       validated_lat: input.validated_lat ?? null,
       validated_lng: input.validated_lng ?? null,
       has_coordinates: hasCoords,
+      location_validation_status: input.location_validation_status || (hasCoords ? "verified" : (input.suggested_lat ? "pending_validation" : "unmapped")),
+      suggested_lat: input.suggested_lat != null ? Number(input.suggested_lat) : null,
+      suggested_lng: input.suggested_lng != null ? Number(input.suggested_lng) : null,
+      suggested_address: input.suggested_address || null,
+      geocoding_provider: input.geocoding_provider || null,
+      geocoding_confidence: input.geocoding_confidence || null,
+      geocoding_alternatives: input.geocoding_alternatives || [],
+      validated_at: hasCoords ? now : null,
+      validated_by_id: hasCoords ? user.id : null,
+      validated_by_name: hasCoords ? user.name : null,
       actual_crowd_size: input.actual_crowd_size ?? null,
       situation_summary: input.situation_summary || null,
       editorial_draft: input.editorial_draft || null,
@@ -772,7 +813,9 @@ class ProtestDataStore {
           keterangan_source, raw_source_payload, status, urgency, category_id,
           validated_lat, validated_lng, has_coordinates, actual_crowd_size, situation_summary,
           editorial_draft, editorial_final, is_archived, completed_at, completed_by_id,
-          completed_by_name, created_at, updated_at, deleted_at, last_synced_at
+          completed_by_name, suggested_lat, suggested_lng, suggested_address, geocoding_provider,
+          geocoding_confidence, location_validation_status, geocoding_alternatives, validated_at,
+          validated_by_id, validated_by_name, created_at, updated_at, deleted_at, last_synced_at
         ) VALUES (
           ?, ?, ?, ?, ?, ?, ?,
           ?, ?, ?, ?, ?,
@@ -780,7 +823,9 @@ class ProtestDataStore {
           ?, ?, ?, ?, ?,
           ?, ?, ?, ?, ?,
           ?, ?, ?, ?, ?,
-          ?, ?, ?, ?, ?
+          ?, ?, ?, ?, ?,
+          ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?
         )
       `);
 
@@ -815,9 +860,19 @@ class ProtestDataStore {
         newEvent.editorial_draft,
         newEvent.editorial_final,
         newEvent.is_archived ? 1 : 0,
-        newEvent.completed_at,
-        newEvent.completed_by_id,
-        newEvent.completed_by_name,
+        newEvent.completed_at ?? null,
+        newEvent.completed_by_id ?? null,
+        newEvent.completed_by_name ?? null,
+        newEvent.suggested_lat ?? null,
+        newEvent.suggested_lng ?? null,
+        newEvent.suggested_address ?? null,
+        newEvent.geocoding_provider ?? null,
+        newEvent.geocoding_confidence ?? null,
+        newEvent.location_validation_status ?? "unmapped",
+        JSON.stringify(newEvent.geocoding_alternatives || []),
+        newEvent.validated_at ?? null,
+        newEvent.validated_by_id ?? null,
+        newEvent.validated_by_name ?? null,
         newEvent.created_at,
         newEvent.updated_at,
         newEvent.deleted_at,
@@ -852,7 +907,8 @@ class ProtestDataStore {
         }
         return res;
       } catch (err) {
-        console.error("[ProtestDataStore] Supabase updateProtest failed, falling back to local SQLite:", err);
+        console.error("[ProtestDataStore] Supabase updateProtest failed:", err);
+        throw err;
       }
     }
     return this.updateProtestLocal(id, updates, user);
@@ -871,6 +927,10 @@ class ProtestDataStore {
     const updatedLng = updates.validated_lng !== undefined ? updates.validated_lng : existing.validated_lng;
     const hasCoords = updatedLat != null && updatedLng != null;
 
+    const updatedStatus = updates.location_validation_status !== undefined
+      ? updates.location_validation_status
+      : (hasCoords ? "verified" : existing.location_validation_status || "unmapped");
+
     const updatedEvent: ProtestEvent = {
       ...existing,
       ...updates,
@@ -880,6 +940,7 @@ class ProtestDataStore {
       validated_lat: updatedLat,
       validated_lng: updatedLng,
       has_coordinates: hasCoords,
+      location_validation_status: updatedStatus,
       updated_at: now
     };
 
@@ -913,6 +974,16 @@ class ProtestDataStore {
           completed_at = ?,
           completed_by_id = ?,
           completed_by_name = ?,
+          suggested_lat = ?,
+          suggested_lng = ?,
+          suggested_address = ?,
+          geocoding_provider = ?,
+          geocoding_confidence = ?,
+          location_validation_status = ?,
+          geocoding_alternatives = ?,
+          validated_at = ?,
+          validated_by_id = ?,
+          validated_by_name = ?,
           updated_at = ?
         WHERE id = ?
       `).run(
@@ -940,9 +1011,19 @@ class ProtestDataStore {
         updatedEvent.editorial_draft,
         updatedEvent.editorial_final,
         updatedEvent.is_archived ? 1 : 0,
-        updatedEvent.completed_at,
-        updatedEvent.completed_by_id,
-        updatedEvent.completed_by_name,
+        updatedEvent.completed_at ?? null,
+        updatedEvent.completed_by_id ?? null,
+        updatedEvent.completed_by_name ?? null,
+        updatedEvent.suggested_lat ?? null,
+        updatedEvent.suggested_lng ?? null,
+        updatedEvent.suggested_address ?? null,
+        updatedEvent.geocoding_provider ?? null,
+        updatedEvent.geocoding_confidence ?? null,
+        updatedEvent.location_validation_status ?? "unmapped",
+        JSON.stringify(updatedEvent.geocoding_alternatives || []),
+        updatedEvent.validated_at ?? null,
+        updatedEvent.validated_by_id ?? null,
+        updatedEvent.validated_by_name ?? null,
         now,
         existing.id
       );
@@ -979,12 +1060,13 @@ class ProtestDataStore {
     if (isSupabaseConfigured()) {
       try {
         const res = await updateStatusInSupabase(id, newStatus, reason, user);
-        if (this.db) {
+        if (this.db && res) {
           try { this.updateProtestStatusLocal(id, newStatus, reason, user); } catch {}
         }
         return res;
       } catch (err) {
-        console.error("[ProtestDataStore] Supabase updateProtestStatus failed, falling back to local SQLite:", err);
+        console.error("[ProtestDataStore] Supabase updateProtestStatus failed:", err);
+        throw err;
       }
     }
     return this.updateProtestStatusLocal(id, newStatus, reason, user);
@@ -1063,7 +1145,8 @@ class ProtestDataStore {
         }
         return res;
       } catch (err) {
-        console.error("[ProtestDataStore] Supabase addReport failed, falling back to local SQLite:", err);
+        console.error("[ProtestDataStore] Supabase addReport failed:", err);
+        throw err;
       }
     }
     return this.addOperatorReportLocal(input, user);
@@ -1289,7 +1372,8 @@ class ProtestDataStore {
         }
         return res;
       } catch (err) {
-        console.error("[ProtestDataStore] Supabase linkCamera failed, falling back to local SQLite:", err);
+        console.error("[ProtestDataStore] Supabase linkCamera failed:", err);
+        throw err;
       }
     }
     return this.linkCameraLocal(input, user);
@@ -1307,10 +1391,10 @@ class ProtestDataStore {
     const cctvStore = getDataStore();
     const camera = cctvStore.getCameraById(input.camera_id);
     const protest = this.getProtestByIdLocal(input.protest_id);
-    if (!camera || !protest) return null;
+    if (!protest) return null;
 
     let distanceMeters = 0;
-    if (protest.validated_lat != null && protest.validated_lng != null) {
+    if (protest.validated_lat != null && protest.validated_lng != null && camera) {
       distanceMeters = calculateDistanceMeters(
         protest.validated_lat,
         protest.validated_lng,
@@ -1324,11 +1408,11 @@ class ProtestDataStore {
     const link: ProtestCameraLink = {
       id,
       protest_id: input.protest_id,
-      camera_id: camera.id,
-      camera_name: camera.name,
-      camera_stream_url: camera.stream_url,
-      camera_protocol: camera.protocol,
-      camera_status: camera.status,
+      camera_id: camera?.id || input.camera_id,
+      camera_name: camera?.name || input.camera_id,
+      camera_stream_url: camera?.stream_url || "",
+      camera_protocol: camera?.protocol || "HLS",
+      camera_status: camera?.status || "ONLINE",
       distance_meters: distanceMeters,
       notes: input.notes || null,
       is_recommended: input.is_recommended || false,
@@ -1364,8 +1448,9 @@ class ProtestDataStore {
         link.created_at
       );
     } else {
+      const targetCamId = camera?.id || input.camera_id;
       const list = this.memoryLinks.get(input.protest_id) || [];
-      const filtered = list.filter((l) => l.camera_id !== camera.id);
+      const filtered = list.filter((l) => l.camera_id !== targetCamId);
       filtered.push(link);
       this.memoryLinks.set(input.protest_id, filtered);
     }
@@ -1382,7 +1467,8 @@ class ProtestDataStore {
         }
         return res;
       } catch (err) {
-        console.error("[ProtestDataStore] Supabase unlinkCamera failed, falling back to local SQLite:", err);
+        console.error("[ProtestDataStore] Supabase unlinkCamera failed:", err);
+        throw err;
       }
     }
     return this.unlinkCameraLocal(protestId, cameraId);
@@ -1526,7 +1612,8 @@ class ProtestDataStore {
           ...res
         };
       } catch (err) {
-        console.error("[ProtestDataStore] Supabase upsertExcelBatch failed, falling back to local SQLite:", err);
+        console.error("[ProtestDataStore] Supabase upsertExcelBatch failed:", err);
+        throw err;
       }
     }
     return this.upsertFromExcelBatchLocal(records);

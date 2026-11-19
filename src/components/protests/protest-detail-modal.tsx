@@ -195,10 +195,7 @@ export function ProtestDetailModal({
 
   // Status Change
   const handleTransitionStatus = async (toStatus: ProtestStatus) => {
-    if (!statusReason.trim()) {
-      alert("Harap berikan alasan ringkas untuk perubahan status operasional.");
-      return;
-    }
+    const effectiveReason = statusReason.trim() || `Perubahan status operasional menjadi ${toStatus.toUpperCase()}`;
     setSubmittingStatus(true);
     try {
       const res = await fetch(`/api/protests/${protestId}/status`, {
@@ -206,7 +203,7 @@ export function ProtestDetailModal({
         headers: { "Content-Type": "application/json", "x-scc-user-role": "operator" },
         body: JSON.stringify({
           to_status: toStatus,
-          reason: statusReason.trim()
+          reason: effectiveReason
         })
       });
       const json = await res.json();

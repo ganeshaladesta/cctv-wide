@@ -604,6 +604,21 @@ export function ProtestDashboard({
           <button
             type="button"
             onClick={() => {
+              setStatusFilter("cancelled");
+              setPage(1);
+            }}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${
+              statusFilter === "cancelled"
+                ? "bg-slate-600 text-white shadow-md shadow-slate-500/20"
+                : "bg-[#111622] text-[#98A4B8] hover:text-white"
+            }`}
+          >
+            Dibatalkan
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
               setStatusFilter("all");
               setLocationValidationFilter("all");
               setPage(1);

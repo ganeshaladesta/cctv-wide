@@ -7,7 +7,7 @@ import { UserRole, UserProfile } from "@/lib/types/protests";
 import { NextRequest } from "next/server";
 
 export const DEFAULT_VIEWER: UserProfile = {
-  id: "usr-viewer-001",
+  id: "a0000000-0000-0000-0000-000000000003",
   email: "viewer@scc.go.id",
   name: "Petugas Monitoring (Viewer)",
   role: "viewer",
@@ -15,7 +15,7 @@ export const DEFAULT_VIEWER: UserProfile = {
 };
 
 export const DEFAULT_OPERATOR: UserProfile = {
-  id: "usr-operator-001",
+  id: "a0000000-0000-0000-0000-000000000002",
   email: "operator@scc.go.id",
   name: "Operator Lapangan SCC",
   role: "operator",
@@ -23,12 +23,40 @@ export const DEFAULT_OPERATOR: UserProfile = {
 };
 
 export const DEFAULT_ADMIN: UserProfile = {
-  id: "usr-admin-001",
+  id: "a0000000-0000-0000-0000-000000000001",
   email: "admin@scc.go.id",
   name: "Administrator Komando SCC",
   role: "admin",
   agency: "Pusat Komando SCC"
 };
+
+/**
+ * Ensures any input ID string is converted to a valid PostgreSQL UUID.
+ * Normalizes legacy IDs like 'usr-operator-001' and hashes non-standard strings.
+ */
+export function ensureValidUuid(id?: string | null): string {
+  if (!id) return "00000000-0000-0000-0000-000000000000";
+  const trimmed = id.trim();
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (uuidRegex.test(trimmed)) return trimmed.toLowerCase();
+
+  if (trimmed === "usr-operator-001") return "a0000000-0000-0000-0000-000000000002";
+  if (trimmed === "usr-admin-001") return "a0000000-0000-0000-0000-000000000001";
+  if (trimmed === "usr-viewer-001") return "a0000000-0000-0000-0000-000000000003";
+
+  // Deterministic mapping for arbitrary strings into valid UUID format
+  let hash1 = 0x811c9dc5;
+  let hash2 = 0x41c64e6d;
+  for (let i = 0; i < trimmed.length; i++) {
+    const ch = trimmed.charCodeAt(i);
+    hash1 = Math.imul(hash1 ^ ch, 0x01000193);
+    hash2 = Math.imul(hash2 ^ ch, 0x5bd1e995);
+  }
+  const h1 = (hash1 >>> 0).toString(16).padStart(8, "0");
+  const h2 = (hash2 >>> 0).toString(16).padStart(8, "0");
+  const combined = (h1 + h2 + h1 + h2).slice(0, 32);
+  return `${combined.slice(0, 8)}-${combined.slice(8, 12)}-4${combined.slice(13, 16)}-a${combined.slice(17, 20)}-${combined.slice(20, 32)}`;
+}
 
 /**
  * Resolve current active user from incoming request:
@@ -46,7 +74,7 @@ export function resolveCurrentUser(req?: NextRequest | Request): UserProfile {
   if (headerRole === "admin") {
     return {
       ...DEFAULT_ADMIN,
-      id: headerId || DEFAULT_ADMIN.id,
+      id: headerId ? ensureValidUuid(headerId) : DEFAULT_ADMIN.id,
       name: headerName || DEFAULT_ADMIN.name
     };
   }
@@ -54,7 +82,7 @@ export function resolveCurrentUser(req?: NextRequest | Request): UserProfile {
   if (headerRole === "operator") {
     return {
       ...DEFAULT_OPERATOR,
-      id: headerId || DEFAULT_OPERATOR.id,
+      id: headerId ? ensureValidUuid(headerId) : DEFAULT_OPERATOR.id,
       name: headerName || DEFAULT_OPERATOR.name
     };
   }
@@ -62,7 +90,7 @@ export function resolveCurrentUser(req?: NextRequest | Request): UserProfile {
   if (headerRole === "viewer") {
     return {
       ...DEFAULT_VIEWER,
-      id: headerId || DEFAULT_VIEWER.id,
+      id: headerId ? ensureValidUuid(headerId) : DEFAULT_VIEWER.id,
       name: headerName || DEFAULT_VIEWER.name
     };
   }
@@ -83,7 +111,7 @@ export function resolveCurrentUser(req?: NextRequest | Request): UserProfile {
           payload.role ||
           "operator";
         return {
-          id: payload.sub || "usr-jwt-user",
+          id: ensureValidUuid(payload.sub),
           email: payload.email || "user@scc.go.id",
           name: payload.user_metadata?.name || payload.email || "Petugas Terotentikasi",
           role: (role === "admin" ? "admin" : role === "viewer" ? "viewer" : "operator") as UserRole,
