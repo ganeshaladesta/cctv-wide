@@ -119,6 +119,13 @@ export function ProtestDetailModal({
     }
   };
 
+  const notifyUpdated = () => {
+    onUpdated?.();
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("scc-protest-updated"));
+    }
+  };
+
   useEffect(() => {
     setMounted(true);
     return () => setMounted(false);
@@ -174,7 +181,7 @@ export function ProtestDetailModal({
       setReportContent("");
       setReportCrowd("");
       await fetchDetail(protestId);
-      onUpdated?.();
+      notifyUpdated();
     } catch (err: any) {
       alert(err.message);
     } finally {
@@ -203,7 +210,7 @@ export function ProtestDetailModal({
 
       setStatusReason("");
       await fetchDetail(protestId);
-      onUpdated?.();
+      notifyUpdated();
     } catch (err: any) {
       alert(err.message);
     } finally {
@@ -223,7 +230,7 @@ export function ProtestDetailModal({
       if (!res.ok) throw new Error(json.error || "Gagal menautkan CCTV.");
 
       await fetchDetail(protestId);
-      onUpdated?.();
+      notifyUpdated();
     } catch (err: any) {
       alert(err.message);
     }
@@ -240,7 +247,7 @@ export function ProtestDetailModal({
       if (!res.ok) throw new Error(json.error || "Gagal mencabut tautan.");
 
       await fetchDetail(protestId);
-      onUpdated?.();
+      notifyUpdated();
     } catch (err: any) {
       alert(err.message);
     }
@@ -259,7 +266,7 @@ export function ProtestDetailModal({
 
       setEditorialText(json.draft);
       await fetchDetail(protestId);
-      onUpdated?.();
+      notifyUpdated();
     } catch (err: any) {
       alert(err.message);
     } finally {
@@ -285,7 +292,7 @@ export function ProtestDetailModal({
 
       alert(isFinal ? "Teks editorial berhasil difinalisasi!" : "Draft editorial berhasil disimpan.");
       await fetchDetail(protestId);
-      onUpdated?.();
+      notifyUpdated();
     } catch (err: any) {
       alert(err.message);
     } finally {
@@ -312,7 +319,7 @@ export function ProtestDetailModal({
 
       alert("Pembaruan situasi operator berhasil disimpan.");
       await fetchDetail(protestId);
-      onUpdated?.();
+      notifyUpdated();
     } catch (err: any) {
       alert(err.message);
     } finally {

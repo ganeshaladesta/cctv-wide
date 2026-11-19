@@ -180,6 +180,7 @@ export default function CommandCenter({
 
   // Unjuk Rasa Monitoring States
   const [protestEvents, setProtestEvents] = useState<ProtestEvent[]>([]);
+  const [focusProtestEvent, setFocusProtestEvent] = useState<ProtestEvent | null>(null);
   const [selectedProtestForModal, setSelectedProtestForModal] = useState<string | null>(null);
   const [isProtestModalOpen, setIsProtestModalOpen] = useState(false);
 
@@ -262,17 +263,35 @@ export default function CommandCenter({
       })
       .catch(() => {});
 
-    fetch("/api/protests?status=active&limit=100", { signal: controller.signal })
-      .then((r) => r.json())
-      .then((j) => {
-        if (!controller.signal.aborted && j.success && Array.isArray(j.data)) {
-          setProtestEvents(j.data);
-        }
-      })
-      .catch(() => {});
-
     return () => controller.abort();
   }, []);
+
+  // Fetch verified Unjuk Rasa events with valid coordinates from Supabase
+  const fetchProtestEvents = useCallback(async () => {
+    try {
+      const res = await fetch("/api/protests?has_coords=true&is_archived=false&limit=200");
+      const j = await res.json();
+      if (j.success && Array.isArray(j.data)) {
+        setProtestEvents(j.data);
+      }
+    } catch (err) {
+      console.warn("[CommandCenter] Gagal memuat event unjuk rasa terpetakan:", err);
+    }
+  }, []);
+
+  // Listen to global unjuk rasa update events for immediate reactive map layer refresh
+  useEffect(() => {
+    fetchProtestEvents();
+
+    const handleProtestUpdated = () => {
+      fetchProtestEvents();
+    };
+
+    window.addEventListener("scc-protest-updated", handleProtestUpdated);
+    return () => {
+      window.removeEventListener("scc-protest-updated", handleProtestUpdated);
+    };
+  }, [fetchProtestEvents]);
 
   const cities = useMemo(() => {
     if (!selectedProvince) return allCities;
@@ -568,8 +587,7 @@ export default function CommandCenter({
   const handleViewProtestOnMap = useCallback((event: ProtestEvent) => {
     setActiveTab("map");
     if (event.validated_lat !== null && event.validated_lng !== null) {
-      setSelectedProtestForModal(event.id);
-      setIsProtestModalOpen(true);
+      setFocusProtestEvent(event);
     }
   }, []);
 
@@ -911,6 +929,7 @@ export default function CommandCenter({
                 onOpenFullDetail={handleOpenFullDetail}
                 onAddToMultiView={handleAddToMultiView}
                 protestEvents={protestEvents}
+                focusProtestEvent={focusProtestEvent}
                 onProtestMarkerClick={handleProtestMarkerClick}
               />
             </div>
@@ -1212,6 +1231,7 @@ export default function CommandCenter({
           <ProtestDashboard
             onViewOnMap={handleViewProtestOnMap}
             onSelectCameraToPlay={handleSelectCameraToPlay}
+            onProtestDataChange={fetchProtestEvents}
           />
         )}
       </main>
@@ -1236,6 +1256,7 @@ export default function CommandCenter({
           setIsProtestModalOpen(false);
           setSelectedProtestForModal(null);
         }}
+        onUpdated={fetchProtestEvents}
         onSelectCameraToPlay={handleSelectCameraToPlay}
       />
 

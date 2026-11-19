@@ -36,11 +36,13 @@ import { Camera } from "@/lib/types";
 interface ProtestDashboardProps {
   onViewOnMap?: (event: ProtestEvent) => void;
   onSelectCameraToPlay?: (camera: Camera) => void;
+  onProtestDataChange?: () => void;
 }
 
 export function ProtestDashboard({
   onViewOnMap,
-  onSelectCameraToPlay
+  onSelectCameraToPlay,
+  onProtestDataChange
 }: ProtestDashboardProps) {
   // Data states
   const [events, setEvents] = useState<ProtestEvent[]>([]);
@@ -184,6 +186,10 @@ export function ProtestDashboard({
         fetchProtests(),
         fetchSyncData()
       ]);
+      onProtestDataChange?.();
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("scc-protest-updated"));
+      }
     } finally {
       setDataRefreshing(false);
     }

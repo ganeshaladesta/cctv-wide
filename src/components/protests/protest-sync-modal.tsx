@@ -99,6 +99,9 @@ export function ProtestSyncModal({
       setStatusMessage(json.message || "Penyelarasan data unjuk rasa selesai.");
       await fetchSyncStatus();
       onSyncCompleted();
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("scc-protest-updated"));
+      }
     } catch (err: any) {
       setErrorMessage(err.message || "Terjadi kesalahan pada proses sinkronisasi.");
     } finally {

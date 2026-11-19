@@ -29,6 +29,7 @@ interface InteractiveMapProps {
   onOpenFullDetail: (cameraId: string, camera: Camera) => void;
   onAddToMultiView: (camera: Camera) => void;
   protestEvents?: ProtestEvent[];
+  focusProtestEvent?: ProtestEvent | null;
   onProtestMarkerClick?: (protest: ProtestEvent) => void;
 }
 
@@ -92,6 +93,173 @@ function markerTupleToCamera(m: CompactMarker): Camera {
   };
 }
 
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function getProtestStatusMeta(status: string) {
+  switch (status) {
+    case "ongoing":
+      return { label: "Berlangsung", bg: "bg-red-500/20 text-red-400 border border-red-500/40" };
+    case "scheduled":
+      return { label: "Terjadwal", bg: "bg-amber-500/20 text-amber-400 border border-amber-500/40" };
+    case "monitoring":
+      return { label: "Pemantauan", bg: "bg-purple-500/20 text-purple-400 border border-purple-500/40" };
+    case "completed":
+      return { label: "Selesai", bg: "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40" };
+    case "cancelled":
+      return { label: "Dibatalkan", bg: "bg-slate-500/20 text-slate-400 border border-slate-500/40" };
+    default:
+      return { label: status, bg: "bg-slate-500/20 text-slate-400 border border-slate-500/40" };
+  }
+}
+
+function getProtestUrgencyMeta(urgency: string) {
+  switch (urgency) {
+    case "critical":
+      return { label: "Kritis", bg: "bg-red-600/30 text-red-300 border border-red-500/50" };
+    case "high":
+      return { label: "Tinggi", bg: "bg-orange-600/30 text-orange-300 border border-orange-500/50" };
+    case "medium":
+      return { label: "Sedang", bg: "bg-blue-600/30 text-blue-300 border border-blue-500/50" };
+    case "low":
+    default:
+      return { label: "Rendah", bg: "bg-slate-600/30 text-slate-300 border border-slate-500/50" };
+  }
+}
+
+function createProtestMarkerIcon(status: string): L.DivIcon {
+  const isOngoing = status === "ongoing";
+  const isScheduled = status === "scheduled";
+  const isMonitoring = status === "monitoring";
+
+  let inner = "";
+  let size = 36;
+  let anchor = 18;
+
+  if (isOngoing) {
+    size = 40;
+    anchor = 20;
+    inner = `
+      <div class="relative flex items-center justify-center cursor-pointer" style="width:40px;height:40px;">
+        <div class="absolute w-10 h-10 rounded-full bg-red-500/45 animate-ping"></div>
+        <div class="w-8 h-8 rounded-full bg-red-600 border-2 border-white shadow-[0_0_12px_rgba(239,68,68,0.85)] flex items-center justify-center text-white font-bold text-sm">
+          📢
+        </div>
+      </div>
+    `;
+  } else if (isScheduled) {
+    size = 34;
+    anchor = 17;
+    inner = `
+      <div class="relative flex items-center justify-center cursor-pointer" style="width:34px;height:34px;">
+        <div class="w-7 h-7 rounded-full bg-amber-500 border-2 border-[#0B0F17] shadow-[0_0_8px_rgba(245,158,11,0.65)] flex items-center justify-center text-black font-bold text-xs">
+          ⏱️
+        </div>
+      </div>
+    `;
+  } else if (isMonitoring) {
+    size = 34;
+    anchor = 17;
+    inner = `
+      <div class="relative flex items-center justify-center cursor-pointer" style="width:34px;height:34px;">
+        <div class="w-7 h-7 rounded-full bg-purple-600 border-2 border-white shadow-[0_0_8px_rgba(147,51,234,0.65)] flex items-center justify-center text-white font-bold text-xs">
+          👁️
+        </div>
+      </div>
+    `;
+  } else {
+    size = 28;
+    anchor = 14;
+    inner = `
+      <div class="relative flex items-center justify-center cursor-pointer" style="width:28px;height:28px;">
+        <div class="w-6 h-6 rounded-full bg-slate-700 border border-white/60 shadow flex items-center justify-center text-white font-bold text-[10px]">
+          ✓
+        </div>
+      </div>
+    `;
+  }
+
+  return L.divIcon({
+    className: "scc-protest-pin-marker",
+    html: inner,
+    iconSize: [size, size],
+    iconAnchor: [anchor, anchor]
+  });
+}
+
+function createProtestPopupHtml(p: ProtestEvent): string {
+  const sBadge = getProtestStatusMeta(p.status);
+  const uBadge = getProtestUrgencyMeta(p.urgency);
+  const safeIsu = escapeHtml(p.isu_tuntutan || "Aksi Unjuk Rasa");
+  const safeLokasi = escapeHtml(p.lokasi || "Lokasi Aksi");
+  const safeKota = p.kota_kabupaten ? escapeHtml(p.kota_kabupaten) : "";
+  const safeProvinsi = p.provinsi ? escapeHtml(p.provinsi) : "";
+  const crowdCount = p.actual_crowd_size || p.estimasi_massa_source;
+  const crowdFormatted = crowdCount ? `${crowdCount.toLocaleString("id-ID")} orang` : "Belum diestimasi";
+  const waktuFormatted = p.waktu_mulai ? p.waktu_mulai.slice(0, 5) + " WIB" : "09:00 WIB";
+  const coordsFormatted = p.validated_lat !== null && p.validated_lng !== null
+    ? `${p.validated_lat.toFixed(5)}, ${p.validated_lng.toFixed(5)}`
+    : "-";
+
+  return `
+    <div class="p-3 text-left font-sans text-white" style="min-width: 270px; max-width: 320px;">
+      <div class="flex items-center justify-between gap-1.5 pb-2 mb-2 border-b border-[#1E293B]">
+        <div class="flex items-center gap-1.5 flex-wrap">
+          <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${sBadge.bg}">
+            ${sBadge.label}
+          </span>
+          <span class="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider ${uBadge.bg}">
+            ${uBadge.label}
+          </span>
+        </div>
+        <span class="font-mono text-[10px] text-[#98A4B8] font-bold truncate max-w-[110px]" title="${escapeHtml(p.kode_unras || p.id_kejadian)}">
+          ${escapeHtml(p.kode_unras || p.id_kejadian)}
+        </span>
+      </div>
+
+      <h4 class="text-xs font-bold text-white line-clamp-2 leading-snug mb-2.5">
+        ${safeIsu}
+      </h4>
+
+      <div class="space-y-1.5 text-[11px] text-[#98A4B8] mb-3">
+        <div class="flex items-center gap-2">
+          <span class="text-xs">📅</span>
+          <span class="text-[#F3F6FB]">${p.tanggal} • ${waktuFormatted}</span>
+        </div>
+        <div class="flex items-start gap-2">
+          <span class="text-xs shrink-0 mt-0.5">📍</span>
+          <span class="text-[#F3F6FB] leading-tight line-clamp-2">
+            ${safeLokasi}${safeKota ? ` (${safeKota})` : ""}${safeProvinsi ? `, ${safeProvinsi}` : ""}
+          </span>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-xs">👥</span>
+          <span>Estimasi Massa: <strong class="text-white font-mono">${crowdFormatted}</strong></span>
+        </div>
+        <div class="flex items-center gap-1.5 pt-1 text-[10px] text-emerald-400 font-semibold border-t border-[#1E293B]/60">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0"></span>
+          <span class="truncate">Koordinat Valid: ${coordsFormatted}</span>
+        </div>
+      </div>
+
+      <button
+        type="button"
+        id="btn-protest-popup-${p.id}"
+        class="w-full py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center justify-center gap-1.5 shadow-lg shadow-blue-500/20 transition-all cursor-pointer"
+      >
+        <span>Pantau Situasi & CCTV Terkait</span>
+        <span>→</span>
+      </button>
+    </div>
+  `;
+}
+
 export default function InteractiveMap({
   markers,
   provinces,
@@ -104,6 +272,7 @@ export default function InteractiveMap({
   onOpenFullDetail,
   onAddToMultiView,
   protestEvents,
+  focusProtestEvent,
   onProtestMarkerClick
 }: InteractiveMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -112,6 +281,7 @@ export default function InteractiveMap({
   const clusterGroupRef = useRef<L.MarkerClusterGroup | null>(null);
   const plainLayerGroupRef = useRef<L.LayerGroup | null>(null);
   const protestLayerGroupRef = useRef<L.LayerGroup | null>(null);
+  const protestMarkersRef = useRef<Map<string, L.Marker>>(new Map());
   const onMarkerClickRef = useRef(onMarkerClick);
   onMarkerClickRef.current = onMarkerClick;
   const onProtestMarkerClickRef = useRef(onProtestMarkerClick);
@@ -349,14 +519,51 @@ export default function InteractiveMap({
     });
   }, [previewCamera]);
 
-  // Render Protest Markers with strict coordinate validation
+  // Fly to focusProtestEvent when selected from dashboard or URL
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !focusProtestEvent) return;
+    if (
+      focusProtestEvent.validated_lat === null ||
+      focusProtestEvent.validated_lng === null ||
+      !isValidLatLng(focusProtestEvent.validated_lat, focusProtestEvent.validated_lng)
+    ) {
+      return;
+    }
+
+    setShowProtestLayer(true);
+    map.flyTo([focusProtestEvent.validated_lat, focusProtestEvent.validated_lng], 16, {
+      duration: 1.0
+    });
+
+    const timer = setTimeout(() => {
+      const marker = protestMarkersRef.current.get(focusProtestEvent.id);
+      if (marker) {
+        marker.openPopup();
+      }
+    }, 700);
+
+    return () => clearTimeout(timer);
+  }, [focusProtestEvent]);
+
+  // Render Protest Markers with strict coordinate validation & interactive popups
   useEffect(() => {
     const group = protestLayerGroupRef.current;
     const map = mapRef.current;
     if (!group || !map) return;
     group.clearLayers();
+    protestMarkersRef.current.clear();
 
-    if (!showProtestLayer || !protestEvents || protestEvents.length === 0) return;
+    if (!showProtestLayer) {
+      if (map.hasLayer(group)) map.removeLayer(group);
+      return;
+    }
+
+    if (!map.hasLayer(group)) {
+      map.addLayer(group);
+    }
+
+    if (!protestEvents || protestEvents.length === 0) return;
 
     for (const p of protestEvents) {
       if (
@@ -367,39 +574,43 @@ export default function InteractiveMap({
         continue; // Unmapped protests MUST NOT be plotted on the live map
       }
 
-      const isOngoing = p.status === "ongoing";
-      const isScheduled = p.status === "scheduled";
-      const isMonitoring = p.status === "monitoring";
+      const statusMeta = getProtestStatusMeta(p.status);
+      const crowdCount = p.actual_crowd_size || p.estimasi_massa_source;
+      const crowdText = crowdCount
+        ? `${crowdCount.toLocaleString("id-ID")} org`
+        : "Massa belum terdata";
 
-      const iconHtml = isOngoing
-        ? `<div class="relative flex items-center justify-center cursor-pointer" style="width:34px;height:34px;"><div class="absolute w-8 h-8 rounded-full bg-red-500/50 animate-ping"></div><div class="w-6 h-6 rounded-full bg-red-600 border-2 border-white text-white flex items-center justify-center font-bold text-xs shadow-xl">🚨</div></div>`
-        : isScheduled
-        ? `<div class="relative flex items-center justify-center cursor-pointer" style="width:30px;height:30px;"><div class="w-6 h-6 rounded-full bg-amber-500 border-2 border-black text-black flex items-center justify-center font-bold text-xs shadow-lg">⚠️</div></div>`
-        : isMonitoring
-        ? `<div class="relative flex items-center justify-center cursor-pointer" style="width:30px;height:30px;"><div class="w-6 h-6 rounded-full bg-purple-600 border-2 border-white text-white flex items-center justify-center font-bold text-xs shadow-lg">👁️</div></div>`
-        : `<div class="relative flex items-center justify-center cursor-pointer" style="width:26px;height:26px;"><div class="w-5 h-5 rounded-full bg-slate-600 border border-white text-white flex items-center justify-center font-bold text-[10px] shadow">✓</div></div>`;
-
-      const icon = L.divIcon({
-        className: "protest-pin-marker",
-        html: iconHtml,
-        iconSize: [34, 34],
-        iconAnchor: [17, 17]
-      });
+      const icon = createProtestMarkerIcon(p.status);
 
       const marker = L.marker([p.validated_lat, p.validated_lng], {
         icon,
-        zIndexOffset: 2000
+        zIndexOffset: p.status === "ongoing" ? 3500 : 3000
       });
 
       marker.bindTooltip(
-        `[${p.status.toUpperCase()}] ${p.isu_tuntutan} • ${p.estimasi_massa_source ? p.estimasi_massa_source.toLocaleString('id-ID') + ' org' : 'Estimasi massa belum ada'}`,
+        `[${statusMeta.label.toUpperCase()}] ${p.isu_tuntutan} • ${crowdText}`,
         { direction: "top", offset: [0, -18] }
       );
 
-      marker.on("click", () => {
-        onProtestMarkerClickRef.current?.(p);
+      marker.bindPopup(createProtestPopupHtml(p), {
+        className: "scc-leaflet-protest-popup",
+        maxWidth: 320,
+        autoPanPadding: [24, 24]
       });
 
+      marker.on("popupopen", () => {
+        const btn = document.getElementById(`btn-protest-popup-${p.id}`);
+        if (btn) {
+          btn.onclick = (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            marker.closePopup();
+            onProtestMarkerClickRef.current?.(p);
+          };
+        }
+      });
+
+      protestMarkersRef.current.set(p.id, marker);
       group.addLayer(marker);
     }
   }, [protestEvents, showProtestLayer]);
@@ -492,27 +703,27 @@ export default function InteractiveMap({
             Cluster: {clustering ? "AKTIF" : "NONAKTIF"}
           </button>
 
-          {protestEvents && protestEvents.length > 0 && (
-            <button
-              type="button"
-              onClick={() => setShowProtestLayer((l) => !l)}
-              title="Toggle Layer Unjuk Rasa"
-              className={`px-2.5 py-1.5 rounded-xl text-[11px] sm:text-xs font-semibold border backdrop-blur-md transition-colors shadow-lg flex items-center gap-1.5 ${
-                showProtestLayer
-                  ? "bg-red-500/20 border-red-500/45 text-red-400"
-                  : "bg-[#090C12]/92 border-[var(--border-default)] text-[#98A4B8] hover:text-white"
-              }`}
-            >
-              <span
-                className={`w-2 h-2 rounded-full ${
-                  showProtestLayer ? "bg-red-500 animate-pulse" : "bg-[#64748B]"
-                }`}
-              />
-              <span>
-                Unras ({protestEvents.filter((p) => p.validated_lat !== null).length})
-              </span>
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => setShowProtestLayer((l) => !l)}
+            title="Aktifkan / Nonaktifkan Layer Peta Aksi Unjuk Rasa"
+            className={`px-2.5 sm:px-3 py-1.5 rounded-xl text-[11px] sm:text-xs font-semibold border backdrop-blur-md transition-all shadow-lg flex items-center gap-1.5 cursor-pointer ${
+              showProtestLayer
+                ? "bg-red-500/20 border-red-500/40 text-red-400 shadow-red-500/10"
+                : "bg-[#090C12]/92 border-[var(--border-default)] text-[#98A4B8] hover:text-white"
+            }`}
+          >
+            <span className="relative flex h-2 w-2">
+              {showProtestLayer && (
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+              )}
+              <span className={`relative inline-flex rounded-full h-2 w-2 ${showProtestLayer ? "bg-red-500" : "bg-slate-500"}`}></span>
+            </span>
+            <span>Layer Unras</span>
+            <span className="font-mono text-[10px] px-1.5 py-0.5 rounded-full bg-red-500/20 text-white tabular-nums border border-red-500/30">
+              {protestEvents ? protestEvents.filter((p) => p.validated_lat !== null && p.validated_lng !== null && isValidLatLng(p.validated_lat, p.validated_lng)).length : 0}
+            </span>
+          </button>
         </div>
 
         {/* Right: OSM Basemap Switcher & Navigation Controls (z-index: 20) */}

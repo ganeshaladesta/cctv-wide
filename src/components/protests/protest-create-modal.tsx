@@ -101,6 +101,9 @@ export function ProtestCreateModal({
       }
 
       onCreated(json.data);
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("scc-protest-updated"));
+      }
       onClose();
     } catch (err: any) {
       setError(err.message || "Terjadi kesalahan saat menyimpan data.");
