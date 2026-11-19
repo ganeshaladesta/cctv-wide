@@ -8,3 +8,4 @@ ALTER TABLE public.protests ADD COLUMN IF NOT EXISTS source_type TEXT NOT NULL D
 CREATE INDEX IF NOT EXISTS idx_protests_source_type ON public.protests(source_type);
 
 COMMENT ON COLUMN public.protests.source_type IS 'Identifies data origin: manual (created by operator/admin in UI) or excel_sync (ingested from OneDrive worksheet)';
+

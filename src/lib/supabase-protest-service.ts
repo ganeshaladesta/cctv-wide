@@ -101,12 +101,12 @@ export async function queryProtestsFromSupabase(filters: ProtestFilterParams = {
   }
 
   // Urgency Filter
-  if (filters.urgency && (filters.urgency as string) !== "all") {
+  if (filters.urgency && filters.urgency !== "all") {
     query = query.eq("urgency", filters.urgency);
   }
 
   // Coordinates Filter
-  if (filters.has_coords !== undefined && (filters.has_coords as any) !== "all") {
+  if (filters.has_coords !== undefined && filters.has_coords !== "all") {
     const hasC = filters.has_coords === true || String(filters.has_coords) === "true";
     if (hasC) {
       query = query.not("validated_lat", "is", null).not("validated_lng", "is", null);
@@ -182,8 +182,7 @@ export async function getProtestByIdFromSupabase(id: string): Promise<ProtestEve
  * 3. Create Protest Event in Supabase
  */
 export async function createProtestInSupabase(
-  payload: Partial<ProtestEvent> & { source_type?: string },
-  user?: any
+  payload: Partial<ProtestEvent> & { source_type?: string }
 ): Promise<ProtestEvent> {
   const supabase = getSupabaseAdminClient();
   if (!supabase) throw new Error("Supabase is not configured.");
@@ -369,8 +368,7 @@ export async function fetchReportsFromSupabase(protestId: string): Promise<Prote
 }
 
 export async function addReportInSupabase(
-  data: Partial<ProtestOperatorReport>,
-  user?: any
+  data: Partial<ProtestOperatorReport>
 ): Promise<ProtestOperatorReport> {
   const supabase = getSupabaseAdminClient();
   if (!supabase) throw new Error("Supabase is not configured.");
@@ -715,7 +713,7 @@ export async function upsertExcelBatchInSupabase(
     category_id?: string | null;
     raw_source_payload?: Record<string, unknown>;
   }>
-): Promise<{ processed: number; created: number; inserted: number; updated: number; skipped: number; failed: number }> {
+): Promise<{ inserted: number; updated: number; skipped: number; failed: number }> {
   const supabase = getSupabaseAdminClient();
   if (!supabase) throw new Error("Supabase is not configured.");
 
@@ -828,5 +826,6 @@ export async function upsertExcelBatchInSupabase(
     }
   }
 
-  return { processed: records.length, created: inserted, inserted, updated, skipped, failed };
+  return { inserted, updated, skipped, failed };
 }
+

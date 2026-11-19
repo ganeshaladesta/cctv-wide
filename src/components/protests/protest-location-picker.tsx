@@ -417,3 +417,4 @@ export function ProtestLocationPicker({
     </div>
   );
 }
+
