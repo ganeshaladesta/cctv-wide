@@ -22,6 +22,7 @@ import {
   validateIndonesianCoordinates,
   inferProtestCategory
 } from "./ms-graph-sync";
+import { normalizeTimeString } from "./time-normalization";
 
 // Maximum window duration: 24 hours (1 calendar day in Asia/Jakarta) + 10 minutes clock skew margin
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
@@ -46,20 +47,37 @@ export function calculateSameDayWindow(refDate: Date = new Date()): {
   period_start_ms: number;
   period_end_ms: number;
 } {
-  const date_wib = new Intl.DateTimeFormat("en-CA", {
+  // Safe extraction of Asia/Jakarta date parts without string interpolation defects
+  const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "Asia/Jakarta",
     year: "numeric",
     month: "2-digit",
     day: "2-digit"
-  }).format(refDate);
+  }).formatToParts(refDate);
+
+  const y = parts.find((p) => p.type === "year")?.value || String(refDate.getFullYear());
+  const m = parts.find((p) => p.type === "month")?.value || String(refDate.getMonth() + 1).padStart(2, "0");
+  const d = parts.find((p) => p.type === "day")?.value || String(refDate.getDate()).padStart(2, "0");
+
+  const date_wib = `${y}-${m}-${d}`;
+  if (date_wib.includes("--")) {
+    throw new Error(`Malformed date_wib generated with double dash: ${date_wib}`);
+  }
 
   const startWib = new Date(`${date_wib}T00:00:00+07:00`);
   const endWib = new Date(startWib.getTime() + ONE_DAY_MS);
 
+  const period_start = startWib.toISOString();
+  const period_end = endWib.toISOString();
+
+  if (period_start.includes("--") || period_end.includes("--")) {
+    throw new Error(`Malformed ISO string generated with double dash: ${period_start}`);
+  }
+
   return {
     date_wib,
-    period_start: startWib.toISOString(),
-    period_end: endWib.toISOString(),
+    period_start,
+    period_end,
     period_start_ms: startWib.getTime(),
     period_end_ms: endWib.getTime()
   };
@@ -173,8 +191,27 @@ export function validateRollingSyncRequest(payload: any): {
     };
   }
 
-  const startMs = Date.parse(payload.period_start);
-  const endMs = Date.parse(payload.period_end);
+  const pStartStr = String(payload.period_start).trim();
+  const pEndStr = String(payload.period_end).trim();
+
+  if (pStartStr.includes("--") || pEndStr.includes("--")) {
+    return {
+      valid: false,
+      error: "period_start atau period_end mengandung format tanggal cacat dengan double dash ('--')."
+    };
+  }
+
+  // Strict ISO 8601 pattern check (e.g. 2026-11-18T17:00:00.000Z)
+  const isoPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:?\d{2})$/;
+  if (!isoPattern.test(pStartStr) || !isoPattern.test(pEndStr)) {
+    return {
+      valid: false,
+      error: "period_start atau period_end bukan format ISO 8601 yang valid."
+    };
+  }
+
+  const startMs = Date.parse(pStartStr);
+  const endMs = Date.parse(pEndStr);
 
   if (isNaN(startMs) || isNaN(endMs)) {
     return { valid: false, error: "period_start atau period_end bukan timestamp ISO yang valid." };
@@ -373,7 +410,38 @@ export async function processSameDaySync(
       const lokasi = row.LOKASI ? String(row.LOKASI).trim() : "Lokasi Belum Ditentukan";
       const isu = row.ISU ? String(row.ISU).trim() : "Aksi Unjuk Rasa";
       const tanggal = row.TANGGAL ? String(row.TANGGAL).trim() : timeParsed.iso.split("T")[0];
-      const waktu = row.WAKTU ? String(row.WAKTU).trim() : "09:00 WIB";
+
+      // Time normalization
+      let waktuNormalized: string | null = null;
+      if (row.WAKTU !== undefined && row.WAKTU !== null && String(row.WAKTU).trim() !== "") {
+        const norm = normalizeTimeString(row.WAKTU);
+        if (norm.error) {
+          skipped++;
+          errors.push(`[ID: ${idKejadian}] Field 'WAKTU' tidak valid: ${norm.error}`);
+          continue;
+        }
+        waktuNormalized = norm.time;
+      } else if (timeParsed.iso) {
+        waktuNormalized = timeParsed.iso.split("T")[1].slice(0, 8);
+      }
+
+      // Coordinate validation: if provided, must be within valid geospatial ranges (-90..90, -180..180)
+      if (row.LATITUDE !== undefined && row.LATITUDE !== null && String(row.LATITUDE).trim() !== "") {
+        const latVal = typeof row.LATITUDE === "number" ? row.LATITUDE : parseFloat(String(row.LATITUDE).replace(",", "."));
+        if (isNaN(latVal) || latVal < -90 || latVal > 90) {
+          skipped++;
+          errors.push(`[ID: ${idKejadian}] Field 'LATITUDE' di luar rentang valid [-90, 90]: ${row.LATITUDE}`);
+          continue;
+        }
+      }
+      if (row.LONGITUDE !== undefined && row.LONGITUDE !== null && String(row.LONGITUDE).trim() !== "") {
+        const lngVal = typeof row.LONGITUDE === "number" ? row.LONGITUDE : parseFloat(String(row.LONGITUDE).replace(",", "."));
+        if (isNaN(lngVal) || lngVal < -180 || lngVal > 180) {
+          skipped++;
+          errors.push(`[ID: ${idKejadian}] Field 'LONGITUDE' di luar rentang valid [-180, 180]: ${row.LONGITUDE}`);
+          continue;
+        }
+      }
 
       const crowd = typeof row["JUMLAH MASSA"] === "number"
         ? row["JUMLAH MASSA"]
@@ -386,7 +454,7 @@ export async function processSameDaySync(
         id_kejadian: idKejadian,
         kode_unras: kodeUnras,
         tanggal,
-        waktu_mulai: waktu,
+        waktu_mulai: waktuNormalized,
         waktu_selesai: null,
         event_datetime: timeParsed.iso,
         lokasi,

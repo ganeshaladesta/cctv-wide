@@ -403,14 +403,60 @@ async function runTests() {
   // ---------------------------------------------------------------------------
   // Test 15: Backward Compatibility Alias Verification
   // ---------------------------------------------------------------------------
-  console.log("\n[Test 15/15] Verifikasi Kompatibilitas Mundur (Alias Function)...");
+  console.log("\n[Test 15/17] Verifikasi Kompatibilitas Mundur (Alias Function)...");
   const legacyWindow = calculateRolling7DayWindow(refDate);
   assert.equal(legacyWindow.date_wib, "2026-11-19");
   assert.equal(legacyWindow.period_end_ms - legacyWindow.period_start_ms, ONE_DAY_MS);
   console.log("  ✔ Alias backwards-compatibility (calculateRolling7DayWindow) berfungsi mulus.");
 
+  // ---------------------------------------------------------------------------
+  // Test 16: Time Normalization & PostgreSQL TIME Column Safety
+  // ---------------------------------------------------------------------------
+  console.log("\n[Test 16/17] Verifikasi Normalisasi Waktu (WIB Suffix & Range Validation)...");
+  const { normalizeTimeString } = await import("../src/lib/time-normalization.ts");
+  
+  // Basic cases
+  assert.equal(normalizeTimeString("09:00 WIB").time, "09:00:00");
+  assert.equal(normalizeTimeString("09:30 WIB").time, "09:30:00");
+  assert.equal(normalizeTimeString("09:00").time, "09:00:00");
+  assert.equal(normalizeTimeString("14:45:30 WIB").time, "14:45:30");
+  assert.equal(normalizeTimeString("14.45.30 WITA").time, "14:45:30");
+  assert.equal(normalizeTimeString("").time, null);
+  assert.equal(normalizeTimeString(null).time, null);
+  assert.equal(normalizeTimeString(0.375).time, "09:00:00"); // Excel fraction: 9h/24h = 0.375
+
+  // Invalid time ranges must NOT silently convert to midnight, must return error
+  const invalidHour = normalizeTimeString("25:00 WIB");
+  assert.equal(invalidHour.time, null);
+  assert.ok(invalidHour.error?.includes("Jam tidak valid"));
+
+  const invalidMinute = normalizeTimeString("12:65 WIB");
+  assert.equal(invalidMinute.time, null);
+  assert.ok(invalidMinute.error?.includes("Menit tidak valid"));
+
+  const garbageTime = normalizeTimeString("bukan-waktu");
+  assert.equal(garbageTime.time, null);
+  assert.ok(garbageTime.error?.includes("Format waktu tidak valid"));
+  console.log("  ✔ Normalisasi format waktu PostgreSQL TIME terverifikasi akurat.");
+
+  // ---------------------------------------------------------------------------
+  // Test 17: Double-dash Date Window Rejection
+  // ---------------------------------------------------------------------------
+  console.log("\n[Test 17/17] Penolakan Format Window Cacat (Double Dash '--')...");
+  const doubleDashPayload = {
+    sync_type: "same_day",
+    timezone: "Asia/Jakarta",
+    period_start: "2026--11-18T17:00:00.000Z",
+    period_end: "2026-11-19T17:00:00.000Z",
+    events: []
+  };
+  const vDoubleDash = validateRollingSyncRequest(doubleDashPayload);
+  assert.equal(vDoubleDash.valid, false, "Double-dash in period_start must fail validation");
+  assert.ok(vDoubleDash.error?.includes("double dash"));
+  console.log("  ✔ Penolakan string tanggal cacat dengan double dash terverifikasi aman.");
+
   console.log("\n================================================================================");
-  console.log("=== SEMUA 15 PENGUJIAN SINKRONISASI SAME-DAY (H-0) BERHASIL DENGAN SEMPURNA! ===");
+  console.log("=== SEMUA 17 PENGUJIAN SINKRONISASI SAME-DAY (H-0) BERHASIL DENGAN SEMPURNA! ===");
   console.log("================================================================================\n");
 }
 

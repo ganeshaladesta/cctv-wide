@@ -4,6 +4,7 @@
  */
 
 import { getSupabaseAdminClient, isSupabaseConfigured } from "./supabase";
+import { normalizeTimeString } from "./time-normalization";
 import {
   ProtestEvent,
   ProtestFilterParams,
@@ -733,6 +734,23 @@ export async function upsertExcelBatchInSupabase(
     }
 
     try {
+      // Validate & normalize time inputs to PostgreSQL TIME (HH:MM:SS) format
+      const normStart = normalizeTimeString(rec.waktu_mulai);
+      if (normStart.error) {
+        lastError = `[ID: ${rec.id_kejadian}] Field 'waktu_mulai' tidak valid: ${normStart.error}`;
+        console.error(lastError);
+        failed++;
+        continue;
+      }
+
+      const normEnd = normalizeTimeString(rec.waktu_selesai);
+      if (normEnd.error) {
+        lastError = `[ID: ${rec.id_kejadian}] Field 'waktu_selesai' tidak valid: ${normEnd.error}`;
+        console.error(lastError);
+        failed++;
+        continue;
+      }
+
       // Check if row already exists in Supabase
       const { data: existing, error: findErr } = await supabase
         .from("protests")
@@ -752,8 +770,8 @@ export async function upsertExcelBatchInSupabase(
         const updatePayload: Record<string, any> = {
           kode_unras: rec.kode_unras,
           tanggal: rec.tanggal,
-          waktu_mulai: rec.waktu_mulai ? rec.waktu_mulai.slice(0, 8) : null,
-          waktu_selesai: rec.waktu_selesai ? rec.waktu_selesai.slice(0, 8) : null,
+          waktu_mulai: normStart.time,
+          waktu_selesai: normEnd.time,
           event_datetime: rec.event_datetime || null,
           lokasi: rec.lokasi,
           titik_kumpul: rec.titik_kumpul || null,
@@ -796,8 +814,8 @@ export async function upsertExcelBatchInSupabase(
           id_kejadian: rec.id_kejadian,
           kode_unras: rec.kode_unras,
           tanggal: rec.tanggal,
-          waktu_mulai: rec.waktu_mulai ? rec.waktu_mulai.slice(0, 8) : null,
-          waktu_selesai: rec.waktu_selesai ? rec.waktu_selesai.slice(0, 8) : null,
+          waktu_mulai: normStart.time,
+          waktu_selesai: normEnd.time,
           event_datetime: rec.event_datetime || `${rec.tanggal}T09:00:00+07:00`,
           lokasi: rec.lokasi,
           titik_kumpul: rec.titik_kumpul || null,

@@ -93,6 +93,34 @@ function getTargetConfig() {
   return { vercelUrl, syncSecret };
 }
 
+// Helper: normalize time into valid HH:MM:SS
+function normalizeTime(raw) {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw === "number") {
+    if (isNaN(raw) || raw < 0 || raw >= 1) return null;
+    const totalSeconds = Math.round(raw * 86400);
+    const h = Math.floor(totalSeconds / 3600);
+    const m = Math.floor((totalSeconds % 3600) / 60);
+    const s = totalSeconds % 60;
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  }
+  let str = String(raw).trim();
+  if (!str) return null;
+  str = str.replace(/\b(wib|wita|wit|utc|gmt)\b/gi, "").trim();
+  if (/\d+T\d+/i.test(str)) {
+    str = str.split(/T/i)[1].split("+")[0].split("-")[0].replace("Z", "").trim();
+  }
+  if (str.includes("-")) str = str.split("-")[0].trim();
+  str = str.replace(/\./g, ":").trim();
+  const match = str.match(/^(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?$/);
+  if (!match) return null;
+  const h = parseInt(match[1], 10);
+  const m = parseInt(match[2], 10);
+  const s = match[3] !== undefined ? parseInt(match[3], 10) : 0;
+  if (h < 0 || h > 23 || m < 0 || m > 59 || s < 0 || s > 59) return null;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
 // 3. Normalize Row from 'NEW UNRAS 2022-2026'
 function mapExcelRow(r, index) {
   const tanggalRaw = r["Tanggal Kejadian"] || r["TANGGAL"] || r["Tanggal"] || "";
@@ -126,20 +154,13 @@ function mapExcelRow(r, index) {
     finalTanggal = new Date().toISOString().split("T")[0];
   }
 
-  let finalWaktu = "09:00 WIB";
+  let finalWaktu = "09:00:00";
   if (r["Waktu"]) {
-    const wNum = Number(r["Waktu"]);
-    if (!isNaN(wNum) && wNum > 0 && wNum < 1) {
-      const totalSeconds = Math.round(wNum * 86400);
-      const hours = Math.floor(totalSeconds / 3600);
-      const minutes = Math.floor((totalSeconds % 3600) / 60);
-      finalWaktu = `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")} WIB`;
-    } else {
-      finalWaktu = String(r["Waktu"]).trim();
-    }
+    const norm = normalizeTime(r["Waktu"]);
+    if (norm) finalWaktu = norm;
   } else if (finalISO && finalISO.includes("T")) {
-    const timePart = finalISO.split("T")[1].substring(0, 5);
-    finalWaktu = `${timePart} WIB`;
+    const norm = normalizeTime(finalISO);
+    if (norm) finalWaktu = norm;
   }
 
   let idKejadian = r["ID KEJADIAN"] ? String(r["ID KEJADIAN"]).trim() : "";
@@ -284,14 +305,24 @@ async function run() {
   const rawRows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
   console.log(`✔ Berhasil membaca total ${rawRows.length} baris dari Excel.\n`);
 
-  // Calculate Same-Day (H-0) Window in Asia/Jakarta
+  // Calculate Same-Day (H-0) Window in Asia/Jakarta safely without double dashes
   const now = new Date();
-  const dateWIB = new Intl.DateTimeFormat("en-CA", {
+  const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "Asia/Jakarta",
     year: "numeric",
     month: "2-digit",
     day: "2-digit"
-  }).format(now);
+  }).formatToParts(now);
+
+  const y = parts.find((p) => p.type === "year")?.value || String(now.getFullYear());
+  const m = parts.find((p) => p.type === "month")?.value || String(now.getMonth() + 1).padStart(2, "0");
+  const d = parts.find((p) => p.type === "day")?.value || String(now.getDate()).padStart(2, "0");
+
+  const dateWIB = `${y}-${m}-${d}`;
+  if (dateWIB.includes("--")) {
+    console.error(`❌ Format dateWIB cacat: ${dateWIB}`);
+    process.exit(1);
+  }
 
   const startWIB = new Date(`${dateWIB}T00:00:00+07:00`);
   const endWIB = new Date(startWIB.getTime() + 24 * 60 * 60 * 1000);
@@ -299,6 +330,11 @@ async function run() {
   const periodEndMs = endWIB.getTime();
   const periodStartISO = startWIB.toISOString();
   const periodEndISO = endWIB.toISOString();
+
+  if (periodStartISO.includes("--") || periodEndISO.includes("--")) {
+    console.error("❌ Format ISO window cacat dengan double dash ('--').");
+    process.exit(1);
+  }
 
   const isSyncAll = process.argv.includes("--all") || process.env.SYNC_ALL === "true";
 
@@ -370,6 +406,7 @@ async function run() {
     console.log(`🚀 Mengirim ke API Serverless Vercel / Supabase:`);
     console.log(`   URL: ${endpointUrl}`);
 
+    let cloudSyncSuccess = true;
     if (!syncSecret) {
       console.warn("   ⚠️  UNRAS_SYNC_SECRET belum diisi di .env.local, sinkronisasi cloud dilewati.");
     } else {
@@ -399,18 +436,33 @@ async function run() {
           respJson = { raw: respText };
         }
 
-        if (response.ok) {
+        if (response.ok && respJson.success !== false && respJson.status !== "failed") {
           console.log(`   🎉 Cloud Supabase Berhasil Diperbarui (HTTP ${response.status})!`);
           if (respJson.summary) {
             console.log(`      - Cloud Inserted: ${respJson.summary.inserted}`);
             console.log(`      - Cloud Updated : ${respJson.summary.updated}`);
+            if (respJson.summary.failed > 0) {
+              console.warn(`      - Cloud Failed  : ${respJson.summary.failed}`);
+            }
           }
         } else {
-          console.warn(`   ⚠️  Cloud mengembalikan status HTTP ${response.status}: ${respJson.error || respText}`);
+          cloudSyncSuccess = false;
+          console.error(`   ⚠️  Cloud mengembalikan status HTTP ${response.status}: ${respJson.error || respText}`);
+          if (respJson.errors && Array.isArray(respJson.errors)) {
+            respJson.errors.slice(0, 5).forEach((e) => console.error(`      - ${e}`));
+          }
         }
       } catch (err) {
-        console.warn(`   ⚠️  Tidak dapat menghubungi cloud: ${err.message}`);
+        cloudSyncSuccess = false;
+        console.error(`   ⚠️  Tidak dapat menghubungi cloud: ${err.message}`);
       }
+    }
+
+    if (!cloudSyncSuccess) {
+      console.error("\n================================================================================");
+      console.error("=== GAGAL: Sinkronisasi cloud Vercel / Supabase mengalami kegagalan!        ===");
+      console.error("================================================================================");
+      process.exit(1);
     }
   }
 
