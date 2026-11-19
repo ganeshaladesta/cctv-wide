@@ -21,6 +21,10 @@ import {
   isTokenExchangeWrapperUrl,
   normalizeLegacyStreamUrl
 } from "@/lib/stream-url";
+import {
+  CCTVStreamMonitor,
+  StreamClassification
+} from "@/lib/cctv-stream-monitor";
 
 interface CCTVPlayerProps {
   camera: Camera;
@@ -66,6 +70,7 @@ export function CCTVPlayer({
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
+  const monitorRef = useRef<CCTVStreamMonitor | null>(null);
 
   const amgChannelId = React.useMemo(
     () => extractAmgChannelId(camera.stream_url),
@@ -76,6 +81,7 @@ export function CCTVPlayer({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(autoPlay);
+  const [classification, setClassification] = useState<StreamClassification>("LIVE");
   const [isMuted, setIsMuted] = useState(true);
   const [retryCount, setRetryCount] = useState(0);
   const [usingProxy, setUsingProxy] = useState(false);
@@ -85,6 +91,15 @@ export function CCTVPlayer({
   useEffect(() => {
     setIsHttpsPage(window.location.protocol === "https:");
   }, []);
+
+  // Synchronize player visibility & pause state to the stream monitor
+  useEffect(() => {
+    monitorRef.current?.setVisibility(isVisible);
+  }, [isVisible]);
+
+  useEffect(() => {
+    monitorRef.current?.setUserPaused(!isPlaying);
+  }, [isPlaying]);
 
   // AMG Sarinah cameras permanently use Direct HLS; other providers preserve camera.protocol
   const activeProtocol = React.useMemo(
@@ -175,7 +190,7 @@ export function CCTVPlayer({
     return () => clearInterval(interval);
   }, [activeProtocol, isVisible, isMixedContentBlocked]);
 
-  // HLS & MP4 Video lifecycle (Direct HLS first; never auto-proxy slow streams or binary video)
+  // HLS & MP4 Video lifecycle with continuous health monitoring & auto-recovery
   useEffect(() => {
     if (!isVisible || isMixedContentBlocked) return;
     if (activeProtocol !== "HLS" && activeProtocol !== "MP4") {
@@ -197,13 +212,18 @@ export function CCTVPlayer({
 
     const cleanup = () => {
       clearTimeout(watchdog);
+      if (monitorRef.current) {
+        monitorRef.current.stop();
+        monitorRef.current = null;
+      }
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
       }
     };
 
-    if (activeProtocol === "HLS" && Hls.isSupported()) {
+    // Helper to initialize or re-initialize Hls instance safely without duplicates
+    const setupHls = (targetVideo: HTMLVideoElement) => {
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: true,
@@ -217,7 +237,7 @@ export function CCTVPlayer({
       hlsRef.current = hls;
 
       hls.loadSource(effectiveStreamUrl);
-      hls.attachMedia(video);
+      hls.attachMedia(targetVideo);
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         if (cancelled) return;
@@ -226,7 +246,7 @@ export function CCTVPlayer({
         setError(null);
         reportStatus("ONLINE");
         if (autoPlay) {
-          video.play().catch(() => {});
+          targetVideo.play().catch(() => {});
         }
       });
 
@@ -234,8 +254,6 @@ export function CCTVPlayer({
         if (cancelled) return;
         if (data.fatal) {
           clearTimeout(watchdog);
-          // Only retry through /api/proxy (manifest-only, direct .ts/.m4s segments)
-          // when manifest loading/parsing hits CORS, never for segment errors or slow timeouts.
           const isManifestCorsOrParse =
             data.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR ||
             data.details === Hls.ErrorDetails.MANIFEST_PARSING_ERROR;
@@ -263,6 +281,59 @@ export function CCTVPlayer({
           );
         }
       });
+
+      return hls;
+    };
+
+    // Initialize per-camera Stream Health Monitor
+    const monitor = new CCTVStreamMonitor(
+      camera.id,
+      camera.source_name || "Unknown",
+      {
+        staleThresholdMs: 8000,
+        bufferingTimeoutMs: 5000,
+        playlistStallThresholdMs: 15000,
+        checkIntervalMs: 1000,
+        maxRecoveryAttempts: 4
+      },
+      {
+        onClassificationChange: (newClass) => {
+          if (cancelled) return;
+          setClassification(newClass);
+          if (newClass === "OFFLINE") {
+            reportStatus("OFFLINE");
+            setError("Stream offline atau terhenti setelah beberapa kali pemulihan otomatis.");
+          } else if (newClass === "LIVE") {
+            reportStatus("ONLINE");
+            setError(null);
+          }
+        },
+        onReinitRequired: async (_reason) => {
+          if (cancelled) return false;
+          // Teardown old HLS and reinit fresh instance isolated to this camera
+          if (hlsRef.current) {
+            hlsRef.current.destroy();
+            hlsRef.current = null;
+          }
+          if (videoRef.current && activeProtocol === "HLS" && Hls.isSupported()) {
+            const freshHls = setupHls(videoRef.current);
+            monitor.attachHls(freshHls);
+            return true;
+          }
+          return false;
+        }
+      }
+    );
+
+    monitorRef.current = monitor;
+    monitor.attachVideo(video);
+    monitor.setVisibility(isVisible);
+    monitor.setUserPaused(!isPlaying);
+    monitor.start();
+
+    if (activeProtocol === "HLS" && Hls.isSupported()) {
+      const initialHls = setupHls(video);
+      monitor.attachHls(initialHls);
     } else {
       // Native HLS (Safari) or MP4 — direct provider playback only (never proxy MP4 video)
       video.src = effectiveStreamUrl;
@@ -296,6 +367,7 @@ export function CCTVPlayer({
     };
   }, [
     camera.id,
+    camera.source_name,
     activeProtocol,
     effectiveStreamUrl,
     rawStreamUrl,
@@ -305,6 +377,7 @@ export function CCTVPlayer({
     retryCount,
     isVisible,
     autoPlay,
+    isPlaying,
     reportStatus
   ]);
 
@@ -330,6 +403,7 @@ export function CCTVPlayer({
   const handleRefresh = () => {
     setError(null);
     setLoading(true);
+    setClassification("BUFFERING");
     setRetryCount((c) => c + 1);
   };
 
@@ -354,8 +428,14 @@ export function CCTVPlayer({
           <div className="flex flex-wrap items-center gap-1.5">
             <span
               className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wider uppercase ${
-                error
+                error || classification === "OFFLINE"
+                  ? "bg-red-500/20 text-red-300 border border-red-500/40"
+                  : classification === "RECOVERING"
+                  ? "bg-blue-500/20 text-blue-300 border border-blue-500/40"
+                  : classification === "BUFFERING" || classification === "STALE"
                   ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
+                  : classification === "PAUSED"
+                  ? "bg-slate-500/20 text-slate-300 border border-slate-500/40"
                   : camera.status === "ONLINE"
                   ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
                   : "bg-red-500/20 text-red-300 border border-red-500/40"
@@ -363,14 +443,28 @@ export function CCTVPlayer({
             >
               <span
                 className={`w-1.5 h-1.5 rounded-full ${
-                  error
-                    ? "bg-amber-400"
-                    : camera.status === "ONLINE"
-                    ? "bg-emerald-400 animate-pulse"
-                    : "bg-red-400"
+                  error || classification === "OFFLINE"
+                    ? "bg-red-400"
+                    : classification === "RECOVERING"
+                    ? "bg-blue-400 animate-spin"
+                    : classification === "BUFFERING" || classification === "STALE"
+                    ? "bg-amber-400 animate-pulse"
+                    : classification === "PAUSED"
+                    ? "bg-slate-400"
+                    : "bg-emerald-400 animate-pulse"
                 }`}
               />
-              {error ? "GANGGUAN" : camera.status === "ONLINE" ? "LIVE" : "OFFLINE"}
+              {error || classification === "OFFLINE"
+                ? "OFFLINE"
+                : classification === "RECOVERING"
+                ? "MEMULIHKAN"
+                : classification === "STALE"
+                ? "TERHENTI"
+                : classification === "BUFFERING"
+                ? "BUFFERING"
+                : classification === "PAUSED"
+                ? "JEDA"
+                : "LIVE"}
             </span>
             <span className="px-1.5 py-0.5 rounded bg-[#0C1018]/90 text-[#E2E8F0] text-[10px] font-mono border border-[var(--border-default)]">
               {activeProtocol}

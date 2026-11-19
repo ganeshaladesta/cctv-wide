@@ -12,6 +12,7 @@
     "lint": "next lint",
     "test": "node scripts/self-test.mjs",
     "test:rolling-sync": "tsx scripts/test-rolling-sync.mjs",
+    "test:recovery": "tsx scripts/test-stream-recovery.mjs",
     "verify:protest": "node scripts/verify-protest-monitoring.mjs",
     "sync:unras": "node scripts/sync-local-excel.mjs",
     "db:init": "node scripts/init-sqlite.mjs",

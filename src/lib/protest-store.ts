@@ -1519,7 +1519,11 @@ class ProtestDataStore {
         if (this.db) {
           try { this.upsertFromExcelBatchLocal(records); } catch {}
         }
-        return res;
+        return {
+          processed: res.inserted + res.updated + res.skipped + (res.failed || 0),
+          created: res.inserted,
+          ...res
+        };
       } catch (err) {
         console.error("[ProtestDataStore] Supabase upsertExcelBatch failed, falling back to local SQLite:", err);
       }

@@ -101,12 +101,12 @@ export async function queryProtestsFromSupabase(filters: ProtestFilterParams = {
   }
 
   // Urgency Filter
-  if (filters.urgency && filters.urgency !== "all") {
+  if (filters.urgency && (filters.urgency as string) !== "all") {
     query = query.eq("urgency", filters.urgency);
   }
 
   // Coordinates Filter
-  if (filters.has_coords !== undefined && filters.has_coords !== "all") {
+  if (filters.has_coords !== undefined && (filters.has_coords as any) !== "all") {
     const hasC = filters.has_coords === true || String(filters.has_coords) === "true";
     if (hasC) {
       query = query.not("validated_lat", "is", null).not("validated_lng", "is", null);
@@ -182,7 +182,8 @@ export async function getProtestByIdFromSupabase(id: string): Promise<ProtestEve
  * 3. Create Protest Event in Supabase
  */
 export async function createProtestInSupabase(
-  payload: Partial<ProtestEvent> & { source_type?: string }
+  payload: Partial<ProtestEvent> & { source_type?: string },
+  _user?: any
 ): Promise<ProtestEvent> {
   const supabase = getSupabaseAdminClient();
   if (!supabase) throw new Error("Supabase is not configured.");
@@ -368,7 +369,8 @@ export async function fetchReportsFromSupabase(protestId: string): Promise<Prote
 }
 
 export async function addReportInSupabase(
-  data: Partial<ProtestOperatorReport>
+  data: Partial<ProtestOperatorReport>,
+  user?: any
 ): Promise<ProtestOperatorReport> {
   const supabase = getSupabaseAdminClient();
   if (!supabase) throw new Error("Supabase is not configured.");
@@ -379,9 +381,9 @@ export async function addReportInSupabase(
   const row = {
     protest_id: protest.id,
     report_type: data.report_type || "progress",
-    author_id: data.author_id,
-    author_name: data.author_name,
-    author_role: data.author_role || "operator",
+    author_id: user?.id || data.author_id,
+    author_name: user?.name || data.author_name,
+    author_role: user?.role || data.author_role || "operator",
     content: data.content,
     crowd_estimate: data.crowd_estimate || null,
     is_pinned: Boolean(data.is_pinned)
