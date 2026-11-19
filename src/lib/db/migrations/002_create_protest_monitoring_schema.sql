@@ -72,6 +72,7 @@ CREATE TABLE IF NOT EXISTS public.protests (
     completed_at TIMESTAMPTZ,
     completed_by_id UUID,
     completed_by_name TEXT,
+    source_type TEXT NOT NULL DEFAULT 'excel_sync',
 
     -- Timestamps & Soft Delete
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -79,6 +80,9 @@ CREATE TABLE IF NOT EXISTS public.protests (
     deleted_at TIMESTAMPTZ,
     last_synced_at TIMESTAMPTZ
 );
+
+-- Ensure backwards-compatible columns exist if table was created in an earlier migration
+ALTER TABLE public.protests ADD COLUMN IF NOT EXISTS source_type TEXT NOT NULL DEFAULT 'excel_sync';
 
 -- Indexes for high-performance filtering & spatial queries
 CREATE INDEX IF NOT EXISTS idx_protests_id_kejadian ON public.protests(id_kejadian);
@@ -88,6 +92,7 @@ CREATE INDEX IF NOT EXISTS idx_protests_event_datetime ON public.protests(event_
 CREATE INDEX IF NOT EXISTS idx_protests_status ON public.protests(status);
 CREATE INDEX IF NOT EXISTS idx_protests_urgency ON public.protests(urgency);
 CREATE INDEX IF NOT EXISTS idx_protests_category ON public.protests(category_id);
+CREATE INDEX IF NOT EXISTS idx_protests_source_type ON public.protests(source_type);
 CREATE INDEX IF NOT EXISTS idx_protests_archived ON public.protests(is_archived);
 CREATE INDEX IF NOT EXISTS idx_protests_deleted ON public.protests(deleted_at);
 CREATE INDEX IF NOT EXISTS idx_protests_coords ON public.protests(validated_lat, validated_lng) WHERE validated_lat IS NOT NULL AND validated_lng IS NOT NULL;
