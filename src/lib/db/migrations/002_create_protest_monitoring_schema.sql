@@ -223,6 +223,12 @@ ALTER TABLE public.protest_camera_links ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.protest_attachments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.protest_sync_logs ENABLE ROW LEVEL SECURITY;
 
+-- CATEGORIES RLS
+DROP POLICY IF EXISTS "Anyone can read categories" ON public.protest_categories;
+CREATE POLICY "Anyone can read categories"
+    ON public.protest_categories FOR SELECT
+    USING (TRUE);
+
 -- Helper to extract user role from auth JWT
 CREATE OR REPLACE FUNCTION public.current_user_role()
 RETURNS TEXT AS $$
@@ -236,48 +242,58 @@ END;
 $$ LANGUAGE plpgsql STABLE;
 
 -- VIEWERS, OPERATORS, ADMINS can SELECT non-deleted protests
+DROP POLICY IF EXISTS "Viewers can read active protests" ON public.protests;
 CREATE POLICY "Viewers can read active protests"
     ON public.protests FOR SELECT
     USING (deleted_at IS NULL);
 
 -- OPERATORS & ADMINS can INSERT protests
+DROP POLICY IF EXISTS "Operators and admins can create protests" ON public.protests;
 CREATE POLICY "Operators and admins can create protests"
     ON public.protests FOR INSERT
     WITH CHECK (public.current_user_role() IN ('admin', 'operator'));
 
 -- OPERATORS & ADMINS can UPDATE protests
+DROP POLICY IF EXISTS "Operators and admins can update protests" ON public.protests;
 CREATE POLICY "Operators and admins can update protests"
     ON public.protests FOR UPDATE
     USING (public.current_user_role() IN ('admin', 'operator') AND deleted_at IS NULL);
 
 -- ONLY ADMINS can SOFT DELETE protests
+DROP POLICY IF EXISTS "Only admins can delete protests" ON public.protests;
 CREATE POLICY "Only admins can delete protests"
     ON public.protests FOR DELETE
     USING (public.current_user_role() = 'admin');
 
 -- OPERATOR REPORTS RLS
+DROP POLICY IF EXISTS "Anyone can read reports" ON public.protest_operator_reports;
 CREATE POLICY "Anyone can read reports"
     ON public.protest_operator_reports FOR SELECT
     USING (TRUE);
 
+DROP POLICY IF EXISTS "Operators and admins can insert reports" ON public.protest_operator_reports;
 CREATE POLICY "Operators and admins can insert reports"
     ON public.protest_operator_reports FOR INSERT
     WITH CHECK (public.current_user_role() IN ('admin', 'operator'));
 
 -- CAMERA LINKS RLS
+DROP POLICY IF EXISTS "Anyone can read camera links" ON public.protest_camera_links;
 CREATE POLICY "Anyone can read camera links"
     ON public.protest_camera_links FOR SELECT
     USING (TRUE);
 
+DROP POLICY IF EXISTS "Operators and admins can manage camera links" ON public.protest_camera_links;
 CREATE POLICY "Operators and admins can manage camera links"
     ON public.protest_camera_links FOR ALL
     USING (public.current_user_role() IN ('admin', 'operator'));
 
 -- SYNC LOGS RLS: ONLY ADMINS & OPERATORS can view, only ADMIN/SERVICE can write
+DROP POLICY IF EXISTS "Operators and admins can view sync logs" ON public.protest_sync_logs;
 CREATE POLICY "Operators and admins can view sync logs"
     ON public.protest_sync_logs FOR SELECT
     USING (public.current_user_role() IN ('admin', 'operator'));
 
+DROP POLICY IF EXISTS "Admin or service role can manage sync logs" ON public.protest_sync_logs;
 CREATE POLICY "Admin or service role can manage sync logs"
     ON public.protest_sync_logs FOR ALL
     USING (public.current_user_role() = 'admin' OR auth.role() = 'service_role');
