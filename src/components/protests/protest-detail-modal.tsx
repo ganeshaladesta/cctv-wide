@@ -140,7 +140,11 @@ export function ProtestDetailModal({
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
-        onClose();
+        if (isPickerOpen) {
+          setIsPickerOpen(false);
+        } else {
+          onClose();
+        }
       }
     };
     window.addEventListener("keydown", handleKeyDown);
@@ -1097,8 +1101,16 @@ export function ProtestDetailModal({
 
     {/* Expanded Interactive Map Picker Overlay (75-80% Screen Width) */}
     {isPickerOpen && (
-      <div className="fixed inset-0 z-[100000] bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
-        <div className="relative w-full max-w-4xl lg:max-w-5xl my-auto">
+      <div
+        className="fixed inset-0 z-[100000] bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto pointer-events-auto unras-picker-overlay"
+        onClick={(e) => {
+          if (e.target === e.currentTarget) setIsPickerOpen(false);
+        }}
+      >
+        <div
+          className="relative w-full max-w-4xl lg:max-w-5xl my-auto pointer-events-auto"
+          onClick={(e) => e.stopPropagation()}
+        >
           <ProtestLocationPicker
             initialLat={latInput ? parseFloat(latInput) : (eventData?.validated_lat ?? null)}
             initialLng={lngInput ? parseFloat(lngInput) : (eventData?.validated_lng ?? null)}

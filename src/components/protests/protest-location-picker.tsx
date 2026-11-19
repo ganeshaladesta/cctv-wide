@@ -489,7 +489,7 @@ export function ProtestLocationPicker({
   };
 
   return (
-    <div className="w-full bg-[#0D121B] border border-[var(--border-default)] rounded-2xl p-4 sm:p-5 space-y-3.5 shadow-2xl">
+    <div className="w-full bg-[#0D121B] border border-[var(--border-default)] rounded-2xl p-4 sm:p-5 space-y-3.5 shadow-2xl pointer-events-auto select-auto">
       {/* Header & Advanced Search Bar */}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
@@ -603,9 +603,9 @@ export function ProtestLocationPicker({
       <div
         className={`relative w-full ${
           compact ? "h-[360px]" : "h-[460px] sm:h-[500px]"
-        } rounded-xl overflow-hidden border border-[var(--border-subtle)] shadow-inner`}
+        } rounded-xl overflow-hidden border border-[var(--border-subtle)] shadow-inner pointer-events-auto`}
       >
-        <div ref={mapContainerRef} className="w-full h-full z-0" />
+        <div ref={mapContainerRef} className="w-full h-full z-0 pointer-events-auto" />
 
         {/* Floating Custom Map Control Buttons (Independent Zoom, Locate, Reset) */}
         <div className="absolute top-3 right-3 z-[400] flex flex-col gap-1.5">

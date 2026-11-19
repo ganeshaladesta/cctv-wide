@@ -121,6 +121,17 @@
   pointer-events: auto;
 }
 
+.unras-picker-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100000;
+  pointer-events: auto !important;
+}
+
+.unras-picker-overlay * {
+  pointer-events: auto;
+}
+
 @layer base {
   html {
     background-color: var(--bg-primary);
