@@ -350,26 +350,7 @@ export function ProtestCreateModal({
               )}
             </div>
 
-            {isPickerOpen ? (
-              <div className="pt-1">
-                <ProtestLocationPicker
-                  initialLat={formData.validated_lat ? parseFloat(formData.validated_lat) : null}
-                  initialLng={formData.validated_lng ? parseFloat(formData.validated_lng) : null}
-                  initialLocationName={formData.lokasi}
-                  compact={true}
-                  onSelectLocation={(pickedLat, pickedLng, label) => {
-                    setFormData((prev) => ({
-                      ...prev,
-                      validated_lat: pickedLat !== null ? String(pickedLat) : "",
-                      validated_lng: pickedLng !== null ? String(pickedLng) : "",
-                      lokasi: (!prev.lokasi || prev.lokasi.trim() === "") && label ? label : prev.lokasi
-                    }));
-                    setIsPickerOpen(false);
-                  }}
-                  onClose={() => setIsPickerOpen(false)}
-                />
-              </div>
-            ) : formData.validated_lat && formData.validated_lng ? (
+            {formData.validated_lat && formData.validated_lng ? (
               <div className="p-3 bg-[#161C2B] border border-emerald-500/30 rounded-xl flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5 text-emerald-400 text-xs font-semibold">
@@ -387,14 +368,14 @@ export function ProtestCreateModal({
                   <button
                     type="button"
                     onClick={() => setIsPickerOpen(true)}
-                    className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 transition-colors cursor-pointer"
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 transition-colors cursor-pointer"
                   >
                     Ubah di Peta
                   </button>
                   <button
                     type="button"
                     onClick={() => setFormData((prev) => ({ ...prev, validated_lat: "", validated_lng: "" }))}
-                    className="p-1 rounded-lg text-[#98A4B8] hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer"
+                    className="p-1.5 rounded-lg text-[#98A4B8] hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer"
                     title="Hapus koordinat"
                   >
                     <X className="w-4 h-4" />
@@ -402,19 +383,22 @@ export function ProtestCreateModal({
                 </div>
               </div>
             ) : (
-              <div className="p-3 bg-[#161C2B] border border-dashed border-[var(--border-default)] rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="p-3.5 bg-[#161C2B] border border-dashed border-blue-500/40 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                 <div className="text-xs text-[#98A4B8]">
-                  <p className="text-white font-medium">Titik Geospasial Belum Ditentukan</p>
-                  <p className="text-[11px] text-[#64748B]">
-                    Klik tombol untuk mencari gedung/landmark atau menandai titik langsung di peta.
+                  <p className="text-white font-semibold flex items-center gap-1.5">
+                    <MapPin className="w-3.5 h-3.5 text-blue-400" />
+                    Titik Geospasial Belum Ditentukan
+                  </p>
+                  <p className="text-[11px] text-[#64748B] mt-0.5">
+                    Cari gedung DPR/MPR, kementerian, monas, balai kota, atau tandai titik langsung di peta.
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={() => setIsPickerOpen(true)}
-                  className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-500/20 transition-all flex items-center gap-1.5 shrink-0 cursor-pointer"
+                  className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-500/25 transition-all flex items-center gap-1.5 shrink-0 cursor-pointer"
                 >
-                  <MapPin className="w-3.5 h-3.5" />
+                  <MapPin className="w-4 h-4" />
                   <span>Pilih di Peta Interaktif</span>
                 </button>
               </div>
@@ -452,6 +436,32 @@ export function ProtestCreateModal({
         </form>
         </div>
       </div>
+
+      {/* Expanded Interactive Map Picker Overlay (75-80% Screen Width) */}
+      {isPickerOpen && (
+        <div className="fixed inset-0 z-[100000] bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
+          <div className="relative w-full max-w-4xl lg:max-w-5xl my-auto">
+            <ProtestLocationPicker
+              initialLat={formData.validated_lat ? parseFloat(formData.validated_lat) : null}
+              initialLng={formData.validated_lng ? parseFloat(formData.validated_lng) : null}
+              initialLocationName={formData.lokasi}
+              city={formData.kota_kabupaten}
+              province={formData.provinsi}
+              compact={false}
+              onSelectLocation={(pickedLat, pickedLng, label) => {
+                setFormData((prev) => ({
+                  ...prev,
+                  validated_lat: pickedLat !== null ? String(pickedLat) : "",
+                  validated_lng: pickedLng !== null ? String(pickedLng) : "",
+                  lokasi: (!prev.lokasi || prev.lokasi.trim() === "") && label ? label : prev.lokasi
+                }));
+                setIsPickerOpen(false);
+              }}
+              onClose={() => setIsPickerOpen(false)}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 

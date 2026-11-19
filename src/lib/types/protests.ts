@@ -83,6 +83,24 @@ export interface ProtestEvent {
   completed_by_id: string | null;
   completed_by_name: string | null;
 
+  // Geocoding Intelligence & Verification Workflow
+  suggested_lat?: number | null;
+  suggested_lng?: number | null;
+  suggested_address?: string | null;
+  geocoding_provider?: string | null;
+  geocoding_confidence?: "high" | "medium" | "low" | null;
+  location_validation_status?: "unmapped" | "pending_validation" | "verified" | "rejected";
+  geocoding_alternatives?: Array<{
+    lat: number;
+    lng: number;
+    address: string;
+    score?: number;
+    provider?: string;
+  }> | null;
+  validated_at?: string | null;
+  validated_by_id?: string | null;
+  validated_by_name?: string | null;
+
   // Metadata & Auditing
   created_at: string;
   updated_at: string;
@@ -260,6 +278,8 @@ export interface ProtestFilterParams {
   date_from?: string; // YYYY-MM-DD
   date_to?: string; // YYYY-MM-DD
   has_coords?: boolean | "true" | "false";
+  location_validation_status?: "unmapped" | "pending_validation" | "verified" | "rejected" | "all";
+  geocoding_confidence?: "high" | "medium" | "low" | "all";
   is_archived?: boolean | "true" | "false";
   page?: number;
   limit?: number;
@@ -279,6 +299,8 @@ export interface ProtestStats {
   cancelled_events: number;
   high_critical_urgency: number;
   events_without_coords: number;
+  pending_validation_count?: number;
+  verified_locations_count?: number;
   today_events: number;
   completed_today: number;
   total_camera_links: number;

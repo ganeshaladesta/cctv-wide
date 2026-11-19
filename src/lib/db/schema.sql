@@ -152,6 +152,18 @@ CREATE TABLE IF NOT EXISTS protests (
     completed_by_id TEXT,
     completed_by_name TEXT,
 
+    -- Geocoding Intelligence & Validation Workflow
+    suggested_lat REAL,
+    suggested_lng REAL,
+    suggested_address TEXT,
+    geocoding_provider TEXT,
+    geocoding_confidence TEXT,
+    location_validation_status TEXT NOT NULL DEFAULT 'unmapped',
+    geocoding_alternatives TEXT DEFAULT '[]',
+    validated_at TEXT,
+    validated_by_id TEXT,
+    validated_by_name TEXT,
+
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     deleted_at TEXT,

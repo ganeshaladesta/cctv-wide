@@ -16,6 +16,7 @@ import {
   ShieldAlert,
   Flame,
   CheckCircle2,
+  Check,
   Clock,
   ExternalLink,
   Layers
@@ -63,6 +64,8 @@ export function ProtestDashboard({
   const [statusFilter, setStatusFilter] = useState<string>("active");
   const [urgencyFilter, setUrgencyFilter] = useState<string>("all");
   const [hasCoordsFilter, setHasCoordsFilter] = useState<string>("all");
+  const [locationValidationFilter, setLocationValidationFilter] = useState<string>("all");
+  const [verifyingId, setVerifyingId] = useState<string | null>(null);
 
   // Modal states
   const [selectedProtestId, setSelectedProtestId] = useState<string | null>(null);
@@ -149,6 +152,7 @@ export function ProtestDashboard({
       if (urgencyFilter !== "all") params.set("urgency", urgencyFilter);
       if (hasCoordsFilter === "true") params.set("has_coords", "true");
       if (hasCoordsFilter === "false") params.set("has_coords", "false");
+      if (locationValidationFilter !== "all") params.set("location_validation_status", locationValidationFilter);
 
       const res = await fetch(`/api/protests?${params.toString()}`, { cache: "no-store" });
       const json = await res.json();
@@ -165,7 +169,37 @@ export function ProtestDashboard({
     } finally {
       setLoading(false);
     }
-  }, [page, limit, searchQuery, statusFilter, urgencyFilter, hasCoordsFilter]);
+  }, [page, limit, searchQuery, statusFilter, urgencyFilter, hasCoordsFilter, locationValidationFilter]);
+
+  const handleQuickVerify = async (event: ProtestEvent) => {
+    if (!event.suggested_lat || !event.suggested_lng) return;
+    setVerifyingId(event.id);
+    try {
+      const res = await fetch(`/api/protests/${event.id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "x-scc-user-role": "operator"
+        },
+        body: JSON.stringify({
+          validated_lat: event.suggested_lat,
+          validated_lng: event.suggested_lng,
+          location_validation_status: "verified"
+        })
+      });
+      if (res.ok) {
+        fetchProtests();
+        fetchStats();
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("scc-protest-updated"));
+        }
+      }
+    } catch (err) {
+      console.error("[QuickVerify Error]", err);
+    } finally {
+      setVerifyingId(null);
+    }
+  };
 
   useEffect(() => {
     fetchStats();
@@ -571,15 +605,41 @@ export function ProtestDashboard({
             type="button"
             onClick={() => {
               setStatusFilter("all");
+              setLocationValidationFilter("all");
               setPage(1);
             }}
             className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${
-              statusFilter === "all"
+              statusFilter === "all" && locationValidationFilter === "all"
                 ? "bg-slate-700 text-white"
                 : "bg-[#111622] text-[#98A4B8] hover:text-white"
             }`}
           >
             Semua Status
+          </button>
+
+          <div className="w-[1px] h-5 bg-white/10 mx-1 shrink-0" />
+
+          {/* Location Validation Review Tab */}
+          <button
+            type="button"
+            onClick={() => {
+              setLocationValidationFilter((prev) => (prev === "pending_validation" ? "all" : "pending_validation"));
+              setStatusFilter("all");
+              setPage(1);
+            }}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors flex items-center gap-1.5 ${
+              locationValidationFilter === "pending_validation"
+                ? "bg-purple-600 text-white shadow-md shadow-purple-500/20"
+                : "bg-[#111622] text-purple-400 hover:text-purple-300 border border-purple-500/20"
+            }`}
+          >
+            <MapPin className="w-3.5 h-3.5" />
+            <span>Verifikasi Lokasi</span>
+            {Boolean(stats?.pending_validation_count) && (
+              <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-purple-400/25 text-white font-bold">
+                {stats?.pending_validation_count}
+              </span>
+            )}
           </button>
         </div>
       </div>
@@ -686,6 +746,53 @@ export function ProtestDashboard({
                         </>
                       )}
                     </div>
+
+                    {/* Geocoding Pending Suggestion Card */}
+                    {event.suggested_lat && !event.has_coordinates && (
+                      <div className="mt-2.5 p-2.5 rounded-xl bg-purple-500/10 border border-purple-500/30 flex flex-wrap items-center justify-between gap-2.5">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <MapPin className="w-4 h-4 text-purple-400 shrink-0" />
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-bold text-white truncate">
+                                Saran Lokasi Otomatis: {event.suggested_address || event.lokasi}
+                              </span>
+                              <span
+                                className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase ${
+                                  event.geocoding_confidence === "high"
+                                    ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                                    : "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                                }`}
+                              >
+                                {event.geocoding_confidence === "high" ? "Akurat (100% POI)" : "Kawasan"}
+                              </span>
+                            </div>
+                            <span className="text-[10px] text-[#98A4B8] font-mono block mt-0.5">
+                              Koordinat: {event.suggested_lat.toFixed(4)}, {event.suggested_lng?.toFixed(4)} • Provider: {event.geocoding_provider}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            disabled={verifyingId === event.id}
+                            onClick={() => handleQuickVerify(event)}
+                            className="px-3 py-1 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition-colors flex items-center gap-1 shadow-sm cursor-pointer"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                            <span>{verifyingId === event.id ? "Memproses..." : "Setujui Titik"}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenDetail(event.id)}
+                            className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-[#161C2B] hover:bg-[#1E2638] text-[#98A4B8] hover:text-white border border-[var(--border-subtle)] transition-colors cursor-pointer"
+                          >
+                            Sesuaikan di Peta
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* Right Actions */}

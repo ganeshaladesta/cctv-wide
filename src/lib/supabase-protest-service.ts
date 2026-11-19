@@ -5,6 +5,7 @@
 
 import { getSupabaseAdminClient, isSupabaseConfigured } from "./supabase";
 import { normalizeTimeString } from "./time-normalization";
+import { geocodingService } from "./geocoding/geocoding-service";
 import {
   ProtestEvent,
   ProtestFilterParams,
@@ -21,6 +22,7 @@ export { isSupabaseConfigured };
  * Format database row into typed ProtestEvent
  */
 function mapRowToProtest(row: any): ProtestEvent {
+  const hasCoords = Boolean(row.has_coordinates || (row.validated_lat !== null && row.validated_lng !== null));
   return {
     id: row.id,
     id_kejadian: row.id_kejadian,
@@ -46,7 +48,7 @@ function mapRowToProtest(row: any): ProtestEvent {
     category_name: row.category_name,
     validated_lat: row.validated_lat !== null && row.validated_lat !== undefined ? Number(row.validated_lat) : null,
     validated_lng: row.validated_lng !== null && row.validated_lng !== undefined ? Number(row.validated_lng) : null,
-    has_coordinates: Boolean(row.has_coordinates || (row.validated_lat !== null && row.validated_lng !== null)),
+    has_coordinates: hasCoords,
     actual_crowd_size: row.actual_crowd_size,
     situation_summary: row.situation_summary,
     editorial_draft: row.editorial_draft,
@@ -55,6 +57,19 @@ function mapRowToProtest(row: any): ProtestEvent {
     completed_at: row.completed_at ? new Date(row.completed_at).toISOString() : null,
     completed_by_id: row.completed_by_id,
     completed_by_name: row.completed_by_name,
+
+    // Geocoding intelligence attributes
+    suggested_lat: row.suggested_lat !== null && row.suggested_lat !== undefined ? Number(row.suggested_lat) : null,
+    suggested_lng: row.suggested_lng !== null && row.suggested_lng !== undefined ? Number(row.suggested_lng) : null,
+    suggested_address: row.suggested_address || null,
+    geocoding_provider: row.geocoding_provider || null,
+    geocoding_confidence: row.geocoding_confidence || null,
+    location_validation_status: row.location_validation_status || (hasCoords ? "verified" : "unmapped"),
+    geocoding_alternatives: Array.isArray(row.geocoding_alternatives) ? row.geocoding_alternatives : [],
+    validated_at: row.validated_at ? new Date(row.validated_at).toISOString() : null,
+    validated_by_id: row.validated_by_id || null,
+    validated_by_name: row.validated_by_name || null,
+
     created_at: row.created_at ? new Date(row.created_at).toISOString() : new Date().toISOString(),
     updated_at: row.updated_at ? new Date(row.updated_at).toISOString() : new Date().toISOString(),
     deleted_at: row.deleted_at ? new Date(row.deleted_at).toISOString() : null,
@@ -114,6 +129,16 @@ export async function queryProtestsFromSupabase(filters: ProtestFilterParams = {
     } else {
       query = query.or("validated_lat.is.null,validated_lng.is.null");
     }
+  }
+
+  // Location Validation Status Filter
+  if (filters.location_validation_status && filters.location_validation_status !== "all") {
+    query = query.eq("location_validation_status", filters.location_validation_status);
+  }
+
+  // Geocoding Confidence Filter
+  if (filters.geocoding_confidence && filters.geocoding_confidence !== "all") {
+    query = query.eq("geocoding_confidence", filters.geocoding_confidence);
   }
 
   // Province & City Filter
@@ -212,6 +237,14 @@ export async function createProtestInSupabase(
     category_id: payload.category_id || null,
     validated_lat: payload.validated_lat !== undefined && payload.validated_lat !== null ? Number(payload.validated_lat) : null,
     validated_lng: payload.validated_lng !== undefined && payload.validated_lng !== null ? Number(payload.validated_lng) : null,
+    location_validation_status: payload.location_validation_status || (payload.validated_lat && payload.validated_lng ? "verified" : (payload.suggested_lat ? "pending_validation" : "unmapped")),
+    suggested_lat: payload.suggested_lat ? Number(payload.suggested_lat) : null,
+    suggested_lng: payload.suggested_lng ? Number(payload.suggested_lng) : null,
+    suggested_address: payload.suggested_address || null,
+    geocoding_provider: payload.geocoding_provider || null,
+    geocoding_confidence: payload.geocoding_confidence || null,
+    geocoding_alternatives: payload.geocoding_alternatives || [],
+    validated_at: payload.validated_lat && payload.validated_lng ? new Date().toISOString() : null,
     actual_crowd_size: payload.actual_crowd_size || null,
     situation_summary: payload.situation_summary || null,
     editorial_draft: payload.editorial_draft || null,
@@ -257,8 +290,33 @@ export async function updateProtestInSupabase(
   if (updates.situation_summary !== undefined) patch.situation_summary = updates.situation_summary;
   if (updates.editorial_draft !== undefined) patch.editorial_draft = updates.editorial_draft;
   if (updates.editorial_final !== undefined) patch.editorial_final = updates.editorial_final;
-  if (updates.validated_lat !== undefined) patch.validated_lat = updates.validated_lat;
-  if (updates.validated_lng !== undefined) patch.validated_lng = updates.validated_lng;
+  if (updates.validated_lat !== undefined) {
+    patch.validated_lat = updates.validated_lat;
+    if (updates.validated_lat !== null) {
+      patch.location_validation_status = "verified";
+      patch.validated_at = new Date().toISOString();
+    } else {
+      patch.location_validation_status = "unmapped";
+    }
+  }
+  if (updates.validated_lng !== undefined) {
+    patch.validated_lng = updates.validated_lng;
+    if (updates.validated_lng !== null && patch.location_validation_status !== "unmapped") {
+      patch.location_validation_status = "verified";
+      patch.validated_at = new Date().toISOString();
+    }
+  }
+  if (updates.location_validation_status !== undefined) {
+    patch.location_validation_status = updates.location_validation_status;
+  }
+  if (updates.suggested_lat !== undefined) patch.suggested_lat = updates.suggested_lat;
+  if (updates.suggested_lng !== undefined) patch.suggested_lng = updates.suggested_lng;
+  if (updates.suggested_address !== undefined) patch.suggested_address = updates.suggested_address;
+  if (updates.geocoding_provider !== undefined) patch.geocoding_provider = updates.geocoding_provider;
+  if (updates.geocoding_confidence !== undefined) patch.geocoding_confidence = updates.geocoding_confidence;
+  if (updates.geocoding_alternatives !== undefined) patch.geocoding_alternatives = updates.geocoding_alternatives;
+  if (updates.validated_by_id !== undefined) patch.validated_by_id = updates.validated_by_id;
+  if (updates.validated_by_name !== undefined) patch.validated_by_name = updates.validated_by_name;
   if (updates.is_archived !== undefined) patch.is_archived = updates.is_archived;
   if (updates.lokasi !== undefined) patch.lokasi = updates.lokasi;
   if (updates.isu_tuntutan !== undefined) patch.isu_tuntutan = updates.isu_tuntutan;
@@ -567,6 +625,8 @@ export async function fetchStatsFromSupabase(): Promise<ProtestStats> {
     cancRes,
     highCritRes,
     noCoordsRes,
+    pendingValRes,
+    verifiedLocRes,
     lastSyncRes
   ] = await Promise.all([
     supabase.from("protests").select("*", { count: "exact", head: true }).is("deleted_at", null),
@@ -577,6 +637,8 @@ export async function fetchStatsFromSupabase(): Promise<ProtestStats> {
     supabase.from("protests").select("*", { count: "exact", head: true }).is("deleted_at", null).eq("status", "cancelled"),
     supabase.from("protests").select("*", { count: "exact", head: true }).is("deleted_at", null).in("urgency", ["high", "critical"]),
     supabase.from("protests").select("*", { count: "exact", head: true }).is("deleted_at", null).or("validated_lat.is.null,validated_lng.is.null"),
+    supabase.from("protests").select("*", { count: "exact", head: true }).is("deleted_at", null).eq("location_validation_status", "pending_validation"),
+    supabase.from("protests").select("*", { count: "exact", head: true }).is("deleted_at", null).eq("location_validation_status", "verified"),
     supabase.from("protest_sync_logs").select("completed_at").eq("status", "success").order("completed_at", { ascending: false }).limit(1).maybeSingle()
   ]);
 
@@ -603,6 +665,8 @@ export async function fetchStatsFromSupabase(): Promise<ProtestStats> {
     cancelled_events: cancRes.count || 0,
     high_critical_urgency: highCritRes.count || 0,
     events_without_coords: noCoordsRes.count || 0,
+    pending_validation_count: pendingValRes.count || 0,
+    verified_locations_count: verifiedLocRes.count || 0,
     today_events: todayCount || 0,
     completed_today: completedTodayCount || 0,
     total_camera_links: 0,
@@ -788,11 +852,28 @@ export async function upsertExcelBatchInSupabase(
           updated_at: now
         };
 
-        // If coordinates not validated by operator yet, apply Excel coords if present
+        // Check if coordinates need geocoding suggestion
         if (existing.validated_lat === null && existing.validated_lng === null) {
-          if (rec.validated_lat !== undefined && rec.validated_lng !== undefined) {
+          if (rec.validated_lat !== undefined && rec.validated_lng !== undefined && rec.validated_lat !== null) {
             updatePayload.validated_lat = rec.validated_lat;
             updatePayload.validated_lng = rec.validated_lng;
+            updatePayload.location_validation_status = "verified";
+          } else {
+            // Auto-geocode suggestion if not yet present
+            try {
+              const autoGeo = await geocodingService.geocodeProtestEvent(rec);
+              if (autoGeo.suggested_lat && autoGeo.suggested_lng) {
+                updatePayload.suggested_lat = autoGeo.suggested_lat;
+                updatePayload.suggested_lng = autoGeo.suggested_lng;
+                updatePayload.suggested_address = autoGeo.suggested_address;
+                updatePayload.geocoding_provider = autoGeo.geocoding_provider;
+                updatePayload.geocoding_confidence = autoGeo.geocoding_confidence;
+                updatePayload.geocoding_alternatives = autoGeo.geocoding_alternatives;
+                updatePayload.location_validation_status = autoGeo.location_validation_status;
+              }
+            } catch (geoErr) {
+              console.warn(`[AutoGeocode skip on update ${rec.id_kejadian}]:`, geoErr);
+            }
           }
         }
 
@@ -809,7 +890,18 @@ export async function upsertExcelBatchInSupabase(
           updated++;
         }
       } else {
+        // Auto-geocode suggestion for new row if coordinates are missing
+        let geoSuggestion: any = null;
+        if (!rec.validated_lat || !rec.validated_lng) {
+          try {
+            geoSuggestion = await geocodingService.geocodeProtestEvent(rec);
+          } catch (geoErr) {
+            console.warn(`[AutoGeocode skip on insert ${rec.id_kejadian}]:`, geoErr);
+          }
+        }
+
         // INSERT NEW ROW
+        const hasDirectCoords = rec.validated_lat !== undefined && rec.validated_lat !== null && rec.validated_lng !== undefined && rec.validated_lng !== null;
         const insertPayload = {
           id_kejadian: rec.id_kejadian,
           kode_unras: rec.kode_unras,
@@ -831,8 +923,17 @@ export async function upsertExcelBatchInSupabase(
           status: "scheduled",
           urgency: "medium",
           source_type: "excel_sync",
-          validated_lat: rec.validated_lat ?? null,
-          validated_lng: rec.validated_lng ?? null,
+          validated_lat: hasDirectCoords ? rec.validated_lat : null,
+          validated_lng: hasDirectCoords ? rec.validated_lng : null,
+          location_validation_status: hasDirectCoords
+            ? "verified"
+            : (geoSuggestion?.suggested_lat ? geoSuggestion.location_validation_status : "unmapped"),
+          suggested_lat: geoSuggestion?.suggested_lat || null,
+          suggested_lng: geoSuggestion?.suggested_lng || null,
+          suggested_address: geoSuggestion?.suggested_address || null,
+          geocoding_provider: geoSuggestion?.geocoding_provider || null,
+          geocoding_confidence: geoSuggestion?.geocoding_confidence || null,
+          geocoding_alternatives: geoSuggestion?.geocoding_alternatives || [],
           raw_source_payload: rec.raw_source_payload || {},
           last_synced_at: now,
           created_at: now,

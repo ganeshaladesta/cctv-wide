@@ -24,6 +24,8 @@ export async function GET(request: NextRequest) {
       date_from: searchParams.get('date_from') || undefined,
       date_to: searchParams.get('date_to') || undefined,
       has_coords: searchParams.get('has_coords') !== null ? searchParams.get('has_coords') === 'true' : undefined,
+      location_validation_status: (searchParams.get('location_validation_status') as any) || undefined,
+      geocoding_confidence: (searchParams.get('geocoding_confidence') as any) || undefined,
       is_archived: searchParams.get('is_archived') !== null ? searchParams.get('is_archived') === 'true' : undefined,
       page: searchParams.get('page') ? parseInt(searchParams.get('page')!, 10) : 1,
       limit: searchParams.get('limit') ? parseInt(searchParams.get('limit')!, 10) : 20,

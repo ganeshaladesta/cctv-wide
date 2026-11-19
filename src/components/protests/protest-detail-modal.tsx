@@ -588,22 +588,52 @@ export function ProtestDetailModal({
                         )}
                       </div>
 
-                      {isPickerOpen ? (
-                        <div className="pt-1">
-                          <ProtestLocationPicker
-                            initialLat={latInput ? parseFloat(latInput) : (eventData?.validated_lat ?? null)}
-                            initialLng={lngInput ? parseFloat(lngInput) : (eventData?.validated_lng ?? null)}
-                            initialLocationName={eventData?.lokasi}
-                            compact={true}
-                            onSelectLocation={(pickedLat, pickedLng) => {
-                              setLatInput(pickedLat !== null ? String(pickedLat) : "");
-                              setLngInput(pickedLng !== null ? String(pickedLng) : "");
-                              setIsPickerOpen(false);
-                            }}
-                            onClose={() => setIsPickerOpen(false)}
-                          />
+                      {/* Suggested Location Review Banner */}
+                      {eventData?.suggested_lat && eventData?.suggested_lng && !latInput && (
+                        <div className="p-3 bg-blue-500/10 border border-blue-500/30 rounded-xl space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] font-bold text-blue-400 flex items-center gap-1.5 uppercase">
+                              <MapPin className="w-3.5 h-3.5" />
+                              Saran Titik Geospasial Otomatis
+                            </span>
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                              eventData.geocoding_confidence === "high"
+                                ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                                : "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                            }`}>
+                              Akurasi: {eventData.geocoding_confidence === "high" ? "Tinggi (100% POI)" : "Sedang"}
+                            </span>
+                          </div>
+                          <p className="text-xs text-white font-medium">
+                            {eventData.suggested_address || eventData.lokasi}
+                          </p>
+                          <p className="text-[10px] text-[#98A4B8] font-mono">
+                            Koordinat: {eventData.suggested_lat}, {eventData.suggested_lng} (Provider: {eventData.geocoding_provider || "gazetteer"})
+                          </p>
+                          <div className="flex items-center gap-2 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setLatInput(String(eventData.suggested_lat));
+                                setLngInput(String(eventData.suggested_lng));
+                              }}
+                              className="px-3 py-1 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition-colors flex items-center gap-1 shadow-sm"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>Setujui Saran Titik</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setIsPickerOpen(true)}
+                              className="px-3 py-1 rounded-lg text-xs font-semibold bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 transition-colors"
+                            >
+                              Tinjau di Peta
+                            </button>
+                          </div>
                         </div>
-                      ) : latInput && lngInput ? (
+                      )}
+
+                      {latInput && lngInput ? (
                         <div className="p-3 bg-[#141A28] border border-emerald-500/30 rounded-xl flex items-center justify-between gap-3">
                           <div className="min-w-0">
                             <div className="flex items-center gap-1.5 text-emerald-400 text-xs font-semibold">
@@ -621,7 +651,7 @@ export function ProtestDetailModal({
                             <button
                               type="button"
                               onClick={() => setIsPickerOpen(true)}
-                              className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 transition-colors cursor-pointer"
+                              className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 transition-colors cursor-pointer"
                             >
                               Ubah di Peta
                             </button>
@@ -631,31 +661,31 @@ export function ProtestDetailModal({
                                 setLatInput("");
                                 setLngInput("");
                               }}
-                              className="p-1 rounded-lg text-[#98A4B8] hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer"
+                              className="p-1.5 rounded-lg text-[#98A4B8] hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer"
                               title="Hapus koordinat"
                             >
                               <X className="w-4 h-4" />
                             </button>
                           </div>
                         </div>
-                      ) : (
-                        <div className="p-3 bg-[#141A28] border border-dashed border-[var(--border-default)] rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                      ) : !eventData?.suggested_lat ? (
+                        <div className="p-3.5 bg-[#141A28] border border-dashed border-[var(--border-default)] rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                           <div className="text-xs text-[#98A4B8]">
                             <p className="text-white font-medium">Titik Geospasial Belum Tervalidasi</p>
-                            <p className="text-[11px] text-[#64748B]">
+                            <p className="text-[11px] text-[#64748B] mt-0.5">
                               Aksi ini belum muncul di layer peta. Tentukan titik melalui pencarian atau klik di peta.
                             </p>
                           </div>
                           <button
                             type="button"
                             onClick={() => setIsPickerOpen(true)}
-                            className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-500/20 transition-all flex items-center gap-1.5 shrink-0 cursor-pointer"
+                            className="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-500/20 transition-all flex items-center gap-1.5 shrink-0 cursor-pointer"
                           >
                             <MapPin className="w-3.5 h-3.5" />
                             <span>Pilih di Peta Interaktif</span>
                           </button>
                         </div>
-                      )}
+                      ) : null}
                     </div>
 
                     <div className="flex justify-end pt-1">
@@ -1064,6 +1094,32 @@ export function ProtestDetailModal({
         </div>
       </div>
     </div>
+
+    {/* Expanded Interactive Map Picker Overlay (75-80% Screen Width) */}
+    {isPickerOpen && (
+      <div className="fixed inset-0 z-[100000] bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
+        <div className="relative w-full max-w-4xl lg:max-w-5xl my-auto">
+          <ProtestLocationPicker
+            initialLat={latInput ? parseFloat(latInput) : (eventData?.validated_lat ?? null)}
+            initialLng={lngInput ? parseFloat(lngInput) : (eventData?.validated_lng ?? null)}
+            initialLocationName={eventData?.lokasi}
+            city={eventData?.kota_kabupaten || undefined}
+            province={eventData?.provinsi || undefined}
+            suggestedLat={eventData?.suggested_lat}
+            suggestedLng={eventData?.suggested_lng}
+            suggestedAddress={eventData?.suggested_address}
+            suggestedConfidence={eventData?.geocoding_confidence}
+            compact={false}
+            onSelectLocation={(pickedLat, pickedLng, label) => {
+              setLatInput(pickedLat !== null ? String(pickedLat) : "");
+              setLngInput(pickedLng !== null ? String(pickedLng) : "");
+              setIsPickerOpen(false);
+            }}
+            onClose={() => setIsPickerOpen(false)}
+          />
+        </div>
+      </div>
+    )}
   </div>
   );
 
