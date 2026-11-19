@@ -1522,6 +1522,7 @@ class ProtestDataStore {
         return {
           processed: res.inserted + res.updated + res.skipped + (res.failed || 0),
           created: res.inserted,
+          error: res.error,
           ...res
         };
       } catch (err) {

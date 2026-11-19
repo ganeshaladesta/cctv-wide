@@ -413,6 +413,9 @@ export async function processSameDaySync(
       inserted = upsertStats.created;
       updated = upsertStats.updated;
       failed += (validBatchForStore.length - (inserted + updated));
+      if ((upsertStats as any).error) {
+        errors.push(`[Supabase Database Error]: ${(upsertStats as any).error}`);
+      }
     }
 
     const durationMs = Date.now() - startTime;

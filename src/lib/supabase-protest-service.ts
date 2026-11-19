@@ -715,7 +715,7 @@ export async function upsertExcelBatchInSupabase(
     category_id?: string | null;
     raw_source_payload?: Record<string, unknown>;
   }>
-): Promise<{ inserted: number; updated: number; skipped: number; failed: number }> {
+): Promise<{ inserted: number; updated: number; skipped: number; failed: number; error?: string | null }> {
   const supabase = getSupabaseAdminClient();
   if (!supabase) throw new Error("Supabase is not configured.");
 
@@ -723,6 +723,7 @@ export async function upsertExcelBatchInSupabase(
   let updated = 0;
   let skipped = 0;
   let failed = 0;
+  let lastError: string | null = null;
   const now = new Date().toISOString();
 
   for (const rec of records) {
@@ -740,6 +741,8 @@ export async function upsertExcelBatchInSupabase(
         .maybeSingle();
 
       if (findErr) {
+        lastError = findErr.message || JSON.stringify(findErr);
+        console.error("[Supabase upsert findErr]", findErr);
         failed++;
         continue;
       }
@@ -781,6 +784,8 @@ export async function upsertExcelBatchInSupabase(
           .eq("id", existing.id);
 
         if (updErr) {
+          lastError = updErr.message || JSON.stringify(updErr);
+          console.error("[Supabase upsert updErr]", updErr);
           failed++;
         } else {
           updated++;
@@ -818,16 +823,20 @@ export async function upsertExcelBatchInSupabase(
 
         const { error: insErr } = await supabase.from("protests").insert(insertPayload);
         if (insErr) {
+          lastError = insErr.message || JSON.stringify(insErr);
+          console.error("[Supabase upsert insErr]", insErr);
           failed++;
         } else {
           inserted++;
         }
       }
-    } catch {
+    } catch (err: any) {
+      lastError = err?.message || String(err);
+      console.error("[Supabase upsert catch]", err);
       failed++;
     }
   }
 
-  return { inserted, updated, skipped, failed };
+  return { inserted, updated, skipped, failed, error: lastError };
 }
 
