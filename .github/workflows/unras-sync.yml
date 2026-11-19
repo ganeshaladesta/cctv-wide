@@ -42,3 +42,4 @@ jobs:
           else
             node scripts/sync-local-excel.mjs
           fi
+
