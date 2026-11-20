@@ -1012,32 +1012,58 @@ export function ProtestDetailModal({
                       </div>
                     ) : (
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-64 overflow-y-auto pr-1">
-                        {nearbyCameras.map((cam) => {
-                          const isAlreadyLinked = cameraLinks.some((l) => l.camera_id === cam.id);
+                        {nearbyCameras.map((item, idx) => {
+                          const cam = item.camera || item;
+                          const camId = cam.id || item.id;
+                          const camName = cam.name || item.name || "Kamera CCTV";
+                          const camSource = cam.source_name || item.source_name || cam.city_name || item.city_name || "CCTV Publik";
+                          const camDist = item.distance_meters ?? cam.distance_meters ?? 0;
+                          const camStatus = cam.status || item.status || "ONLINE";
+                          const isAlreadyLinked = cameraLinks.some((l) => l.camera_id === camId);
+
                           return (
                             <div
-                              key={cam.id}
+                              key={camId || `cam-rec-${idx}`}
                               className="p-3 bg-[#111622] border border-[var(--border-subtle)] rounded-xl flex items-center justify-between gap-3 text-xs"
                             >
                               <div className="min-w-0 flex-1">
-                                <span className="text-white font-semibold truncate block">{cam.name}</span>
-                                <div className="flex items-center gap-2 text-[11px] text-[#98A4B8] mt-0.5">
-                                  <span>Jarak: <strong className="text-emerald-400">{cam.distance_meters}m</strong></span>
+                                <div className="flex items-center gap-1.5">
+                                  <Video className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                                  <span className="text-white font-semibold truncate block" title={camName}>
+                                    {camName}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-2 text-[11px] text-[#98A4B8] mt-1">
+                                  <span>Jarak: <strong className="text-emerald-400 font-mono">{camDist}m</strong></span>
                                   <span>•</span>
-                                  <span>{cam.source_name || cam.city_name}</span>
+                                  <span className="truncate max-w-[130px]">{camSource}</span>
+                                  <span>•</span>
+                                  <span className={camStatus === "ONLINE" || camStatus === 1 ? "text-emerald-400 text-[10px]" : "text-red-400 text-[10px]"}>
+                                    {camStatus === "ONLINE" || camStatus === 1 ? "ONLINE" : "OFFLINE"}
+                                  </span>
                                 </div>
                               </div>
 
                               <div className="flex items-center gap-1.5 shrink-0">
+                                {cam && onSelectCameraToPlay && (
+                                  <button
+                                    type="button"
+                                    onClick={() => onSelectCameraToPlay(cam)}
+                                    className="px-2 py-1 rounded-lg text-[11px] font-semibold bg-blue-600/20 text-blue-400 border border-blue-500/30 hover:bg-blue-600/30 transition-colors"
+                                    title="Preview Live Stream"
+                                  >
+                                    Putar
+                                  </button>
+                                )}
                                 {isAlreadyLinked ? (
-                                  <span className="text-[10px] text-emerald-400 font-semibold px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30">
+                                  <span className="text-[10px] text-emerald-400 font-semibold px-2 py-1 rounded bg-emerald-500/10 border border-emerald-500/30">
                                     Tertaut
                                   </span>
                                 ) : (
                                   <button
                                     type="button"
-                                    onClick={() => handleLinkCamera(cam.id)}
-                                    className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition-colors flex items-center gap-1"
+                                    onClick={() => handleLinkCamera(camId)}
+                                    className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition-colors flex items-center gap-1 cursor-pointer"
                                   >
                                     <LinkIcon className="w-3 h-3" /> Tautkan
                                   </button>

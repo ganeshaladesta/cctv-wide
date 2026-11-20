@@ -1651,10 +1651,10 @@ class ProtestDataStore {
     lng: number,
     radiusMeters = 5000,
     limit = 10
-  ): Array<{ camera: Camera; distance_meters: number }> {
+  ): Array<any> {
     const cctvStore = getDataStore();
     const allCameras = cctvStore.getAllCameras();
-    const matches: Array<{ camera: Camera; distance_meters: number }> = [];
+    const matches: Array<any> = [];
 
     // Pre-filter bounding box (~0.05 degrees ~ 5.5km)
     const latDelta = radiusMeters / 111000;
@@ -1667,7 +1667,21 @@ class ProtestDataStore {
       ) {
         const d = calculateDistanceMeters(lat, lng, cam.latitude, cam.longitude);
         if (d <= radiusMeters) {
-          matches.push({ camera: cam, distance_meters: d });
+          matches.push({
+            id: cam.id,
+            name: cam.name,
+            location: cam.location,
+            latitude: cam.latitude,
+            longitude: cam.longitude,
+            city_id: cam.city_id,
+            city_name: cam.city_name,
+            source_id: cam.source_id,
+            source_name: cam.source_name,
+            stream_url: cam.stream_url,
+            status: cam.status,
+            distance_meters: Math.round(d),
+            camera: cam
+          });
         }
       }
     }
