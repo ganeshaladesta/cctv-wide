@@ -190,23 +190,63 @@ export interface ProtestCameraLink {
 export interface ExcelProtestRow {
   'ID KEJADIAN'?: string;
   'KODE_UNRAS'?: string;
-  'TANGGAL': string;
+  'ID UNRAS'?: string;
+  'TANGGAL'?: string;
   'WAKTU'?: string;
   'WAKTU DAN TGL KEJADIAN ISO'?: string;
-  'LOKASI': string;
+  'LOKASI'?: string;
   'TITIK KUMPUL'?: string;
   'SASARAN'?: string;
-  'ISU': string;
+  'ISU'?: string;
   'JUMLAH MASSA'?: string | number;
   'ORGANISASI'?: string;
   'KORLAP'?: string;
   'WILAYAH HUKUM'?: string;
+  'KP/KPw'?: string;
   'PROVINSI'?: string;
   'KOTA/KABUPATEN'?: string;
   'LATITUDE'?: number;
   'LONGITUDE'?: number;
   'STATUS'?: string;
   'KETERANGAN'?: string;
+
+  // Flexible snake_case aliases (Power Automate & JSON integrations)
+  id_kejadian?: string;
+  kode_unras?: string;
+  id_unras?: string;
+  tanggal_kejadian?: string;
+  tanggal?: string;
+  waktu?: string;
+  waktu_mulai?: string;
+  lokasi?: string;
+  titik_kumpul?: string;
+  sasaran?: string;
+  sasaran_aksi?: string;
+  isu?: string;
+  tuntutan?: string;
+  isu_tuntutan?: string;
+  jumlah_massa?: string | number;
+  estimasi_massa?: string | number;
+  organisasi?: string;
+  aliansi?: string;
+  organisasi_kelompok?: string;
+  korlap?: string;
+  korlap_pimpinan?: string;
+  kp?: string;
+  kp_kpw?: string;
+  wilayah_hukum?: string;
+  regional?: string;
+  provinsi?: string;
+  kota?: string;
+  kota_kabupaten?: string;
+  kategori_isu?: string;
+  dampak?: string;
+  ringkasan_situasi?: string;
+  keterangan?: string;
+  latitude?: number;
+  longitude?: number;
+  status?: string;
+  [key: string]: any;
 }
 
 /**
@@ -239,10 +279,10 @@ export interface ProtestSyncLog {
 export type ProtestSyncType = "same_day" | "same_day_h0" | "rolling_7d";
 
 export interface ProtestSyncPayload {
-  sync_type: ProtestSyncType;
-  timezone: "Asia/Jakarta";
-  period_start: string; // ISO 8601 string (00:00:00 WIB today)
-  period_end: string; // ISO 8601 string (00:00:00 WIB tomorrow)
+  sync_type?: ProtestSyncType;
+  timezone?: "Asia/Jakarta";
+  period_start?: string; // ISO 8601 string (00:00:00 WIB today)
+  period_end?: string; // ISO 8601 string (00:00:00 WIB tomorrow)
   events: ExcelProtestRow[];
 }
 

@@ -2004,6 +2004,9 @@ class ProtestDataStore {
               kota_kabupaten = ?,
               keterangan_source = ?,
               raw_source_payload = ?,
+              regional = COALESCE(?, regional),
+              kategori_isu = COALESCE(?, kategori_isu),
+              dampak = COALESCE(?, dampak),
               last_synced_at = ?,
               updated_at = ?
             WHERE id = ?
@@ -2025,6 +2028,9 @@ class ProtestDataStore {
             rec.kota_kabupaten ?? existing.kota_kabupaten,
             rec.keterangan_source ?? existing.keterangan_source,
             JSON.stringify(rec.raw_source_payload || {}),
+            (rec as any).regional ?? null,
+            (rec as any).kategori_isu ?? null,
+            (rec as any).dampak ?? null,
             now,
             now,
             existing.id
@@ -2104,7 +2110,8 @@ class ProtestDataStore {
               keterangan_source, raw_source_payload, status, urgency, category_id,
               validated_lat, validated_lng, has_coordinates, actual_crowd_size, situation_summary,
               editorial_draft, editorial_final, is_archived, completed_at, completed_by_id,
-              completed_by_name, created_at, updated_at, deleted_at, last_synced_at
+              completed_by_name, created_at, updated_at, deleted_at, last_synced_at,
+              regional, kategori_isu, dampak
             ) VALUES (
               ?, ?, ?, ?, ?, ?, ?,
               ?, ?, ?, ?, ?,
@@ -2112,7 +2119,8 @@ class ProtestDataStore {
               ?, ?, ?, ?, ?,
               ?, ?, ?, ?, ?,
               ?, ?, ?, ?, ?,
-              ?, ?, ?, ?, ?
+              ?, ?, ?, ?, ?,
+              ?, ?, ?
             )
           `).run(
             newEvent.id,
@@ -2151,7 +2159,10 @@ class ProtestDataStore {
             newEvent.created_at,
             newEvent.updated_at,
             newEvent.deleted_at,
-            newEvent.last_synced_at
+            newEvent.last_synced_at,
+            (rec as any).regional ?? null,
+            (rec as any).kategori_isu ?? null,
+            (rec as any).dampak ?? null
           );
         } else {
           this.memoryEvents.set(newEvent.id, newEvent);

@@ -950,6 +950,10 @@ export async function upsertExcelBatchInSupabase(
           updated_at: now
         };
 
+        if ((rec as any).regional) updatePayload.regional = (rec as any).regional;
+        if ((rec as any).kategori_isu) updatePayload.kategori_isu = (rec as any).kategori_isu;
+        if ((rec as any).dampak) updatePayload.dampak = (rec as any).dampak;
+
         // Check if coordinates need geocoding suggestion
         if (existing.validated_lat === null && existing.validated_lng === null) {
           if (rec.validated_lat !== undefined && rec.validated_lng !== undefined && rec.validated_lat !== null) {
@@ -1037,6 +1041,10 @@ export async function upsertExcelBatchInSupabase(
           created_at: now,
           updated_at: now
         };
+
+        if ((rec as any).regional) (insertPayload as any).regional = (rec as any).regional;
+        if ((rec as any).kategori_isu) (insertPayload as any).kategori_isu = (rec as any).kategori_isu;
+        if ((rec as any).dampak) (insertPayload as any).dampak = (rec as any).dampak;
 
         const { error: insErr } = await supabase.from("protests").insert(insertPayload);
         if (insErr) {

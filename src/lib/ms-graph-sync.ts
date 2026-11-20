@@ -496,7 +496,8 @@ export class MsGraphSyncService {
 
       // Map rows into data store batch structure
       const mappedRecords = rows.map((r, index) => {
-        const idKejadian = r['ID KEJADIAN'] || r['KODE_UNRAS'] || `UNR-${r.TANGGAL.replace(/[\/\-]/g, '')}-${String(index + 1).padStart(3, '0')}`;
+        const rawTanggal = r.TANGGAL ? String(r.TANGGAL).trim() : new Date().toISOString().split('T')[0];
+        const idKejadian = r['ID KEJADIAN'] || r['KODE_UNRAS'] || `UNR-${rawTanggal.replace(/[\/\-]/g, '')}-${String(index + 1).padStart(3, '0')}`;
         const kodeUnras = r['KODE_UNRAS'] || idKejadian;
         const crowd = typeof r['JUMLAH MASSA'] === 'number' ? r['JUMLAH MASSA'] : normalizeCrowdEstimate(r['JUMLAH MASSA']).count;
         const coords = validateIndonesianCoordinates(r.LATITUDE, r.LONGITUDE);
@@ -504,13 +505,13 @@ export class MsGraphSyncService {
         return {
           id_kejadian: idKejadian,
           kode_unras: kodeUnras,
-          tanggal: r.TANGGAL,
+          tanggal: rawTanggal,
           waktu_mulai: r.WAKTU || '09:00 WIB',
           waktu_selesai: null,
-          lokasi: r.LOKASI,
+          lokasi: r.LOKASI || 'Lokasi Belum Ditentukan',
           titik_kumpul: r['TITIK KUMPUL'] || null,
           sasaran_aksi: r.SASARAN || null,
-          isu_tuntutan: r.ISU,
+          isu_tuntutan: r.ISU || 'Aksi Unjuk Rasa',
           estimasi_massa_source: crowd || null,
           organisasi_kelompok: r.ORGANISASI || null,
           korlap_pimpinan: r.KORLAP || null,

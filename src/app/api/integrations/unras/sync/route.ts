@@ -62,8 +62,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(result, { status: 409 });
     }
 
-    const httpStatus = result.status === "failed" ? 500 : 200;
-    return NextResponse.json(result, { status: httpStatus });
+    // Normal synchronization outcome (success, partial, or validation skips) returns 200 with actionable structured JSON
+    return NextResponse.json(result, { status: 200 });
   } catch (error: any) {
     return NextResponse.json(
       {

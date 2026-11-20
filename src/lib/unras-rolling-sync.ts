@@ -87,24 +87,63 @@ export function calculateSameDayWindow(refDate: Date = new Date()): {
 export const calculateRolling7DayWindow = calculateSameDayWindow;
 
 /**
+ * Extracts a field value case-insensitively across provided candidate keys
+ */
+function getField(row: Record<string, any>, ...keys: string[]): any {
+  if (!row || typeof row !== "object") return undefined;
+  for (const k of keys) {
+    if (row[k] !== undefined && row[k] !== null && String(row[k]).trim() !== "") {
+      return row[k];
+    }
+  }
+  // Try case-insensitive lookup
+  const rowKeys = Object.keys(row);
+  for (const k of keys) {
+    const kLower = k.toLowerCase().replace(/[\s_-]/g, "");
+    const foundKey = rowKeys.find((rk) => rk.toLowerCase().replace(/[\s_-]/g, "") === kLower);
+    if (foundKey && row[foundKey] !== undefined && row[foundKey] !== null && String(row[foundKey]).trim() !== "") {
+      return row[foundKey];
+    }
+  }
+  return undefined;
+}
+
+/**
  * Extracts and strictly validates the event timestamp from:
- * 'WAKTU DAN TGL KEJADIAN ISO'
+ * 'WAKTU DAN TGL KEJADIAN ISO' or flexible event date fields
  *
  * Rules:
  * - Do NOT use file modification or record update timestamps.
+ * - Normalize timestamp without timezone offset to +07:00 (Asia/Jakarta).
  * - Do NOT infer from unrelated columns if the timestamp is missing.
  */
 export function parseSourceEventDatetime(
   rawISO: any,
   fallbackTanggal?: any
 ): { iso: string | null; epochMs: number | null; error?: string } {
-  // Primary: Check 'WAKTU DAN TGL KEJADIAN ISO'
+  // Primary: Check 'WAKTU DAN TGL KEJADIAN ISO' / ISO string
   const val = rawISO !== undefined && rawISO !== null && String(rawISO).trim() !== ""
     ? String(rawISO).trim()
     : null;
 
   if (val) {
-    const parsed = Date.parse(val);
+    if (val.includes("--")) {
+      return {
+        iso: null,
+        epochMs: null,
+        error: `Format timestamp ISO tidak valid (mengandung double dash): '${val}'`
+      };
+    }
+
+    let normalizedIso = val;
+    // If format is like "2026-11-20T00:00:00" without timezone offset, append +07:00 (Asia/Jakarta)
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(val)) {
+      normalizedIso = `${val}+07:00`;
+    } else if (/^\d{4}-\d{2}-\d{2}$/.test(val)) {
+      normalizedIso = `${val}T09:00:00+07:00`;
+    }
+
+    const parsed = Date.parse(normalizedIso);
     if (!isNaN(parsed)) {
       return { iso: new Date(parsed).toISOString(), epochMs: parsed };
     }
@@ -115,12 +154,18 @@ export function parseSourceEventDatetime(
     };
   }
 
-  // Fallback: Check if TANGGAL is a clean ISO string (e.g., YYYY-MM-DD)
+  // Fallback: Check if fallbackTanggal is a clean date string
   if (fallbackTanggal) {
-    const tStr = String(fallbackTanggal).trim();
+    if (String(fallbackTanggal).includes("--")) {
+      return {
+        iso: null,
+        epochMs: null,
+        error: `Format tanggal tidak valid (mengandung double dash): '${fallbackTanggal}'`
+      };
+    }
+    const tStr = String(fallbackTanggal).trim().slice(0, 10);
     if (/^\d{4}-\d{2}-\d{2}$/.test(tStr)) {
-      // Default to 00:00:00 WIB (+07:00)
-      const wibISO = `${tStr}T00:00:00+07:00`;
+      const wibISO = `${tStr}T09:00:00+07:00`;
       const parsed = Date.parse(wibISO);
       if (!isNaN(parsed)) {
         return { iso: new Date(parsed).toISOString(), epochMs: parsed };
@@ -131,7 +176,7 @@ export function parseSourceEventDatetime(
   return {
     iso: null,
     epochMs: null,
-    error: "Field 'WAKTU DAN TGL KEJADIAN ISO' kosong atau tidak dapat diuraikan"
+    error: "Field 'WAKTU DAN TGL KEJADIAN ISO' atau 'tanggal' kosong atau tidak dapat diuraikan"
   };
 }
 
@@ -169,39 +214,52 @@ export function validateRollingSyncRequest(payload: any): {
     return { valid: false, error: "Payload request tidak valid (bukan JSON object)." };
   }
 
+  // Gracefully default sync_type to "same_day" if omitted
+  const syncType = payload.sync_type || "same_day";
   const validSyncTypes = ["same_day", "same_day_h0", "rolling_7d"];
-  if (!validSyncTypes.includes(payload.sync_type)) {
+  if (!validSyncTypes.includes(syncType)) {
     return {
       valid: false,
       error: `sync_type '${payload.sync_type}' tidak didukung. Wajib 'same_day' atau 'same_day_h0'.`
     };
   }
 
-  if (payload.timezone !== "Asia/Jakarta") {
+  // Gracefully default timezone to "Asia/Jakarta" if omitted
+  const tz = payload.timezone || "Asia/Jakarta";
+  if (tz !== "Asia/Jakarta") {
     return {
       valid: false,
       error: `timezone '${payload.timezone}' tidak valid. Wajib 'Asia/Jakarta'.`
     };
   }
 
-  if (!payload.period_start || !payload.period_end) {
+  // Double-dash defect check
+  if (payload.period_start && String(payload.period_start).includes("--")) {
     return {
       valid: false,
-      error: "period_start dan period_end wajib disertakan dalam format ISO 8601."
+      error: "period_start atau period_end mengandung format tanggal cacat dengan double dash ('--')."
     };
   }
-
-  const pStartStr = String(payload.period_start).trim();
-  const pEndStr = String(payload.period_end).trim();
-
-  if (pStartStr.includes("--") || pEndStr.includes("--")) {
+  if (payload.period_end && String(payload.period_end).includes("--")) {
     return {
       valid: false,
       error: "period_start atau period_end mengandung format tanggal cacat dengan double dash ('--')."
     };
   }
 
-  // Strict ISO 8601 pattern check (e.g. 2026-11-18T17:00:00.000Z)
+  let pStartStr = payload.period_start ? String(payload.period_start).trim() : "";
+  let pEndStr = payload.period_end ? String(payload.period_end).trim() : "";
+
+  // Auto-populate default same-day window if missing
+  if (!pStartStr || !pEndStr) {
+    const defaultWindow = calculateSameDayWindow();
+    pStartStr = defaultWindow.period_start;
+    pEndStr = defaultWindow.period_end;
+    payload.period_start = pStartStr;
+    payload.period_end = pEndStr;
+  }
+
+  // Strict ISO 8601 pattern check (e.g. 2026-11-18T17:00:00.000Z or 2026-11-20T00:00:00+07:00)
   const isoPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:?\d{2})$/;
   if (!isoPattern.test(pStartStr) || !isoPattern.test(pEndStr)) {
     return {
@@ -240,6 +298,9 @@ export function validateRollingSyncRequest(payload: any): {
     };
   }
 
+  payload.sync_type = syncType;
+  payload.timezone = tz;
+
   return { valid: true, startMs, endMs };
 }
 
@@ -263,8 +324,8 @@ export async function processSameDaySync(
         success: false,
         status: "skipped",
         execution_id: executionId,
-        period_start: payload.period_start,
-        period_end: payload.period_end,
+        period_start: payload.period_start || "",
+        period_end: payload.period_end || "",
         summary: {
           received: payload.events?.length || 0,
           processed: 0,
@@ -360,61 +421,90 @@ export async function processSameDaySync(
   }> = [];
 
   try {
-    // 4. Validate Each Row in Batch
+    const periodDateWib = payload.period_start
+      ? new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta" }).format(new Date(startMs))
+      : new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta" }).format(new Date());
+
+    // 4. Validate and Normalize Each Row in Batch
     for (let i = 0; i < payload.events.length; i++) {
-      const row = payload.events[i];
+      const row = payload.events[i] as Record<string, any>;
       const rowIndex = i + 1;
 
-      // Rule: Primary identity ID KEJADIAN must be present
-      const idKejadian = row["ID KEJADIAN"] ? String(row["ID KEJADIAN"]).trim() : "";
-      if (!idKejadian) {
+      if (!row || typeof row !== "object") {
         skipped++;
-        errors.push(`[Baris ${rowIndex}] Dilewati: 'ID KEJADIAN' kosong atau tidak valid.`);
+        errors.push(`[Baris ${rowIndex}] Dilewati: Baris data bukan objek JSON yang valid.`);
         continue;
       }
 
-      // Rule: Event timestamp extraction from 'WAKTU DAN TGL KEJADIAN ISO'
-      const timeParsed = parseSourceEventDatetime(
-        row["WAKTU DAN TGL KEJADIAN ISO"],
-        row.TANGGAL
-      );
+      // 1. Resolve Identifiers (supports Excel Header format AND snake_case format)
+      const rawIdKejadian = getField(row, "ID KEJADIAN", "id_kejadian", "ID_KEJADIAN", "idKejadian");
+      const rawKodeUnras = getField(row, "ID UNRAS", "KODE_UNRAS", "id_unras", "kode_unras", "KODE UNRAS", "kodeUnras");
+
+      // Extract raw date for deterministic key derivation
+      const rawDate = getField(row, "TANGGAL", "tanggal", "tanggal_kejadian", "WAKTU DAN TGL KEJADIAN ISO", "event_date");
+      let dateStr = periodDateWib;
+      if (rawDate) {
+        const match = String(rawDate).match(/(\d{4})[-/](\d{2})[-/](\d{2})/);
+        if (match) {
+          dateStr = `${match[1]}-${match[2]}-${match[3]}`;
+        }
+      }
+      const cleanDateCompact = dateStr.replace(/-/g, "");
+
+      let idKejadian = "";
+      let kodeUnras = "";
+
+      if (rawIdKejadian && String(rawIdKejadian).trim() !== "") {
+        idKejadian = String(rawIdKejadian).trim();
+        kodeUnras = rawKodeUnras ? String(rawKodeUnras).trim() : idKejadian;
+      } else if (rawKodeUnras && String(rawKodeUnras).trim() !== "") {
+        // Safe deterministic identifier strategy when ID KEJADIAN is empty in Excel:
+        // KEJ-YYYYMMDD-{ID_UNRAS} (e.g. KEJ-20261120-U1473)
+        kodeUnras = String(rawKodeUnras).trim();
+        idKejadian = `KEJ-${cleanDateCompact}-${kodeUnras}`;
+      } else {
+        // Neither identifier is provided: Return validation error rather than silently creating duplicates
+        skipped++;
+        errors.push(`[Baris ${rowIndex}] Dilewati: 'ID KEJADIAN' dan 'ID UNRAS'/'KODE_UNRAS' keduanya kosong. Rekor tidak dapat diidentifikasi secara unik.`);
+        continue;
+      }
+
+      // 2. Event Timestamp Extraction & Boundary Check
+      const rawTimeISO = getField(row, "WAKTU DAN TGL KEJADIAN ISO", "tanggal_kejadian", "event_datetime");
+      const timeParsed = parseSourceEventDatetime(rawTimeISO, dateStr);
 
       if (!timeParsed.iso || timeParsed.epochMs === null) {
         skipped++;
-        errors.push(
-          `[ID: ${idKejadian}] Dilewati: ${timeParsed.error || "Timestamp kejadian tidak valid"}.`
-        );
+        errors.push(`[ID: ${idKejadian}] Dilewati: ${timeParsed.error || "Timestamp kejadian tidak valid"}.`);
         continue;
       }
 
-      // Rule: Same-Day (H-0) boundary check: event_datetime >= period_start && event_datetime < period_end
+      // Same-Day (H-0) boundary check: event_datetime >= period_start && event_datetime < period_end
       // Exact start boundary (00:00:00 WIB today) is INCLUDED; exact end boundary (00:00:00 WIB tomorrow) is EXCLUDED
       if (timeParsed.epochMs < startMs) {
         skipped++;
-        errors.push(
-          `[ID: ${idKejadian}] Dilewati: Waktu kejadian (${timeParsed.iso}) lebih lampau dari hari ini (kemarin/historis).`
-        );
+        errors.push(`[ID: ${idKejadian}] Dilewati: Waktu kejadian (${timeParsed.iso}) lebih lampau dari hari ini (kemarin/historis).`);
         continue;
       }
 
       if (timeParsed.epochMs >= endMs) {
         skipped++;
-        errors.push(
-          `[ID: ${idKejadian}] Dilewati: Waktu kejadian (${timeParsed.iso}) di luar atau di masa depan hari ini (besok atau lebih).`
-        );
+        errors.push(`[ID: ${idKejadian}] Dilewati: Waktu kejadian (${timeParsed.iso}) di luar atau di masa depan hari ini (besok atau lebih).`);
         continue;
       }
 
-      // Extract core fields
-      const kodeUnras = row["KODE_UNRAS"] ? String(row["KODE_UNRAS"]).trim() : idKejadian;
-      const lokasi = row.LOKASI ? String(row.LOKASI).trim() : "Lokasi Belum Ditentukan";
-      const isu = row.ISU ? String(row.ISU).trim() : "Aksi Unjuk Rasa";
-      const tanggal = row.TANGGAL ? String(row.TANGGAL).trim() : timeParsed.iso.split("T")[0];
+      // 3. Extract core fields with flexible field normalization
+      const lokasi = String(getField(row, "LOKASI", "lokasi") || "Lokasi Belum Ditentukan").trim();
+      const titikKumpul = getField(row, "TITIK KUMPUL", "titik_kumpul") ? String(getField(row, "TITIK KUMPUL", "titik_kumpul")).trim() : null;
+      const sasaranAksi = getField(row, "SASARAN", "sasaran", "sasaran_aksi") ? String(getField(row, "SASARAN", "sasaran", "sasaran_aksi")).trim() : null;
+      const isu = String(getField(row, "ISU", "tuntutan", "isu_tuntutan", "isu") || "Aksi Unjuk Rasa").trim();
+      const tanggal = dateStr;
 
       // Time normalization
+      const rawWaktu = getField(row, "WAKTU", "waktu", "waktu_mulai");
       let waktuNormalized: string | null = null;
-      if (row.WAKTU !== undefined && row.WAKTU !== null && String(row.WAKTU).trim() !== "") {
-        const norm = normalizeTimeString(row.WAKTU);
+      if (rawWaktu) {
+        const norm = normalizeTimeString(rawWaktu);
         if (norm.error) {
           skipped++;
           errors.push(`[ID: ${idKejadian}] Field 'WAKTU' tidak valid: ${norm.error}`);
@@ -422,33 +512,56 @@ export async function processSameDaySync(
         }
         waktuNormalized = norm.time;
       } else if (timeParsed.iso) {
-        waktuNormalized = timeParsed.iso.split("T")[1].slice(0, 8);
+        const wibTime = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(new Date(timeParsed.epochMs));
+        waktuNormalized = wibTime !== "00:00:00" ? wibTime : "09:00:00";
+      } else {
+        waktuNormalized = "09:00:00";
       }
 
       // Coordinate validation: if provided, must be within valid geospatial ranges (-90..90, -180..180)
-      if (row.LATITUDE !== undefined && row.LATITUDE !== null && String(row.LATITUDE).trim() !== "") {
-        const latVal = typeof row.LATITUDE === "number" ? row.LATITUDE : parseFloat(String(row.LATITUDE).replace(",", "."));
+      const rawLat = getField(row, "LATITUDE", "latitude");
+      const rawLng = getField(row, "LONGITUDE", "longitude");
+      if (rawLat !== undefined && rawLat !== null && String(rawLat).trim() !== "") {
+        const latVal = typeof rawLat === "number" ? rawLat : parseFloat(String(rawLat).replace(",", "."));
         if (isNaN(latVal) || latVal < -90 || latVal > 90) {
           skipped++;
-          errors.push(`[ID: ${idKejadian}] Field 'LATITUDE' di luar rentang valid [-90, 90]: ${row.LATITUDE}`);
+          errors.push(`[ID: ${idKejadian}] Field 'LATITUDE' di luar rentang valid [-90, 90]: ${rawLat}`);
           continue;
         }
       }
-      if (row.LONGITUDE !== undefined && row.LONGITUDE !== null && String(row.LONGITUDE).trim() !== "") {
-        const lngVal = typeof row.LONGITUDE === "number" ? row.LONGITUDE : parseFloat(String(row.LONGITUDE).replace(",", "."));
+      if (rawLng !== undefined && rawLng !== null && String(rawLng).trim() !== "") {
+        const lngVal = typeof rawLng === "number" ? rawLng : parseFloat(String(rawLng).replace(",", "."));
         if (isNaN(lngVal) || lngVal < -180 || lngVal > 180) {
           skipped++;
-          errors.push(`[ID: ${idKejadian}] Field 'LONGITUDE' di luar rentang valid [-180, 180]: ${row.LONGITUDE}`);
+          errors.push(`[ID: ${idKejadian}] Field 'LONGITUDE' di luar rentang valid [-180, 180]: ${rawLng}`);
           continue;
         }
       }
 
-      const crowd = typeof row["JUMLAH MASSA"] === "number"
-        ? row["JUMLAH MASSA"]
-        : normalizeCrowdEstimate(row["JUMLAH MASSA"]).count;
+      // Crowd size normalization
+      const rawCrowd = getField(row, "JUMLAH MASSA", "jumlah_massa", "estimasi_massa");
+      let crowd: number | null = null;
+      if (rawCrowd !== undefined && rawCrowd !== null && String(rawCrowd).trim() !== "") {
+        if (typeof rawCrowd === "number") {
+          crowd = Math.round(rawCrowd);
+        } else {
+          crowd = normalizeCrowdEstimate(rawCrowd).count;
+        }
+      }
 
-      const coords = validateIndonesianCoordinates(row.LATITUDE, row.LONGITUDE);
-      const category = inferProtestCategory(isu, row.ORGANISASI || "");
+      const organisasi = getField(row, "ORGANISASI", "aliansi", "organisasi_kelompok", "organisasi") ? String(getField(row, "ORGANISASI", "aliansi", "organisasi_kelompok", "organisasi")).trim() : null;
+      const korlap = getField(row, "KORLAP", "korlap", "korlap_pimpinan") ? String(getField(row, "KORLAP", "korlap", "korlap_pimpinan")).trim() : null;
+      // Wilayah hukum preserves KPBI, KPwDN, or regional jurisdiction
+      const wilayahHukum = getField(row, "WILAYAH HUKUM", "wilayah_hukum", "KP/KPw", "kp", "kp_kpw") ? String(getField(row, "WILAYAH HUKUM", "wilayah_hukum", "KP/KPw", "kp", "kp_kpw")).trim() : null;
+      const regional = getField(row, "REGIONAL", "regional") ? String(getField(row, "REGIONAL", "regional")).trim() : null;
+      const provinsi = String(getField(row, "PROVINSI", "provinsi") || "DKI Jakarta").trim();
+      const kotaKabupaten = getField(row, "KOTA/KABUPATEN", "kota_kabupaten", "kota") ? String(getField(row, "KOTA/KABUPATEN", "kota_kabupaten", "kota")).trim() : null;
+      const keterangan = getField(row, "KETERANGAN", "ringkasan_situasi", "keterangan_source", "keterangan") ? String(getField(row, "KETERANGAN", "ringkasan_situasi", "keterangan_source", "keterangan")).trim() : null;
+      const kategoriIsu = getField(row, "kategori_isu", "KATEGORI_ISU") ? String(getField(row, "kategori_isu", "KATEGORI_ISU")).trim() : null;
+      const dampak = getField(row, "DAMPAK", "dampak") ? String(getField(row, "DAMPAK", "dampak")).trim() : null;
+
+      const coords = validateIndonesianCoordinates(rawLat, rawLng);
+      const category = inferProtestCategory(isu, organisasi || "");
 
       validBatchForStore.push({
         id_kejadian: idKejadian,
@@ -458,29 +571,42 @@ export async function processSameDaySync(
         waktu_selesai: null,
         event_datetime: timeParsed.iso,
         lokasi,
-        titik_kumpul: row["TITIK KUMPUL"] || null,
-        sasaran_aksi: row.SASARAN || null,
+        titik_kumpul: titikKumpul,
+        sasaran_aksi: sasaranAksi,
         isu_tuntutan: isu,
-        estimasi_massa_source: crowd || null,
-        organisasi_kelompok: row.ORGANISASI || null,
-        korlap_pimpinan: row.KORLAP || null,
-        wilayah_hukum: row["WILAYAH HUKUM"] || null,
-        provinsi: row.PROVINSI || "DKI Jakarta",
-        kota_kabupaten: row["KOTA/KABUPATEN"] || null,
-        keterangan_source: row.KETERANGAN || null,
+        estimasi_massa_source: crowd,
+        organisasi_kelompok: organisasi,
+        korlap_pimpinan: korlap,
+        wilayah_hukum: wilayahHukum,
+        provinsi,
+        kota_kabupaten: kotaKabupaten,
+        keterangan_source: keterangan,
         validated_lat: coords.lat,
         validated_lng: coords.lng,
         category_id: category,
-        raw_source_payload: row as unknown as Record<string, unknown>
-      });
+        raw_source_payload: row as unknown as Record<string, unknown>,
+        regional,
+        kategori_isu: kategoriIsu,
+        dampak
+      } as any);
     }
 
-    // 5. Execute Idempotent Batch Upsert
-    if (validBatchForStore.length > 0) {
-      const upsertStats = await protestStore.upsertFromExcelBatch(validBatchForStore);
+    // 5. Deduplicate Batch by id_kejadian to prevent batch insert collision
+    const dedupedBatchMap = new Map<string, typeof validBatchForStore[0]>();
+    for (const item of validBatchForStore) {
+      if (dedupedBatchMap.has(item.id_kejadian)) {
+        errors.push(`[ID: ${item.id_kejadian}] Peringatan: Terdapat duplikasi ID di dalam batch input. Menggunakan data baris terakhir.`);
+      }
+      dedupedBatchMap.set(item.id_kejadian, item);
+    }
+    const finalBatch = Array.from(dedupedBatchMap.values());
+
+    // 6. Execute Idempotent Batch Upsert
+    if (finalBatch.length > 0) {
+      const upsertStats = await protestStore.upsertFromExcelBatch(finalBatch);
       inserted = upsertStats.created;
       updated = upsertStats.updated;
-      failed += (validBatchForStore.length - (inserted + updated));
+      failed += (finalBatch.length - (inserted + updated));
       if ((upsertStats as any).error) {
         errors.push(`[Supabase Database Error]: ${(upsertStats as any).error}`);
       }
@@ -515,8 +641,8 @@ export async function processSameDaySync(
       success: finalStatus !== "failed",
       status: finalStatus,
       execution_id: executionId,
-      period_start: payload.period_start,
-      period_end: payload.period_end,
+      period_start: payload.period_start || "",
+      period_end: payload.period_end || "",
       summary: {
         received: payload.events.length,
         processed: validBatchForStore.length,
@@ -549,8 +675,8 @@ export async function processSameDaySync(
       success: false,
       status: "failed",
       execution_id: executionId,
-      period_start: payload.period_start,
-      period_end: payload.period_end,
+      period_start: payload.period_start || "",
+      period_end: payload.period_end || "",
       summary: {
         received: payload.events.length,
         processed: validBatchForStore.length,
