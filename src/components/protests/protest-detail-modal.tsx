@@ -397,10 +397,11 @@ export function ProtestDetailModal({
           onClick={(e) => e.stopPropagation()}
         >
           {/* Modal Top Bar */}
-          <div className="px-5 py-4 border-b border-[var(--border-subtle)] bg-[#111622] flex items-center justify-between shrink-0">
-            <div className="flex items-center gap-3">
+          <div className="px-4 sm:px-5 py-3 sm:py-4 border-b border-[var(--border-subtle)] bg-[#111622] flex items-center justify-between gap-3 shrink-0">
+            {/* Flexible Left Container with responsive truncation */}
+            <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1">
               <span
-                className={`px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${
+                className={`px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wider shrink-0 ${
                   eventData?.status === "ongoing"
                     ? "bg-red-500/20 text-red-400 border border-red-500/40 animate-pulse"
                     : eventData?.status === "scheduled"
@@ -412,33 +413,37 @@ export function ProtestDetailModal({
               >
                 {eventData?.status || "Loading..."}
               </span>
-              <div>
-                <h2 id="unras-detail-title" className="text-sm sm:text-base font-bold text-white line-clamp-1">
+              <div className="min-w-0 flex-1">
+                <h2 id="unras-detail-title" className="text-sm sm:text-base font-bold text-white truncate">
                   {eventData?.isu_tuntutan || "Memuat Aksi Unjuk Rasa..."}
                 </h2>
-              <p className="text-[11px] text-[#98A4B8]">
-                {eventData?.kode_unras} • {eventData?.tanggal} • {eventData?.lokasi}
-              </p>
+                <p className="text-[11px] text-[#98A4B8] truncate">
+                  {eventData?.kode_unras} • {eventData?.tanggal} • {eventData?.lokasi}
+                </p>
+              </div>
+            </div>
+
+            {/* Right Action Container: Rigid width to protect button layout */}
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setIsEditModalOpen(true)}
+                className="inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap px-3.5 py-2 rounded-xl text-xs font-semibold bg-blue-600/20 text-blue-400 border border-blue-500/30 hover:bg-blue-600 hover:text-white transition-all cursor-pointer shadow-sm"
+                title="Edit Data Unras Lengkap (C:AC)"
+              >
+                <Edit3 className="w-3.5 h-3.5 shrink-0" />
+                <span className="whitespace-nowrap">Edit Data Unras</span>
+              </button>
+              <button
+                onClick={onClose}
+                className="p-1.5 rounded-xl text-[#98A4B8] hover:text-white hover:bg-white/5 transition-colors cursor-pointer shrink-0"
+                aria-label="Tutup Detail Unras"
+                title="Tutup"
+              >
+                <X className="w-5 h-5" />
+              </button>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setIsEditModalOpen(true)}
-              className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-600/20 text-blue-400 border border-blue-500/30 hover:bg-blue-600 hover:text-white transition-all flex items-center gap-1.5 cursor-pointer"
-              title="Edit Data Unras Lengkap (C:AC)"
-            >
-              <Edit3 className="w-3.5 h-3.5" />
-              <span>Edit Data Unras</span>
-            </button>
-            <button
-              onClick={onClose}
-              className="p-1.5 rounded-lg text-[#98A4B8] hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-        </div>
 
         {/* Navigation Tabs */}
         <div className="flex items-center gap-1 px-5 border-b border-[var(--border-subtle)] bg-[#0E131F] overflow-x-auto shrink-0 py-1.5">
