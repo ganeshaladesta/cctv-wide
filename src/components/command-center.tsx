@@ -359,6 +359,18 @@ export default function CommandCenter({
     return () => clearInterval(interval);
   }, [operationalDateWib, fetchProtestEvents, fetchDailyOverview, fetchProtestStats]);
 
+  // Periodic background telemetry refresh (every 60s) for live operational awareness
+  useEffect(() => {
+    const telemetryInterval = setInterval(() => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        fetchProtestEvents();
+        fetchDailyOverview();
+        fetchProtestStats();
+      }
+    }, 60000);
+    return () => clearInterval(telemetryInterval);
+  }, [fetchProtestEvents, fetchDailyOverview, fetchProtestStats]);
+
   const cities = useMemo(() => {
     if (!selectedProvince) return allCities;
     const provLower = selectedProvince.toLowerCase();

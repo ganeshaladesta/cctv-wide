@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { DashboardStats } from "@/lib/types";
 import { ProtestStats, ProtestEvent, DailyUnrasSituationOverview } from "@/lib/types/protests";
+import { normalizeProtestStatus } from "@/lib/unras-helpers";
 import { ProgramsCard } from "@/components/motion-ui";
 import { DashboardTab } from "@/components/branding";
 
@@ -64,14 +65,25 @@ export function ExecutiveKpiStrip({
     return provs.size;
   }, [activeProtests]);
 
+  // Fallback count active regions affected
+  const fallbackRegionsCount = React.useMemo(() => {
+    const regs = new Set(
+      activeProtests
+        .map((p) => p.regional || p.provinsi)
+        .filter((r): r is string => Boolean(r))
+    );
+    return regs.size;
+  }, [activeProtests]);
+
   // Strict Daily Metrics based on Asia/Jakarta operational date
   const totalPoints = dailyOverview ? dailyOverview.total_points : activeProtests.length;
-  const ongoingCount = dailyOverview ? dailyOverview.ongoing_points_count : activeProtests.filter((p) => p.status === "ongoing").length;
-  const monitoringCount = dailyOverview ? dailyOverview.monitoring_points_count : activeProtests.filter((p) => p.status === "monitoring").length;
-  const scheduledCount = dailyOverview ? dailyOverview.scheduled_points_count : activeProtests.filter((p) => p.status === "scheduled").length;
+  const ongoingCount = dailyOverview ? dailyOverview.ongoing_points_count : activeProtests.filter((p) => normalizeProtestStatus(p.status) === "ongoing").length;
+  const monitoringCount = dailyOverview ? dailyOverview.monitoring_points_count : activeProtests.filter((p) => normalizeProtestStatus(p.status) === "monitoring").length;
+  const scheduledCount = dailyOverview ? dailyOverview.scheduled_points_count : activeProtests.filter((p) => normalizeProtestStatus(p.status) === "scheduled").length;
   const totalCrowd = dailyOverview ? dailyOverview.total_estimated_crowd : totalActiveCrowd;
   const totalElements = dailyOverview ? dailyOverview.total_identified_elements : 0;
   const affectedProvincesCount = dailyOverview ? dailyOverview.affected_provinces_count : fallbackProvincesCount;
+  const affectedRegionsCount = dailyOverview ? (dailyOverview.affected_regions_count || dailyOverview.affected_provinces_count) : fallbackRegionsCount;
 
   const uptimePct = cctvStats.total_cameras > 0
     ? ((cctvStats.online_cameras / cctvStats.total_cameras) * 100).toFixed(1)
@@ -228,7 +240,7 @@ export function ExecutiveKpiStrip({
                 : "Termonitor"} <span className="text-xs font-normal text-[#98A4B8]">org</span>
             </p>
             <div className="flex items-center justify-between text-[10px] text-[#98A4B8] mt-1 pt-1 border-t border-white/[0.06] font-mono">
-              <span>{totalElements > 0 ? `${totalElements} Elemen • ` : ""}{affectedProvincesCount} Wilayah</span>
+              <span>{totalElements > 0 ? `${totalElements} Elemen • ` : ""}{affectedRegionsCount} Wilayah</span>
               <span className="text-blue-300 font-bold">{affectedProvincesCount} Provinsi</span>
             </div>
           </ProgramsCard>

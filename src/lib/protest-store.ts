@@ -50,13 +50,20 @@ import {
   unlinkCameraInSupabase,
   fetchStatusHistoryFromSupabase,
   fetchStatsFromSupabase,
+  fetchDailySituationOverviewFromSupabase,
   fetchSyncLogsFromSupabase,
   fetchSyncLogByIdFromSupabase,
   createSyncLogInSupabase,
   updateSyncLogInSupabase,
   upsertExcelBatchInSupabase
 } from "./supabase-protest-service";
-import { deriveTahunBulan, deriveEventTimestamps, generateIdKejadian, generateKodeUnras } from "./unras-helpers";
+import {
+  deriveTahunBulan,
+  deriveEventTimestamps,
+  generateIdKejadian,
+  generateKodeUnras,
+  normalizeProtestStatus
+} from "./unras-helpers";
 
 // Haversine distance in meters
 export function calculateDistanceMeters(
@@ -3003,7 +3010,7 @@ class ProtestDataStore {
         regional: event.regional,
         latitude: event.validated_lat,
         longitude: event.validated_lng,
-        status: event.status,
+        status: normalizeProtestStatus(event.status),
         urgency: event.urgency,
         notes: event.situation_summary,
         created_at: event.created_at,
@@ -3022,6 +3029,17 @@ class ProtestDataStore {
   }
 
   async getDailySituationOverview(dateStr: string): Promise<DailyUnrasSituationOverview> {
+    if (isSupabaseConfigured()) {
+      try {
+        return await fetchDailySituationOverviewFromSupabase(dateStr);
+      } catch (err) {
+        console.error("[ProtestDataStore] Supabase getDailySituationOverview failed, falling back to local SQLite:", err);
+      }
+    }
+    return await this.getDailySituationOverviewLocal(dateStr);
+  }
+
+  async getDailySituationOverviewLocal(dateStr: string): Promise<DailyUnrasSituationOverview> {
     this.init();
     const cleanDate = (dateStr || "").slice(0, 10) || new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta" }).format(new Date());
     const startWib = new Date(`${cleanDate}T00:00:00+07:00`);
@@ -3137,10 +3155,10 @@ class ProtestDataStore {
       return (b.current_crowd_total || 0) - (a.current_crowd_total || 0);
     });
 
-    const ongoingCount = allPoints.filter((pt) => pt.status === "ongoing").length;
-    const monitoringCount = allPoints.filter((pt) => pt.status === "monitoring").length;
-    const scheduledCount = allPoints.filter((pt) => pt.status === "scheduled").length;
-    const completedCount = allPoints.filter((pt) => pt.status === "completed").length;
+    const ongoingCount = allPoints.filter((pt) => normalizeProtestStatus(pt.status) === "ongoing").length;
+    const monitoringCount = allPoints.filter((pt) => normalizeProtestStatus(pt.status) === "monitoring").length;
+    const scheduledCount = allPoints.filter((pt) => normalizeProtestStatus(pt.status) === "scheduled").length;
+    const completedCount = allPoints.filter((pt) => normalizeProtestStatus(pt.status) === "completed").length;
     const totalActivePoints = ongoingCount + monitoringCount;
 
     const totalEstimatedCrowd = allPoints.reduce((sum, pt) => sum + (pt.current_crowd_total || 0), 0);

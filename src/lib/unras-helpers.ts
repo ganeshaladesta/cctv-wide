@@ -3,6 +3,13 @@
  * Grounded in Excel source 'NEW UNRAS 2022-2026' (Columns C through AC)
  */
 
+import {
+  ProtestStatus,
+  ProtestEvent,
+  ProtestPoint,
+  ProtestElement
+} from "@/lib/types/protests";
+
 export const BULAN_INDONESIA = [
   "Januari",
   "Februari",
@@ -287,4 +294,103 @@ export function synthesizeRedaksiText(params: {
   }
 
   return parts.join("\n");
+}
+
+/**
+ * Normalizes operational statuses consistently across casing and legacy aliases.
+ * Strictly preserves operational statuses: scheduled, ongoing, monitoring, completed, cancelled.
+ * Unknown statuses are preserved as lowercased string without silent coercion.
+ */
+export function normalizeProtestStatus(rawStatus?: string | null): ProtestStatus {
+  if (!rawStatus) return "scheduled";
+  const s = String(rawStatus).trim().toLowerCase();
+  if (s === "ongoing" || s === "berlangsung" || s === "aktif" || s === "active") return "ongoing";
+  if (s === "monitoring" || s === "pemantauan" || s === "pantau" || s === "siaga") return "monitoring";
+  if (s === "scheduled" || s === "terjadwal" || s === "rencana" || s === "persiapan") return "scheduled";
+  if (s === "completed" || s === "selesai" || s === "rampung" || s === "bubar") return "completed";
+  if (s === "cancelled" || s === "batal" || s === "dibatalkan") return "cancelled";
+  return s as ProtestStatus;
+}
+
+/**
+ * Synthesizes a virtual ProtestPoint with mass elements from a legacy/Excel event.
+ */
+export function synthesizePointsForLegacyEvent(event: ProtestEvent): ProtestPoint[] {
+  const rawElements = event.organisasi_kelompok
+    ? event.organisasi_kelompok
+        .split(/[,;\/\n]+/)
+        .map((s) => s.trim())
+        .filter((s) => s.length > 1)
+    : [];
+
+  const pointId = `point-${event.id}-primary`;
+  const totalCrowd = event.actual_crowd_size ?? event.estimasi_massa_source ?? 0;
+  const normalizedStatus = normalizeProtestStatus(event.status);
+
+  const elements: ProtestElement[] = [];
+  if (rawElements.length > 0) {
+    const crowdPerElem = Math.round(totalCrowd / rawElements.length);
+    for (let i = 0; i < rawElements.length; i++) {
+      const elemName = rawElements[i];
+      elements.push({
+        id: `elem-${event.id}-${i}`,
+        point_id: pointId,
+        protest_id: event.id,
+        name: elemName,
+        leader_name: i === 0 ? event.korlap_pimpinan : null,
+        status: "active",
+        latest_crowd: i === 0 ? (totalCrowd - crowdPerElem * (rawElements.length - 1)) : crowdPerElem,
+        previous_crowd: undefined,
+        crowd_delta: 0,
+        verification_status: event.actual_crowd_size != null ? "verified" : "unverified",
+        last_observed_at: event.updated_at || event.created_at,
+        created_at: event.created_at,
+        updated_at: event.updated_at
+      });
+    }
+  } else {
+    elements.push({
+      id: `elem-${event.id}-0`,
+      point_id: pointId,
+      protest_id: event.id,
+      name: "Elemen Massa Teridentifikasi",
+      leader_name: event.korlap_pimpinan,
+      status: "active",
+      latest_crowd: totalCrowd,
+      previous_crowd: undefined,
+      crowd_delta: 0,
+      verification_status: event.actual_crowd_size != null ? "verified" : "unverified",
+      last_observed_at: event.updated_at || event.created_at,
+      created_at: event.created_at,
+      updated_at: event.updated_at
+    });
+  }
+
+  return [
+    {
+      id: pointId,
+      protest_id: event.id,
+      point_name: event.lokasi || "Titik Utama",
+      location_address: event.lokasi,
+      provinsi: event.provinsi,
+      kota_kabupaten: event.kota_kabupaten,
+      regional: event.regional,
+      latitude: event.validated_lat,
+      longitude: event.validated_lng,
+      status: normalizedStatus,
+      urgency: event.urgency || "medium",
+      notes: event.situation_summary,
+      created_at: event.created_at,
+      updated_at: event.updated_at,
+      elements,
+      current_crowd_total: totalCrowd,
+      crowd_trend: "none",
+      crowd_change_delta: 0,
+      last_observation_at: event.updated_at || event.created_at,
+      parent_title: event.isu_tuntutan,
+      parent_kode_unras: event.kode_unras,
+      parent_id_kejadian: event.id_kejadian,
+      parent_tanggal: event.tanggal
+    }
+  ];
 }

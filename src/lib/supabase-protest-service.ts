@@ -8,7 +8,14 @@ import { getDataStore } from "./data-store";
 import { normalizeTimeString } from "./time-normalization";
 import { geocodingService } from "./geocoding/geocoding-service";
 import { ensureValidUuid } from "./auth-roles";
-import { deriveTahunBulan, deriveEventTimestamps, generateIdKejadian, generateKodeUnras } from "./unras-helpers";
+import {
+  deriveTahunBulan,
+  deriveEventTimestamps,
+  generateIdKejadian,
+  generateKodeUnras,
+  normalizeProtestStatus,
+  synthesizePointsForLegacyEvent
+} from "./unras-helpers";
 import {
   ProtestEvent,
   ProtestFilterParams,
@@ -16,7 +23,11 @@ import {
   ProtestStatusHistory,
   ProtestOperatorReport,
   ProtestCameraLink,
-  ProtestSyncLog
+  ProtestSyncLog,
+  DailyUnrasSituationOverview,
+  ProtestPoint,
+  ProtestStatus,
+  ProtestUrgency
 } from "./types/protests";
 
 export { isSupabaseConfigured };
@@ -45,7 +56,7 @@ function mapRowToProtest(row: any): ProtestEvent {
     provinsi: row.provinsi || "DKI Jakarta",
     kota_kabupaten: row.kota_kabupaten,
     keterangan_source: row.keterangan_source,
-    status: row.status || "scheduled",
+    status: normalizeProtestStatus(row.status),
     urgency: row.urgency || "medium",
     category_id: row.category_id,
     category_name: row.category_name,
@@ -110,7 +121,7 @@ export async function queryProtestsFromSupabase(filters: ProtestFilterParams = {
   if (!supabase) throw new Error("Supabase is not configured.");
 
   const page = Math.max(1, Number(filters.page) || 1);
-  const limit = Math.min(100, Math.max(1, Number(filters.limit) || 20));
+  const limit = Math.min(500, Math.max(1, Number(filters.limit) || 20));
   const offset = (page - 1) * limit;
 
   let query = supabase
@@ -174,6 +185,21 @@ export async function queryProtestsFromSupabase(filters: ProtestFilterParams = {
   }
   if (filters.date_to) {
     query = query.lte("tanggal", filters.date_to);
+  }
+
+  // Strict Operational Date Filter in Asia/Jakarta (WIB)
+  const targetDate = (filters.operational_date || filters.date || "").trim();
+  if (targetDate) {
+    const dateWib = targetDate === "today"
+      ? new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta" }).format(new Date())
+      : targetDate.slice(0, 10);
+
+    const startWib = new Date(`${dateWib}T00:00:00+07:00`);
+    const endWib = new Date(startWib.getTime() + 86400000);
+    const startUtcIso = startWib.toISOString();
+    const endUtcIso = endWib.toISOString();
+
+    query = query.or(`tanggal.eq.${dateWib},and(tanggal.is.null,event_datetime.gte.${startUtcIso},event_datetime.lt.${endUtcIso})`);
   }
 
   // Full-text search
@@ -725,34 +751,42 @@ export async function fetchStatsFromSupabase(): Promise<ProtestStats> {
     noCoordsRes,
     pendingValRes,
     verifiedLocRes,
-    lastSyncRes
+    lastSyncRes,
+    cameraLinksRes
   ] = await Promise.all([
     supabase.from("protests").select("*", { count: "exact", head: true }).is("deleted_at", null),
-    supabase.from("protests").select("*", { count: "exact", head: true }).is("deleted_at", null).eq("status", "scheduled"),
-    supabase.from("protests").select("*", { count: "exact", head: true }).is("deleted_at", null).eq("status", "ongoing"),
-    supabase.from("protests").select("*", { count: "exact", head: true }).is("deleted_at", null).eq("status", "monitoring"),
+    supabase.from("protests").select("*", { count: "exact", head: true }).is("deleted_at", null).eq("status", "scheduled").eq("is_archived", false),
+    supabase.from("protests").select("*", { count: "exact", head: true }).is("deleted_at", null).eq("status", "ongoing").eq("is_archived", false),
+    supabase.from("protests").select("*", { count: "exact", head: true }).is("deleted_at", null).eq("status", "monitoring").eq("is_archived", false),
     supabase.from("protests").select("*", { count: "exact", head: true }).is("deleted_at", null).eq("status", "completed"),
     supabase.from("protests").select("*", { count: "exact", head: true }).is("deleted_at", null).eq("status", "cancelled"),
-    supabase.from("protests").select("*", { count: "exact", head: true }).is("deleted_at", null).in("urgency", ["high", "critical"]),
-    supabase.from("protests").select("*", { count: "exact", head: true }).is("deleted_at", null).or("validated_lat.is.null,validated_lng.is.null"),
-    supabase.from("protests").select("*", { count: "exact", head: true }).is("deleted_at", null).eq("location_validation_status", "pending_validation"),
+    supabase.from("protests").select("*", { count: "exact", head: true }).is("deleted_at", null).in("urgency", ["high", "critical"]).eq("is_archived", false),
+    supabase.from("protests").select("*", { count: "exact", head: true }).is("deleted_at", null).or("validated_lat.is.null,validated_lng.is.null").eq("is_archived", false),
+    supabase.from("protests").select("*", { count: "exact", head: true }).is("deleted_at", null).eq("location_validation_status", "pending_validation").eq("is_archived", false),
     supabase.from("protests").select("*", { count: "exact", head: true }).is("deleted_at", null).eq("location_validation_status", "verified"),
-    supabase.from("protest_sync_logs").select("completed_at").eq("status", "success").order("completed_at", { ascending: false }).limit(1).maybeSingle()
+    supabase.from("protest_sync_logs").select("completed_at").eq("status", "success").order("completed_at", { ascending: false }).limit(1).maybeSingle(),
+    supabase.from("protest_camera_links").select("*", { count: "exact", head: true })
   ]);
 
-  const today = new Date().toISOString().split("T")[0];
-  const { count: todayCount } = await supabase
-    .from("protests")
-    .select("*", { count: "exact", head: true })
-    .is("deleted_at", null)
-    .eq("tanggal", today);
+  const todayWib = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta" }).format(new Date());
+  const startWib = new Date(`${todayWib}T00:00:00+07:00`);
+  const endWib = new Date(startWib.getTime() + 86400000);
+  const startUtcIso = startWib.toISOString();
+  const endUtcIso = endWib.toISOString();
 
-  const { count: completedTodayCount } = await supabase
-    .from("protests")
-    .select("*", { count: "exact", head: true })
-    .is("deleted_at", null)
-    .eq("status", "completed")
-    .eq("tanggal", today);
+  const [todayRes, completedTodayRes] = await Promise.all([
+    supabase
+      .from("protests")
+      .select("*", { count: "exact", head: true })
+      .is("deleted_at", null)
+      .or(`tanggal.eq.${todayWib},and(tanggal.is.null,event_datetime.gte.${startUtcIso},event_datetime.lt.${endUtcIso})`),
+    supabase
+      .from("protests")
+      .select("*", { count: "exact", head: true })
+      .is("deleted_at", null)
+      .eq("status", "completed")
+      .or(`tanggal.eq.${todayWib},completed_at.gte.${startUtcIso}`)
+  ]);
 
   return {
     total_events: totalRes.count || 0,
@@ -765,10 +799,202 @@ export async function fetchStatsFromSupabase(): Promise<ProtestStats> {
     events_without_coords: noCoordsRes.count || 0,
     pending_validation_count: pendingValRes.count || 0,
     verified_locations_count: verifiedLocRes.count || 0,
-    today_events: todayCount || 0,
-    completed_today: completedTodayCount || 0,
-    total_camera_links: 0,
+    today_events: todayRes.count || 0,
+    completed_today: completedTodayRes.count || 0,
+    total_camera_links: cameraLinksRes?.count || 0,
     last_successful_sync: lastSyncRes.data?.completed_at || null
+  };
+}
+
+/**
+ * 9B. Daily UNRAS Situation Overview Directly from Supabase
+ * Authoritative multi-point aggregation across all protest points for the specified monitoring date.
+ */
+export async function fetchDailySituationOverviewFromSupabase(dateStr: string): Promise<DailyUnrasSituationOverview> {
+  const supabase = getSupabaseAdminClient();
+  if (!supabase) throw new Error("Supabase is not configured.");
+
+  const cleanDate = (dateStr || "").slice(0, 10) || new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta" }).format(new Date());
+  const startWib = new Date(`${cleanDate}T00:00:00+07:00`);
+  const endWib = new Date(startWib.getTime() + 86400000);
+  const startUtcIso = startWib.toISOString();
+  const endUtcIso = endWib.toISOString();
+
+  // Query today's non-deleted protests from Supabase
+  const { data: rows, error } = await supabase
+    .from("protests")
+    .select("*")
+    .is("deleted_at", null)
+    .or(`tanggal.eq.${cleanDate},and(tanggal.is.null,event_datetime.gte.${startUtcIso},event_datetime.lt.${endUtcIso})`);
+
+  if (error) {
+    throw new Error(`Gagal memuat daily situation dari Supabase: ${error.message}`);
+  }
+
+  const protests: ProtestEvent[] = (rows || []).map(mapRowToProtest);
+  const protestIds = protests.map((p) => p.id);
+
+  // Batch query points and camera links if any protests exist today
+  const allPointsMap = new Map<string, ProtestPoint[]>();
+  const allLinksMap = new Map<string, ProtestCameraLink[]>();
+
+  if (protestIds.length > 0) {
+    try {
+      const { data: ptRows, error: ptErr } = await supabase
+        .from("protest_points")
+        .select("*")
+        .in("protest_id", protestIds);
+      if (!ptErr && Array.isArray(ptRows)) {
+        for (const r of ptRows) {
+          const pt: ProtestPoint = {
+            id: String(r.id),
+            protest_id: String(r.protest_id),
+            point_name: String(r.point_name),
+            location_address: r.location_address ? String(r.location_address) : null,
+            provinsi: r.provinsi ? String(r.provinsi) : null,
+            kota_kabupaten: r.kota_kabupaten ? String(r.kota_kabupaten) : null,
+            regional: r.regional ? String(r.regional) : null,
+            latitude: r.latitude != null ? Number(r.latitude) : null,
+            longitude: r.longitude != null ? Number(r.longitude) : null,
+            status: normalizeProtestStatus(r.status),
+            urgency: (r.urgency as ProtestUrgency) || "medium",
+            notes: r.notes ? String(r.notes) : null,
+            created_at: String(r.created_at),
+            updated_at: String(r.updated_at)
+          };
+          const list = allPointsMap.get(pt.protest_id) || [];
+          list.push(pt);
+          allPointsMap.set(pt.protest_id, list);
+        }
+      }
+    } catch {}
+
+    try {
+      const { data: linkRows, error: lkErr } = await supabase
+        .from("protest_camera_links")
+        .select("*")
+        .in("protest_id", protestIds);
+      if (!lkErr && Array.isArray(linkRows)) {
+        for (const r of linkRows) {
+          const lk: ProtestCameraLink = {
+            id: String(r.id),
+            protest_id: String(r.protest_id),
+            point_id: r.point_id ? String(r.point_id) : undefined,
+            camera_id: String(r.camera_id),
+            camera_name: String(r.camera_name),
+            camera_stream_url: r.camera_stream_url || undefined,
+            camera_protocol: r.camera_protocol || undefined,
+            camera_status: r.camera_status || "ONLINE",
+            distance_meters: Number(r.distance_meters) || 0,
+            notes: r.notes || null,
+            is_recommended: Boolean(r.is_recommended),
+            linked_by_id: String(r.linked_by_id),
+            linked_by_name: String(r.linked_by_name),
+            created_at: String(r.created_at)
+          };
+          const list = allLinksMap.get(lk.protest_id) || [];
+          list.push(lk);
+          allLinksMap.set(lk.protest_id, list);
+        }
+      }
+    } catch {}
+  }
+
+  const allPoints: ProtestPoint[] = [];
+  const affectedProvincesSet = new Set<string>();
+  const affectedRegionsSet = new Set<string>();
+  const linkedCameraIdsSet = new Set<string>();
+  let totalIdentifiedElements = 0;
+
+  for (const p of protests) {
+    if (p.provinsi && p.provinsi.trim()) affectedProvincesSet.add(p.provinsi.trim());
+    if (p.regional && p.regional.trim()) affectedRegionsSet.add(p.regional.trim());
+
+    let points = allPointsMap.get(p.id) || [];
+    if (points.length === 0) {
+      points = synthesizePointsForLegacyEvent(p);
+    }
+
+    const cameraLinks = allLinksMap.get(p.id) || [];
+    for (const link of cameraLinks) {
+      linkedCameraIdsSet.add(link.camera_id);
+    }
+
+    for (const pt of points) {
+      pt.parent_title = p.isu_tuntutan;
+      pt.parent_kode_unras = p.kode_unras;
+      pt.parent_id_kejadian = p.id_kejadian;
+      pt.parent_tanggal = p.tanggal;
+
+      if (points.length === 1) {
+        pt.linked_cameras = cameraLinks;
+        pt.linked_camera_count = cameraLinks.length;
+      } else {
+        const ptLinks = cameraLinks.filter((l) => l.point_id === pt.id);
+        pt.linked_cameras = ptLinks;
+        pt.linked_camera_count = ptLinks.length;
+      }
+
+      if (pt.elements) {
+        totalIdentifiedElements += pt.elements.length;
+      }
+
+      allPoints.push(pt);
+    }
+  }
+
+  // Sort points: ongoing > monitoring > scheduled > others, then urgency, then crowd size DESC
+  const statusWeight: Record<ProtestStatus, number> = {
+    ongoing: 4,
+    monitoring: 3,
+    scheduled: 2,
+    completed: 1,
+    cancelled: 0
+  };
+  const urgencyWeight: Record<ProtestUrgency, number> = {
+    critical: 4,
+    high: 3,
+    medium: 2,
+    low: 1
+  };
+
+  allPoints.sort((a, b) => {
+    const sA = statusWeight[a.status] || 0;
+    const sB = statusWeight[b.status] || 0;
+    if (sA !== sB) return sB - sA;
+
+    const uA = urgencyWeight[a.urgency] || 0;
+    const uB = urgencyWeight[b.urgency] || 0;
+    if (uA !== uB) return uB - uA;
+
+    return (b.current_crowd_total || 0) - (a.current_crowd_total || 0);
+  });
+
+  const ongoingCount = allPoints.filter((pt) => pt.status === "ongoing").length;
+  const monitoringCount = allPoints.filter((pt) => pt.status === "monitoring").length;
+  const scheduledCount = allPoints.filter((pt) => pt.status === "scheduled").length;
+  const completedCount = allPoints.filter((pt) => pt.status === "completed").length;
+  const totalActivePoints = ongoingCount + monitoringCount;
+
+  const totalEstimatedCrowd = allPoints.reduce((sum, pt) => sum + (pt.current_crowd_total || 0), 0);
+
+  return {
+    selected_date: cleanDate,
+    total_events: protests.length,
+    total_points: allPoints.length,
+    total_active_points: totalActivePoints,
+    ongoing_points_count: ongoingCount,
+    monitoring_points_count: monitoringCount,
+    scheduled_points_count: scheduledCount,
+    completed_points_count: completedCount,
+    total_estimated_crowd: totalEstimatedCrowd,
+    total_identified_elements: totalIdentifiedElements,
+    affected_provinces_count: affectedProvincesSet.size,
+    affected_provinces: Array.from(affectedProvincesSet).sort(),
+    affected_regions_count: affectedRegionsSet.size,
+    affected_regions: Array.from(affectedRegionsSet).sort(),
+    linked_cctv_count: linkedCameraIdsSet.size,
+    points: allPoints
   };
 }
 
