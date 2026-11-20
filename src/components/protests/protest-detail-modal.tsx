@@ -35,6 +35,8 @@ import {
 import { Camera } from "@/lib/types";
 import dynamic from "next/dynamic";
 import { ProtestFormModal } from "./protest-form-modal";
+import { UnrasSinglePlayerModal } from "./unras-single-player-modal";
+import { UnrasMultiViewModal } from "./unras-multiview-modal";
 
 const ProtestLocationPicker = dynamic(
   () => import("./protest-location-picker").then((mod) => mod.ProtestLocationPicker),
@@ -95,6 +97,11 @@ export function ProtestDetailModal({
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [savingSummary, setSavingSummary] = useState(false);
 
+  // Modal Navigation Stack for CCTV monitoring (UNRAS Detail -> Camera Selection -> Single Player / Multi-View)
+  type UnrasPlayerMode = "none" | "single" | "multiview";
+  const [activePlayerMode, setActivePlayerMode] = useState<UnrasPlayerMode>("none");
+  const [selectedSingleCamera, setSelectedSingleCamera] = useState<Camera | null>(null);
+
   const fetchDetail = async (id: string) => {
     setLoading(true);
     setError(null);
@@ -144,12 +151,24 @@ export function ProtestDetailModal({
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        e.preventDefault();
-        if (isPickerOpen) {
-          setIsPickerOpen(false);
-        } else {
-          onClose();
+        if (activePlayerMode !== "none") {
+          e.preventDefault();
+          setActivePlayerMode("none");
+          setSelectedSingleCamera(null);
+          return;
         }
+        if (isPickerOpen) {
+          e.preventDefault();
+          setIsPickerOpen(false);
+          return;
+        }
+        if (isEditModalOpen) {
+          e.preventDefault();
+          setIsEditModalOpen(false);
+          return;
+        }
+        e.preventDefault();
+        onClose();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
@@ -259,20 +278,16 @@ export function ProtestDetailModal({
     }
   };
 
-  // Play Camera & close modal safely to prevent overlapping dialogs
+  // Play Single Camera within UNRAS navigation stack without unmounting parent modal
   const handlePlayCamera = (cam: Camera) => {
-    onClose();
-    onSelectCameraToPlay?.(cam);
+    setSelectedSingleCamera(cam);
+    setActivePlayerMode("single");
   };
 
   // Open Dedicated MultiView Monitoring for this UNRAS event
   const handleOpenMultiView = () => {
     if (!eventData || cameraLinks.length === 0) return;
-    const resolvedCameras: Camera[] = cameraLinks
-      .map((l) => l.camera)
-      .filter((c): c is Camera => Boolean(c));
-    onClose();
-    onOpenDedicatedMultiView?.(eventData, resolvedCameras);
+    setActivePlayerMode("multiview");
   };
 
   // Generate Editorial Text
@@ -960,16 +975,18 @@ export function ProtestDetailModal({
                   <div className="p-3.5 rounded-xl bg-gradient-to-r from-blue-950/60 via-[#131B2E] to-blue-900/40 border border-blue-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-lg">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="flex h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                        <span className={`flex h-2 w-2 rounded-full ${cameraLinks.length > 0 ? "bg-emerald-400 animate-pulse" : "bg-slate-500"}`} />
                         <h4 className="text-xs font-bold text-white uppercase tracking-wider">
                           Dedicated Multi-View Workspace
                         </h4>
                         <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30">
-                          {cameraLinks.length} Kamera
+                          {cameraLinks.length} Kamera Tertaut
                         </span>
                       </div>
                       <p className="text-[11px] text-[#98A4B8] mt-0.5">
-                        Pantau seluruh perimeter aksi unjuk rasa ini secara simultan di Multi-View
+                        {cameraLinks.length > 0
+                          ? "Pantau seluruh perimeter aksi unjuk rasa ini secara simultan di Multi-View"
+                          : "Tautkan minimal 1 kamera CCTV di bawah untuk mengaktifkan pemantauan simultan Multi-View"}
                       </p>
                     </div>
                     <button
@@ -1281,6 +1298,33 @@ export function ProtestDetailModal({
             setEventData(updated);
             if (protestId) fetchDetail(protestId);
             notifyUpdated();
+          }}
+        />
+      )}
+
+      {/* Nested Single Camera Player Modal (Navigation Stack: Camera Selection -> Single Player) */}
+      {activePlayerMode === "single" && selectedSingleCamera && (
+        <UnrasSinglePlayerModal
+          camera={selectedSingleCamera}
+          event={eventData}
+          onClose={() => {
+            setActivePlayerMode("none");
+            setSelectedSingleCamera(null);
+          }}
+        />
+      )}
+
+      {/* Nested Dedicated Multi-View Monitoring Modal (Navigation Stack: Camera Selection -> Multi-View) */}
+      {activePlayerMode === "multiview" && eventData && (
+        <UnrasMultiViewModal
+          isOpen={activePlayerMode === "multiview"}
+          event={eventData}
+          cameraLinks={cameraLinks}
+          onClose={() => setActivePlayerMode("none")}
+          onUnlinkCamera={handleUnlinkCamera}
+          onSelectSingleCamera={(cam) => {
+            setSelectedSingleCamera(cam);
+            setActivePlayerMode("single");
           }}
         />
       )}
