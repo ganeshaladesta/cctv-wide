@@ -52,6 +52,7 @@ export interface UnrasPriorityPanelProps {
   totalPages: number;
   onPageChange?: (newPage: number) => void;
   loadingCameras: boolean;
+  operationalDate?: string;
 }
 
 export function UnrasPriorityPanel({
@@ -68,7 +69,8 @@ export function UnrasPriorityPanel({
   page,
   totalPages,
   onPageChange,
-  loadingCameras
+  loadingCameras,
+  operationalDate
 }: UnrasPriorityPanelProps) {
   // Sidebar tab: 'unras' (default) or 'cameras'
   const [activeSidebarTab, setActiveSidebarTab] = useState<"unras" | "cameras">("unras");
@@ -84,9 +86,15 @@ export function UnrasPriorityPanel({
     }
   }, []);
 
-  const [selectedDate, setSelectedDate] = useState<string>(todayWib);
+  const [selectedDate, setSelectedDate] = useState<string>(operationalDate || todayWib);
   const [dailyOverview, setDailyOverview] = useState<DailyUnrasSituationOverview | null>(null);
   const [loadingDailyOverview, setLoadingDailyOverview] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (operationalDate && operationalDate !== selectedDate) {
+      setSelectedDate(operationalDate);
+    }
+  }, [operationalDate]);
 
   const fetchDailyOverview = useCallback(async (dateStr: string) => {
     setLoadingDailyOverview(true);

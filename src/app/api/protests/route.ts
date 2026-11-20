@@ -22,6 +22,8 @@ export async function GET(request: NextRequest) {
       category: searchParams.get('category') || undefined,
       province: searchParams.get('province') || undefined,
       city: searchParams.get('city') || undefined,
+      operational_date: searchParams.get('operational_date') || undefined,
+      date: searchParams.get('date') || undefined,
       date_from: searchParams.get('date_from') || undefined,
       date_to: searchParams.get('date_to') || undefined,
       has_coords: searchParams.get('has_coords') !== null ? searchParams.get('has_coords') === 'true' : undefined,
@@ -35,9 +37,12 @@ export async function GET(request: NextRequest) {
     };
 
     const result = await protestStore.queryProtests(filters);
+    const todayWib = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta" }).format(new Date());
 
     return NextResponse.json({
       success: true,
+      operational_date_wib: todayWib,
+      timezone: 'Asia/Jakarta',
       total: result.total,
       page: result.page,
       limit: result.limit,

@@ -293,6 +293,8 @@ export interface ProtestFilterParams {
   category?: string;
   province?: string;
   city?: string;
+  operational_date?: string; // YYYY-MM-DD or 'today' (Asia/Jakarta)
+  date?: string; // Alias for operational_date (Asia/Jakarta)
   date_from?: string; // YYYY-MM-DD
   date_to?: string; // YYYY-MM-DD
   has_coords?: boolean | "true" | "false";

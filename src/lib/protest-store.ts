@@ -701,14 +701,43 @@ class ProtestDataStore {
         params.push(`%${filters.city.toLowerCase()}%`);
       }
 
-      if (filters.date_from) {
-        whereClauses.push("tanggal >= ?");
-        params.push(filters.date_from);
-      }
+      // Strict Operational Date Filter in Asia/Jakarta (WIB)
+      const targetDate = (filters.operational_date || filters.date || "").trim();
+      if (targetDate) {
+        const dateWib = targetDate === "today"
+          ? new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta" }).format(new Date())
+          : targetDate.slice(0, 10);
 
-      if (filters.date_to) {
-        whereClauses.push("tanggal <= ?");
-        params.push(filters.date_to);
+        const startWib = new Date(`${dateWib}T00:00:00+07:00`);
+        const endWib = new Date(startWib.getTime() + 86400000);
+        const nextDateWib = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta" }).format(endWib);
+
+        const startWibIso = `${dateWib}T00:00:00+07:00`;
+        const endWibIso = `${nextDateWib}T00:00:00+07:00`;
+        const startUtcIso = startWib.toISOString();
+        const endUtcIso = endWib.toISOString();
+
+        whereClauses.push(`(
+          tanggal = ?
+          OR (
+            (tanggal IS NULL OR trim(tanggal) = '')
+            AND (
+              (event_datetime >= ? AND event_datetime < ?)
+              OR (event_datetime >= ? AND event_datetime < ?)
+            )
+          )
+        )`);
+        params.push(dateWib, startWibIso, endWibIso, startUtcIso, endUtcIso);
+      } else {
+        if (filters.date_from) {
+          whereClauses.push("tanggal >= ?");
+          params.push(filters.date_from);
+        }
+
+        if (filters.date_to) {
+          whereClauses.push("tanggal <= ?");
+          params.push(filters.date_to);
+        }
       }
 
       if (filters.q && filters.q.trim()) {
@@ -762,6 +791,32 @@ class ProtestDataStore {
     if (filters.has_coords !== undefined) {
       const hasCoords = filters.has_coords === true || filters.has_coords === "true";
       items = items.filter((e) => (hasCoords ? e.validated_lat !== null : e.validated_lat === null));
+    }
+
+    // Strict Operational Date Filter in Asia/Jakarta (WIB) for in-memory fallback
+    const targetDateMem = (filters.operational_date || filters.date || "").trim();
+    if (targetDateMem) {
+      const dateWib = targetDateMem === "today"
+        ? new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta" }).format(new Date())
+        : targetDateMem.slice(0, 10);
+      const startWibMs = new Date(`${dateWib}T00:00:00+07:00`).getTime();
+      const endWibMs = startWibMs + 86400000;
+
+      items = items.filter((e) => {
+        if (e.tanggal === dateWib) return true;
+        if (!e.tanggal && e.event_datetime) {
+          const ms = new Date(e.event_datetime).getTime();
+          return ms >= startWibMs && ms < endWibMs;
+        }
+        return false;
+      });
+    } else {
+      if (filters.date_from) {
+        items = items.filter((e) => e.tanggal >= filters.date_from!);
+      }
+      if (filters.date_to) {
+        items = items.filter((e) => e.tanggal <= filters.date_to!);
+      }
     }
 
     if (filters.q && filters.q.trim()) {
@@ -2369,7 +2424,7 @@ class ProtestDataStore {
   }
 
   getStatsLocal(): ProtestStats {
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta" }).format(new Date());
 
     if (this.db) {
       const row = this.db.prepare(`
@@ -2916,17 +2971,45 @@ class ProtestDataStore {
 
   async getDailySituationOverview(dateStr: string): Promise<DailyUnrasSituationOverview> {
     this.init();
+    const cleanDate = (dateStr || "").slice(0, 10) || new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta" }).format(new Date());
+    const startWib = new Date(`${cleanDate}T00:00:00+07:00`);
+    const endWib = new Date(startWib.getTime() + 86400000);
+    const nextDateWib = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta" }).format(endWib);
+
+    const startWibIso = `${cleanDate}T00:00:00+07:00`;
+    const endWibIso = `${nextDateWib}T00:00:00+07:00`;
+    const startUtcIso = startWib.toISOString();
+    const endUtcIso = endWib.toISOString();
+
     let protests: ProtestEvent[] = [];
     if (this.db) {
       const rows = this.db.prepare(`
         SELECT * FROM protests
-        WHERE tanggal = ? AND deleted_at IS NULL
-      `).all(dateStr) as Array<Record<string, unknown>>;
+        WHERE deleted_at IS NULL
+          AND (
+            tanggal = ?
+            OR (
+              (tanggal IS NULL OR trim(tanggal) = '')
+              AND (
+                (event_datetime >= ? AND event_datetime < ?)
+                OR (event_datetime >= ? AND event_datetime < ?)
+              )
+            )
+          )
+      `).all(cleanDate, startWibIso, endWibIso, startUtcIso, endUtcIso) as Array<Record<string, unknown>>;
       protests = rows.map((r) => this.mapRowToProtest(r));
     } else {
-      protests = Array.from(this.memoryEvents.values()).filter(
-        (e) => e.tanggal === dateStr && !e.deleted_at
-      );
+      const startWibMs = startWib.getTime();
+      const endWibMs = endWib.getTime();
+      protests = Array.from(this.memoryEvents.values()).filter((e) => {
+        if (e.deleted_at) return false;
+        if (e.tanggal === cleanDate) return true;
+        if (!e.tanggal && e.event_datetime) {
+          const ms = new Date(e.event_datetime).getTime();
+          return ms >= startWibMs && ms < endWibMs;
+        }
+        return false;
+      });
     }
 
     const allPoints: ProtestPoint[] = [];

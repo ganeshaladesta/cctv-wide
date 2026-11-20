@@ -53,7 +53,7 @@ import {
 import MultiViewGrid from "@/components/multi-view-grid";
 import { ProtestDashboard } from "@/components/protests/protest-dashboard";
 import { ProtestDetailModal } from "@/components/protests/protest-detail-modal";
-import { ProtestEvent, ProtestStats } from "@/lib/types/protests";
+import { ProtestEvent, ProtestStats, DailyUnrasSituationOverview } from "@/lib/types/protests";
 import { ExecutiveKpiStrip } from "@/components/executive/executive-kpi-strip";
 import { UnrasPriorityPanel } from "@/components/executive/unras-priority-panel";
 import { OperationalAlertsPanel } from "@/components/executive/operational-alerts-panel";
@@ -77,6 +77,14 @@ interface CommandCenterProps {
   initialProvinces: Province[];
   initialCameras: Camera[];
   initialTab?: DashboardTab;
+}
+
+function getTodayWib(): string {
+  try {
+    return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta" }).format(new Date());
+  } catch {
+    return new Date().toISOString().slice(0, 10);
+  }
 }
 
 export default function CommandCenter({
@@ -182,7 +190,9 @@ export default function CommandCenter({
     initialCameras.slice(0, 4)
   );
 
-  // Unjuk Rasa Monitoring States
+  // Unjuk Rasa Monitoring States (Strict Asia/Jakarta Daily Operational Scope)
+  const [operationalDateWib, setOperationalDateWib] = useState<string>(getTodayWib);
+  const [dailyOverview, setDailyOverview] = useState<DailyUnrasSituationOverview | null>(null);
   const [protestEvents, setProtestEvents] = useState<ProtestEvent[]>([]);
   const [protestStats, setProtestStats] = useState<ProtestStats | null>(null);
   const [focusProtestEvent, setFocusProtestEvent] = useState<ProtestEvent | null>(null);
@@ -286,26 +296,43 @@ export default function CommandCenter({
     }
   }, []);
 
-  // Fetch verified and active Unjuk Rasa events from database
-  const fetchProtestEvents = useCallback(async () => {
+  // Fetch verified and active Unjuk Rasa events strictly for today's operational date (Asia/Jakarta)
+  const fetchProtestEvents = useCallback(async (targetDate?: string) => {
+    const activeDate = targetDate || operationalDateWib;
     try {
-      const res = await fetch("/api/protests?is_archived=false&limit=150&sort_by=tanggal&sort_order=desc");
+      const res = await fetch(`/api/protests?operational_date=${encodeURIComponent(activeDate)}&is_archived=false&limit=250&sort_by=tanggal&sort_order=desc`);
       const j = await res.json();
       if (j.success && Array.isArray(j.data)) {
         setProtestEvents(j.data);
       }
     } catch (err) {
-      console.warn("[CommandCenter] Gagal memuat event unjuk rasa:", err);
+      console.warn("[CommandCenter] Gagal memuat event unjuk rasa harian:", err);
     }
-  }, []);
+  }, [operationalDateWib]);
+
+  // Fetch daily situation overview for today's operational date
+  const fetchDailyOverview = useCallback(async (targetDate?: string) => {
+    const activeDate = targetDate || operationalDateWib;
+    try {
+      const res = await fetch(`/api/protests/daily-situation?date=${encodeURIComponent(activeDate)}`);
+      const j = await res.json();
+      if (j.success && j.data) {
+        setDailyOverview(j.data);
+      }
+    } catch (err) {
+      console.warn("[CommandCenter] Gagal memuat daily situation overview:", err);
+    }
+  }, [operationalDateWib]);
 
   // Listen to global unjuk rasa update events for immediate reactive map layer & KPI refresh
   useEffect(() => {
     fetchProtestEvents();
+    fetchDailyOverview();
     fetchProtestStats();
 
     const handleProtestUpdated = () => {
       fetchProtestEvents();
+      fetchDailyOverview();
       fetchProtestStats();
     };
 
@@ -313,7 +340,24 @@ export default function CommandCenter({
     return () => {
       window.removeEventListener("scc-protest-updated", handleProtestUpdated);
     };
-  }, [fetchProtestEvents, fetchProtestStats]);
+  }, [fetchProtestEvents, fetchDailyOverview, fetchProtestStats]);
+
+  // Midnight Rollover Watcher (Asia/Jakarta): automatically flips operational date and reloads daily events at 00:00 WIB
+  useEffect(() => {
+    const checkRollover = () => {
+      const currentWib = getTodayWib();
+      if (currentWib !== operationalDateWib) {
+        console.info(`[CommandCenter] Asia/Jakarta midnight rollover: ${operationalDateWib} -> ${currentWib}`);
+        setOperationalDateWib(currentWib);
+        fetchProtestEvents(currentWib);
+        fetchDailyOverview(currentWib);
+        fetchProtestStats();
+      }
+    };
+
+    const interval = setInterval(checkRollover, 30000);
+    return () => clearInterval(interval);
+  }, [operationalDateWib, fetchProtestEvents, fetchDailyOverview, fetchProtestStats]);
 
   const cities = useMemo(() => {
     if (!selectedProvince) return allCities;
@@ -844,6 +888,8 @@ export default function CommandCenter({
         cctvStats={stats}
         unrasStats={protestStats}
         activeProtests={protestEvents}
+        dailyOverview={dailyOverview}
+        operationalDate={operationalDateWib}
         onSelectTab={setActiveTab}
       />
 
@@ -994,6 +1040,7 @@ export default function CommandCenter({
               <div className="lg:col-span-4 min-w-0">
                 <UnrasPriorityPanel
                   protestEvents={protestEvents}
+                  operationalDate={operationalDateWib}
                   onSelectEventDetail={handleProtestMarkerClick}
                   onFocusEventOnMap={(event) => {
                     if (event.validated_lat !== null && event.validated_lng !== null) {

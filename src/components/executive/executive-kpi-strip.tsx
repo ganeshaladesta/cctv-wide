@@ -15,7 +15,7 @@ import {
   Eye
 } from "lucide-react";
 import { DashboardStats } from "@/lib/types";
-import { ProtestStats, ProtestEvent } from "@/lib/types/protests";
+import { ProtestStats, ProtestEvent, DailyUnrasSituationOverview } from "@/lib/types/protests";
 import { ProgramsCard } from "@/components/motion-ui";
 import { DashboardTab } from "@/components/branding";
 
@@ -23,6 +23,8 @@ interface ExecutiveKpiStripProps {
   cctvStats: DashboardStats;
   unrasStats: ProtestStats | null;
   activeProtests: ProtestEvent[];
+  dailyOverview?: DailyUnrasSituationOverview | null;
+  operationalDate?: string;
   onSelectTab: (tab: DashboardTab) => void;
   onFilterUnrasStatus?: (status: string) => void;
 }
@@ -31,10 +33,20 @@ export function ExecutiveKpiStrip({
   cctvStats,
   unrasStats,
   activeProtests,
+  dailyOverview,
+  operationalDate,
   onSelectTab,
   onFilterUnrasStatus
 }: ExecutiveKpiStripProps) {
-  // Calculate total crowd across currently active events
+  const todayWib = React.useMemo(() => {
+    try {
+      return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta" }).format(new Date());
+    } catch {
+      return new Date().toISOString().slice(0, 10);
+    }
+  }, []);
+
+  // Calculate fallback total crowd across currently active events
   const totalActiveCrowd = React.useMemo(() => {
     return activeProtests.reduce((acc, p) => {
       const crowd = p.actual_crowd_size || p.estimasi_massa_source || 0;
@@ -42,8 +54,8 @@ export function ExecutiveKpiStrip({
     }, 0);
   }, [activeProtests]);
 
-  // Count active provinces affected
-  const affectedProvincesCount = React.useMemo(() => {
+  // Fallback count active provinces affected
+  const fallbackProvincesCount = React.useMemo(() => {
     const provs = new Set(
       activeProtests
         .map((p) => p.provinsi)
@@ -52,10 +64,14 @@ export function ExecutiveKpiStrip({
     return provs.size;
   }, [activeProtests]);
 
-  const ongoingCount = unrasStats?.ongoing_events ?? activeProtests.filter((p) => p.status === "ongoing").length;
-  const monitoringCount = unrasStats?.monitoring_events ?? activeProtests.filter((p) => p.status === "monitoring").length;
-  const scheduledCount = unrasStats?.scheduled_events ?? activeProtests.filter((p) => p.status === "scheduled").length;
-  const totalEvents = unrasStats?.total_events ?? activeProtests.length;
+  // Strict Daily Metrics based on Asia/Jakarta operational date
+  const totalPoints = dailyOverview ? dailyOverview.total_points : activeProtests.length;
+  const ongoingCount = dailyOverview ? dailyOverview.ongoing_points_count : activeProtests.filter((p) => p.status === "ongoing").length;
+  const monitoringCount = dailyOverview ? dailyOverview.monitoring_points_count : activeProtests.filter((p) => p.status === "monitoring").length;
+  const scheduledCount = dailyOverview ? dailyOverview.scheduled_points_count : activeProtests.filter((p) => p.status === "scheduled").length;
+  const totalCrowd = dailyOverview ? dailyOverview.total_estimated_crowd : totalActiveCrowd;
+  const totalElements = dailyOverview ? dailyOverview.total_identified_elements : 0;
+  const affectedProvincesCount = dailyOverview ? dailyOverview.affected_provinces_count : fallbackProvincesCount;
 
   const uptimePct = cctvStats.total_cameras > 0
     ? ((cctvStats.online_cameras / cctvStats.total_cameras) * 100).toFixed(1)
@@ -76,7 +92,7 @@ export function ExecutiveKpiStrip({
             </h2>
           </div>
           <span className="text-[10px] text-[#64748B] font-mono">
-            Zona Waktu: Asia/Jakarta (WIB) • Data Persisten Real-Time
+            Hari Operasional: <strong className="text-slate-200">{operationalDate || todayWib} WIB</strong> (Asia/Jakarta) • Data Persisten Real-Time
           </span>
         </div>
 
@@ -156,7 +172,7 @@ export function ExecutiveKpiStrip({
             onClick={() => onFilterUnrasStatus?.("ongoing")}
           >
             <div className="flex items-center justify-between gap-1 text-[11px] text-[#98A4B8]">
-              <span className="truncate">Aksi Berlangsung (Ongoing)</span>
+              <span className="truncate">Aksi Berlangsung Hari Ini</span>
               <Flame className={`w-3.5 h-3.5 ${ongoingCount > 0 ? "text-red-400 animate-pulse" : "text-slate-400"} shrink-0`} />
             </div>
             <p className={`text-base sm:text-lg font-extrabold mt-1 font-mono tabular-nums truncate ${ongoingCount > 0 ? "text-red-400" : "text-white"}`}>
@@ -190,8 +206,8 @@ export function ExecutiveKpiStrip({
               </span>
             </div>
             <div className="flex items-center justify-between text-[10px] text-[#98A4B8] mt-1 pt-1 border-t border-white/[0.06] font-mono">
-              <span>Total Aksi Terdata:</span>
-              <span className="text-white font-bold">{totalEvents}</span>
+              <span>Total Titik Hari Ini:</span>
+              <span className="text-white font-bold">{totalPoints} Titik</span>
             </div>
           </ProgramsCard>
 
@@ -203,16 +219,16 @@ export function ExecutiveKpiStrip({
             onClick={() => onSelectTab("protests")}
           >
             <div className="flex items-center justify-between gap-1 text-[11px] text-[#98A4B8]">
-              <span className="truncate">Estimasi Massa Lapangan</span>
+              <span className="truncate">Estimasi Massa Hari Ini</span>
               <Users className="w-3.5 h-3.5 text-blue-400 group-hover:scale-110 transition-transform shrink-0" />
             </div>
             <p className="text-base sm:text-lg font-extrabold mt-1 font-mono tabular-nums text-amber-300 truncate">
-              {totalActiveCrowd > 0
-                ? `±${totalActiveCrowd.toLocaleString("id-ID")}`
+              {totalCrowd > 0
+                ? `±${totalCrowd.toLocaleString("id-ID")}`
                 : "Termonitor"} <span className="text-xs font-normal text-[#98A4B8]">org</span>
             </p>
             <div className="flex items-center justify-between text-[10px] text-[#98A4B8] mt-1 pt-1 border-t border-white/[0.06] font-mono">
-              <span>Wilayah Terdampak:</span>
+              <span>{totalElements > 0 ? `${totalElements} Elemen • ` : ""}{affectedProvincesCount} Wilayah</span>
               <span className="text-blue-300 font-bold">{affectedProvincesCount} Provinsi</span>
             </div>
           </ProgramsCard>
