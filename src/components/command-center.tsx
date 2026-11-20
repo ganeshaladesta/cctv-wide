@@ -53,7 +53,11 @@ import {
 import MultiViewGrid from "@/components/multi-view-grid";
 import { ProtestDashboard } from "@/components/protests/protest-dashboard";
 import { ProtestDetailModal } from "@/components/protests/protest-detail-modal";
-import { ProtestEvent } from "@/lib/types/protests";
+import { ProtestEvent, ProtestStats } from "@/lib/types/protests";
+import { ExecutiveKpiStrip } from "@/components/executive/executive-kpi-strip";
+import { UnrasPriorityPanel } from "@/components/executive/unras-priority-panel";
+import { OperationalAlertsPanel } from "@/components/executive/operational-alerts-panel";
+import { RegionalDistributionMatrix } from "@/components/executive/regional-distribution-matrix";
 
 const InteractiveMap = dynamic(() => import("@/components/interactive-map"), {
   ssr: false,
@@ -180,6 +184,7 @@ export default function CommandCenter({
 
   // Unjuk Rasa Monitoring States
   const [protestEvents, setProtestEvents] = useState<ProtestEvent[]>([]);
+  const [protestStats, setProtestStats] = useState<ProtestStats | null>(null);
   const [focusProtestEvent, setFocusProtestEvent] = useState<ProtestEvent | null>(null);
   const [selectedProtestForModal, setSelectedProtestForModal] = useState<string | null>(null);
   const [isProtestModalOpen, setIsProtestModalOpen] = useState(false);
@@ -268,32 +273,47 @@ export default function CommandCenter({
     return () => controller.abort();
   }, []);
 
-  // Fetch verified Unjuk Rasa events with valid coordinates from Supabase
+  // Fetch overall UNRAS statistics
+  const fetchProtestStats = useCallback(async () => {
+    try {
+      const res = await fetch("/api/protests/stats", { cache: "no-store" });
+      const j = await res.json();
+      if (j.success && j.data) {
+        setProtestStats(j.data);
+      }
+    } catch (err) {
+      console.warn("[CommandCenter] Gagal memuat statistik unras:", err);
+    }
+  }, []);
+
+  // Fetch verified and active Unjuk Rasa events from database
   const fetchProtestEvents = useCallback(async () => {
     try {
-      const res = await fetch("/api/protests?has_coords=true&is_archived=false&limit=200");
+      const res = await fetch("/api/protests?is_archived=false&limit=150&sort_by=tanggal&sort_order=desc");
       const j = await res.json();
       if (j.success && Array.isArray(j.data)) {
         setProtestEvents(j.data);
       }
     } catch (err) {
-      console.warn("[CommandCenter] Gagal memuat event unjuk rasa terpetakan:", err);
+      console.warn("[CommandCenter] Gagal memuat event unjuk rasa:", err);
     }
   }, []);
 
-  // Listen to global unjuk rasa update events for immediate reactive map layer refresh
+  // Listen to global unjuk rasa update events for immediate reactive map layer & KPI refresh
   useEffect(() => {
     fetchProtestEvents();
+    fetchProtestStats();
 
     const handleProtestUpdated = () => {
       fetchProtestEvents();
+      fetchProtestStats();
     };
 
     window.addEventListener("scc-protest-updated", handleProtestUpdated);
     return () => {
       window.removeEventListener("scc-protest-updated", handleProtestUpdated);
     };
-  }, [fetchProtestEvents]);
+  }, [fetchProtestEvents, fetchProtestStats]);
 
   const cities = useMemo(() => {
     if (!selectedProvince) return allCities;
@@ -819,32 +839,13 @@ export default function CommandCenter({
         multiViewCount={multiViewCameras.length}
       />
 
-      {/* National Telemetry KPI Strip (Programs-inspired staggered cards) */}
-      <section
-        aria-label="Statistik Pemantauan Nasional"
-        className="relative z-[1] px-2.5 sm:px-4 lg:px-6 pt-3 pb-2"
-      >
-        <div className="max-w-[1600px] mx-auto grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2 sm:gap-2.5">
-          {kpiCards.map((kpi, idx) => (
-            <ProgramsCard
-              key={kpi.label}
-              index={idx}
-              enableShimmer
-              className={`p-3 sm:p-3.5 rounded-2xl ee-surface ${kpi.borderTone}`}
-            >
-              <div className="flex items-center justify-between gap-1 text-[11px] sm:text-xs text-[#98A4B8]">
-                <span className="truncate">{kpi.label}</span>
-                {kpi.icon}
-              </div>
-              <p
-                className={`text-base sm:text-lg font-extrabold mt-1 font-mono tabular-nums truncate ${kpi.valueColor}`}
-              >
-                {kpi.value}
-              </p>
-            </ProgramsCard>
-          ))}
-        </div>
-      </section>
+      {/* Executive Security Situational Telemetry Strip (CCTV Readiness & National UNRAS Situation) */}
+      <ExecutiveKpiStrip
+        cctvStats={stats}
+        unrasStats={protestStats}
+        activeProtests={protestEvents}
+        onSelectTab={setActiveTab}
+      />
 
       {/* Global Search & Animated Morph Dropdown Filter Bar (below Main Navbar) */}
       <section
@@ -967,130 +968,77 @@ export default function CommandCenter({
       {/* Main Workspace Area */}
       <main className="relative z-[1] flex-1 max-w-[1600px] w-full mx-auto px-2.5 sm:px-4 lg:px-6 py-2.5 sm:py-3.5">
         {activeTab === "map" && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-3.5 sm:gap-4">
-            {/* Left Interactive Map (8 cols on desktop, isolated at z-index: 0) */}
-            <div className="lg:col-span-8 h-[460px] sm:h-[560px] lg:h-[620px] min-w-0">
-              <InteractiveMap
-                markers={markers}
-                provinces={provinces}
-                selectedProvince={selectedProvince}
-                selectedCity={selectedCity}
-                previewCamera={activePreviewCamera}
-                loadingMarkers={loadingMarkers}
-                onMarkerClick={handleMapMarkerClick}
-                onClosePreview={handleCloseCameraInterface}
-                onOpenFullDetail={handleOpenFullDetail}
-                onAddToMultiView={handleAddToMultiView}
-                protestEvents={protestEvents}
-                focusProtestEvent={focusProtestEvent}
-                onProtestMarkerClick={handleProtestMarkerClick}
-              />
+          <div className="space-y-3.5 sm:space-y-4">
+            {/* ROW 3: Main Operational Workspace */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-3.5 sm:gap-4">
+              {/* Left Interactive Map (8 cols on desktop, isolated at z-index: 0) */}
+              <div className="lg:col-span-8 h-[520px] sm:h-[600px] lg:h-[660px] min-w-0">
+                <InteractiveMap
+                  markers={markers}
+                  provinces={provinces}
+                  selectedProvince={selectedProvince}
+                  selectedCity={selectedCity}
+                  previewCamera={activePreviewCamera}
+                  loadingMarkers={loadingMarkers}
+                  onMarkerClick={handleMapMarkerClick}
+                  onClosePreview={handleCloseCameraInterface}
+                  onOpenFullDetail={handleOpenFullDetail}
+                  onAddToMultiView={handleAddToMultiView}
+                  protestEvents={protestEvents}
+                  focusProtestEvent={focusProtestEvent}
+                  onProtestMarkerClick={handleProtestMarkerClick}
+                />
+              </div>
+
+              {/* Right Executive Situation & Priority Panel (4 cols on desktop) */}
+              <div className="lg:col-span-4 min-w-0">
+                <UnrasPriorityPanel
+                  protestEvents={protestEvents}
+                  onSelectEventDetail={handleProtestMarkerClick}
+                  onFocusEventOnMap={(event) => {
+                    if (event.validated_lat !== null && event.validated_lng !== null) {
+                      setFocusProtestEvent(event);
+                    }
+                  }}
+                  onOpenDedicatedMultiView={handleOpenDedicatedMultiView}
+                  onViewAllProtests={() => setActiveTab("protests")}
+                  cameras={cameras}
+                  totalMatchingCameras={totalMatching}
+                  onSelectCamera={handleDirectoryCameraClick}
+                  onToggleMultiViewCamera={handleAddToMultiView}
+                  multiViewIdSet={multiViewIdSet}
+                  page={page}
+                  totalPages={totalPages}
+                  onPageChange={fetchCameraPage}
+                  loadingCameras={loadingCameras}
+                />
+              </div>
             </div>
 
-            {/* Right Live Camera Directory Sidebar (DAFTAR KAMERA — 4 cols on desktop) */}
-            <div
-              data-testid="daftar-kamera-sidebar"
-              className="lg:col-span-4 h-[480px] sm:h-[560px] lg:h-[620px] rounded-2xl ee-surface flex flex-col overflow-hidden min-w-0"
-            >
-              <div className="px-3.5 py-2.5 bg-[#0C1018] border-b border-[var(--border-subtle)] flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 min-w-0">
-                  <Filter className="w-3.5 h-3.5 text-[#60A5FA] shrink-0" />
-                  <h2 className="text-xs font-bold uppercase tracking-wider text-[#F3F6FB] truncate">
-                    Daftar Kamera ({totalMatching.toLocaleString("id-ID")})
-                  </h2>
-                </div>
-                <span className="text-[11px] text-[#98A4B8] font-mono tabular-nums shrink-0">
-                  Hal {page}/{totalPages}
-                </span>
-              </div>
+            {/* ROW 4: Executive Operational Alerts & Regional Situational Distribution */}
+            <div className="space-y-3.5 sm:space-y-4">
+              <OperationalAlertsPanel
+                protestEvents={protestEvents}
+                protestStats={protestStats}
+                cctvStats={stats}
+                onSelectEventDetail={handleProtestMarkerClick}
+                onFocusEventOnMap={(event) => {
+                  if (event.validated_lat !== null && event.validated_lng !== null) {
+                    setFocusProtestEvent(event);
+                  }
+                }}
+                onSelectTab={setActiveTab}
+              />
 
-              <div className="flex-1 overflow-y-auto divide-y divide-[var(--border-subtle)]">
-                {loadingCameras ? (
-                  <div className="p-8 text-center text-xs text-[#98A4B8]">
-                    Memuat daftar kamera...
-                  </div>
-                ) : cameras.length === 0 ? (
-                  <div className="p-8 text-center text-xs text-[#657287]">
-                    Tidak ada kamera yang sesuai filter.
-                  </div>
-                ) : (
-                  cameras.map((cam) => (
-                    <div
-                      key={cam.id}
-                      data-testid={`directory-camera-row-${cam.id}`}
-                      className="p-3 hover:bg-white/[0.035] transition-colors flex items-start justify-between gap-2"
-                    >
-                      <button
-                        type="button"
-                        data-testid={`directory-camera-btn-${cam.id}`}
-                        onClick={() => handleDirectoryCameraClick(cam.id, cam)}
-                        className="text-left min-w-0 flex-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#3B82F6] rounded-md"
-                      >
-                        <div className="flex items-center gap-1.5">
-                          <span
-                            className={`w-2 h-2 rounded-full shrink-0 ${
-                              cam.status === "ONLINE"
-                                ? "bg-[#10B981]"
-                                : "bg-[#EF4444]"
-                            }`}
-                          />
-                          <p className="text-xs font-semibold text-[#F3F6FB] truncate">
-                            {cam.name}
-                          </p>
-                        </div>
-                        <p className="text-[11px] text-[#98A4B8] truncate mt-0.5">
-                          {cam.city_name}, {cam.province_name}
-                        </p>
-                        <p className="text-[10px] text-[#657287] truncate mt-0.5 font-mono">
-                          {cam.source_name} • {cam.protocol}
-                        </p>
-                      </button>
-
-                      <div className="flex items-center gap-1 shrink-0">
-                        <FavoritesButton
-                          cameraId={cam.id}
-                          cameraName={cam.name}
-                          size="sm"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => handleAddToMultiView(cam)}
-                          title="Tambah ke Multi-View"
-                          aria-label={`Tambah ${cam.name} ke Multi-View`}
-                          className="p-1.5 rounded-lg bg-[#161C2B] hover:bg-[#3B82F6] border border-[var(--border-subtle)] text-[#98A4B8] hover:text-white transition-colors"
-                        >
-                          <PlusSquare className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-
-              {/* Pagination Footer */}
-              <div className="p-2.5 bg-[#0C1018] border-t border-[var(--border-subtle)] flex items-center justify-between gap-2">
-                <button
-                  type="button"
-                  disabled={page <= 1}
-                  onClick={() => fetchCameraPage(page - 1)}
-                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#161C2B] hover:bg-[#1C2436] border border-[var(--border-subtle)] disabled:opacity-40 text-xs text-[#E2E8F0] transition-colors"
-                >
-                  <ChevronLeft className="w-3.5 h-3.5" />
-                  <span>Sebelumnya</span>
-                </button>
-                <span className="text-[11px] text-[#98A4B8] font-mono tabular-nums truncate">
-                  Hal {page}/{totalPages}
-                </span>
-                <button
-                  type="button"
-                  disabled={page >= totalPages}
-                  onClick={() => fetchCameraPage(page + 1)}
-                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#161C2B] hover:bg-[#1C2436] border border-[var(--border-subtle)] disabled:opacity-40 text-xs text-[#E2E8F0] transition-colors"
-                >
-                  <span>Berikutnya</span>
-                  <ChevronRight className="w-3.5 h-3.5" />
-                </button>
-              </div>
+              <RegionalDistributionMatrix
+                cctvStats={stats}
+                provinces={provinces}
+                protestEvents={protestEvents}
+                onSelectProvinceFilter={(provId) => {
+                  setSelectedProvince(provId);
+                  setSelectedCity("");
+                }}
+              />
             </div>
           </div>
         )}
