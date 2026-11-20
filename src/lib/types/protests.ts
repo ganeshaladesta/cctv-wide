@@ -66,6 +66,22 @@ export interface ProtestEvent {
   keterangan_source: string | null; // Catatan asli dari sumber Excel
   raw_source_payload?: Record<string, unknown>; // JSON dump dari row asli Excel
 
+  // Excel C:AC Source Attributes
+  urutan_bulan?: number | null; // Col B: Urutan Bulan
+  tahun?: number | null; // Col C: Tahun (derived from tanggal)
+  bulan?: string | null; // Col D: Bulan (derived from tanggal)
+  kategori_kejadian?: string | null; // Col E: Kategori Kejadian (default: 'Unjuk Rasa')
+  kp_kpw?: string | null; // Col F: KP/KPw ('KPBI', 'KPwDN')
+  regional?: string | null; // Col G: Regional ('Kantor Pusat', 'Jawa', 'Sumatera', 'KTI', 'Papua')
+  kategori_isu?: string | null; // Col S: Kategori Isu
+  dampak?: string | null; // Col T: Dampak ('Tidak Ada', 'Ada')
+  keterangan_dampak?: string | null; // Col U: Keterangan Dampak
+  nama_pelapor?: string | null; // Col V: Nama Pelapor
+  info_awal?: string | null; // Col W: Info Awal Unras
+  tindak_lanjut?: string | null; // Col X: Tindak Lanjut KPBI
+  progres_asistensi?: string | null; // Col AA: Progres Asistensi
+  realisasi?: string | null; // Col AC: Realisasi ('Terealisasi', 'Audiensi', 'Dibatalkan', 'Tidak Terealisasi', 'Mediasi', 'Dialihkan')
+
   // Operator-Managed & Validated Attributes (NEVER overwritten by Excel sync)
   status: ProtestStatus;
   urgency: ProtestUrgency;

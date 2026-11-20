@@ -164,6 +164,22 @@ CREATE TABLE IF NOT EXISTS protests (
     validated_by_id TEXT,
     validated_by_name TEXT,
 
+    -- Excel C:AC Source Fields
+    urutan_bulan INTEGER DEFAULT 1,
+    tahun INTEGER,
+    bulan TEXT,
+    kategori_kejadian TEXT DEFAULT 'Unjuk Rasa',
+    kp_kpw TEXT DEFAULT 'KPBI',
+    regional TEXT DEFAULT 'Kantor Pusat',
+    kategori_isu TEXT,
+    dampak TEXT DEFAULT 'Tidak Ada',
+    keterangan_dampak TEXT,
+    nama_pelapor TEXT,
+    info_awal TEXT,
+    tindak_lanjut TEXT,
+    progres_asistensi TEXT,
+    realisasi TEXT DEFAULT 'Terealisasi',
+
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     deleted_at TEXT,

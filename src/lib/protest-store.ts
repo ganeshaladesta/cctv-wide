@@ -51,6 +51,7 @@ import {
   updateSyncLogInSupabase,
   upsertExcelBatchInSupabase
 } from "./supabase-protest-service";
+import { deriveTahunBulan, deriveEventTimestamps, generateIdKejadian, generateKodeUnras } from "./unras-helpers";
 
 // Haversine distance in meters
 export function calculateDistanceMeters(
@@ -356,6 +357,29 @@ class ProtestDataStore {
         this.db.exec("ALTER TABLE protests ADD COLUMN validated_by_name TEXT;");
       }
 
+      // Excel C:AC Source Attributes migration
+      const cAcFields = [
+        { name: "urutan_bulan", def: "INTEGER" },
+        { name: "tahun", def: "INTEGER" },
+        { name: "bulan", def: "TEXT" },
+        { name: "kategori_kejadian", def: "TEXT DEFAULT 'Unjuk Rasa'" },
+        { name: "kp_kpw", def: "TEXT" },
+        { name: "regional", def: "TEXT" },
+        { name: "kategori_isu", def: "TEXT" },
+        { name: "dampak", def: "TEXT DEFAULT 'Tidak Ada'" },
+        { name: "keterangan_dampak", def: "TEXT" },
+        { name: "nama_pelapor", def: "TEXT" },
+        { name: "info_awal", def: "TEXT" },
+        { name: "tindak_lanjut", def: "TEXT" },
+        { name: "progres_asistensi", def: "TEXT" },
+        { name: "realisasi", def: "TEXT" }
+      ];
+      for (const col of cAcFields) {
+        if (!protestCols.includes(col.name)) {
+          this.db.exec(`ALTER TABLE protests ADD COLUMN ${col.name} ${col.def};`);
+        }
+      }
+
       // Only seed dummy data if explicitly enabled via SEED_DUMMY_DATA=true
       if (process.env.SEED_DUMMY_DATA === "true") {
         const row = this.db.prepare("SELECT COUNT(*) as count FROM protests").get() as { count: number };
@@ -596,9 +620,9 @@ class ProtestDataStore {
       if (filters.q && filters.q.trim()) {
         const term = `%${filters.q.trim().toLowerCase()}%`;
         whereClauses.push(
-          "(LOWER(isu_tuntutan) LIKE ? OR LOWER(lokasi) LIKE ? OR LOWER(organisasi_kelompok) LIKE ? OR LOWER(id_kejadian) LIKE ? OR LOWER(kode_unras) LIKE ?)"
+          "(LOWER(isu_tuntutan) LIKE ? OR LOWER(lokasi) LIKE ? OR LOWER(organisasi_kelompok) LIKE ? OR LOWER(korlap_pimpinan) LIKE ? OR LOWER(kategori_isu) LIKE ? OR LOWER(nama_pelapor) LIKE ? OR LOWER(id_kejadian) LIKE ? OR LOWER(kode_unras) LIKE ?)"
         );
-        params.push(term, term, term, term, term);
+        params.push(term, term, term, term, term, term, term, term);
       }
 
       const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
@@ -653,6 +677,9 @@ class ProtestDataStore {
           e.isu_tuntutan.toLowerCase().includes(term) ||
           e.lokasi.toLowerCase().includes(term) ||
           (e.organisasi_kelompok && e.organisasi_kelompok.toLowerCase().includes(term)) ||
+          (e.korlap_pimpinan && e.korlap_pimpinan.toLowerCase().includes(term)) ||
+          (e.kategori_isu && e.kategori_isu.toLowerCase().includes(term)) ||
+          (e.nama_pelapor && e.nama_pelapor.toLowerCase().includes(term)) ||
           e.id_kejadian.toLowerCase().includes(term) ||
           e.kode_unras.toLowerCase().includes(term)
       );
@@ -752,15 +779,19 @@ class ProtestDataStore {
     const id = input.id || crypto.randomUUID();
     const now = new Date().toISOString();
     const hasCoords = input.validated_lat != null && input.validated_lng != null;
+    const tb = deriveTahunBulan(input.tanggal || "");
+    const timestamps = deriveEventTimestamps(input.tanggal || "", input.waktu_mulai || "09:00 WIB");
+    const autoIdKejadian = input.id_kejadian || generateIdKejadian(input.provinsi, input.tanggal);
+    const autoKodeUnras = input.kode_unras || generateKodeUnras(input.tanggal, input.lokasi);
 
     const newEvent: ProtestEvent = {
       id,
-      id_kejadian: input.id_kejadian,
-      kode_unras: input.kode_unras || `UNR-${Date.now()}`,
+      id_kejadian: autoIdKejadian,
+      kode_unras: autoKodeUnras,
       tanggal: input.tanggal,
-      waktu_mulai: input.waktu_mulai || null,
+      waktu_mulai: timestamps.normalizedTime,
       waktu_selesai: input.waktu_selesai || null,
-      event_datetime: input.event_datetime || null,
+      event_datetime: input.event_datetime || timestamps.eventDatetimeIso,
       lokasi: input.lokasi,
       titik_kumpul: input.titik_kumpul || null,
       sasaran_aksi: input.sasaran_aksi || null,
@@ -801,7 +832,23 @@ class ProtestDataStore {
       created_at: now,
       updated_at: now,
       deleted_at: null,
-      last_synced_at: null
+      last_synced_at: null,
+
+      // Excel C:AC Source Attributes
+      urutan_bulan: input.urutan_bulan ?? null,
+      tahun: input.tahun || tb.tahun,
+      bulan: input.bulan || tb.bulan,
+      kategori_kejadian: input.kategori_kejadian || "Unjuk Rasa",
+      kp_kpw: input.kp_kpw || (input.provinsi === "DKI Jakarta" ? "KPBI" : "KPwDN"),
+      regional: input.regional || (input.provinsi === "DKI Jakarta" ? "Kantor Pusat" : "Jawa"),
+      kategori_isu: input.kategori_isu || null,
+      dampak: input.dampak || "Tidak Ada",
+      keterangan_dampak: input.keterangan_dampak || null,
+      nama_pelapor: input.nama_pelapor || user.name || null,
+      info_awal: input.info_awal || null,
+      tindak_lanjut: input.tindak_lanjut || null,
+      progres_asistensi: input.progres_asistensi || null,
+      realisasi: input.realisasi || null
     };
 
     if (this.db) {
@@ -815,7 +862,10 @@ class ProtestDataStore {
           editorial_draft, editorial_final, is_archived, completed_at, completed_by_id,
           completed_by_name, suggested_lat, suggested_lng, suggested_address, geocoding_provider,
           geocoding_confidence, location_validation_status, geocoding_alternatives, validated_at,
-          validated_by_id, validated_by_name, created_at, updated_at, deleted_at, last_synced_at
+          validated_by_id, validated_by_name, created_at, updated_at, deleted_at, last_synced_at,
+          urutan_bulan, tahun, bulan, kategori_kejadian, kp_kpw, regional,
+          kategori_isu, dampak, keterangan_dampak, nama_pelapor, info_awal, tindak_lanjut,
+          progres_asistensi, realisasi
         ) VALUES (
           ?, ?, ?, ?, ?, ?, ?,
           ?, ?, ?, ?, ?,
@@ -825,7 +875,10 @@ class ProtestDataStore {
           ?, ?, ?, ?, ?,
           ?, ?, ?, ?, ?,
           ?, ?, ?, ?,
-          ?, ?, ?, ?, ?, ?
+          ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?,
+          ?, ?
         )
       `);
 
@@ -876,7 +929,21 @@ class ProtestDataStore {
         newEvent.created_at,
         newEvent.updated_at,
         newEvent.deleted_at,
-        newEvent.last_synced_at
+        newEvent.last_synced_at,
+        newEvent.urutan_bulan ?? null,
+        newEvent.tahun ?? null,
+        newEvent.bulan ?? null,
+        newEvent.kategori_kejadian ?? null,
+        newEvent.kp_kpw ?? null,
+        newEvent.regional ?? null,
+        newEvent.kategori_isu ?? null,
+        newEvent.dampak ?? null,
+        newEvent.keterangan_dampak ?? null,
+        newEvent.nama_pelapor ?? null,
+        newEvent.info_awal ?? null,
+        newEvent.tindak_lanjut ?? null,
+        newEvent.progres_asistensi ?? null,
+        newEvent.realisasi ?? null
       );
     } else {
       this.memoryEvents.set(newEvent.id, newEvent);
@@ -931,12 +998,30 @@ class ProtestDataStore {
       ? updates.location_validation_status
       : (hasCoords ? "verified" : existing.location_validation_status || "unmapped");
 
+    const tb = updates.tanggal ? deriveTahunBulan(updates.tanggal) : null;
+    const timestamps = updates.tanggal ? deriveEventTimestamps(updates.tanggal, updates.waktu_mulai || existing.waktu_mulai || "09:00 WIB") : null;
+
     const updatedEvent: ProtestEvent = {
       ...existing,
       ...updates,
       id: existing.id,
       id_kejadian: existing.id_kejadian, // immutable source identity
       kode_unras: existing.kode_unras,
+      event_datetime: updates.event_datetime || (timestamps ? timestamps.eventDatetimeIso : existing.event_datetime),
+      urutan_bulan: updates.urutan_bulan !== undefined ? updates.urutan_bulan : existing.urutan_bulan,
+      tahun: updates.tahun !== undefined ? updates.tahun : (tb ? tb.tahun : existing.tahun),
+      bulan: updates.bulan !== undefined ? updates.bulan : (tb ? tb.bulan : existing.bulan),
+      kategori_kejadian: updates.kategori_kejadian !== undefined ? updates.kategori_kejadian : (existing.kategori_kejadian || "Unjuk Rasa"),
+      kp_kpw: updates.kp_kpw !== undefined ? updates.kp_kpw : existing.kp_kpw,
+      regional: updates.regional !== undefined ? updates.regional : existing.regional,
+      kategori_isu: updates.kategori_isu !== undefined ? updates.kategori_isu : existing.kategori_isu,
+      dampak: updates.dampak !== undefined ? updates.dampak : (existing.dampak || "Tidak Ada"),
+      keterangan_dampak: updates.keterangan_dampak !== undefined ? updates.keterangan_dampak : existing.keterangan_dampak,
+      nama_pelapor: updates.nama_pelapor !== undefined ? updates.nama_pelapor : existing.nama_pelapor,
+      info_awal: updates.info_awal !== undefined ? updates.info_awal : existing.info_awal,
+      tindak_lanjut: updates.tindak_lanjut !== undefined ? updates.tindak_lanjut : existing.tindak_lanjut,
+      progres_asistensi: updates.progres_asistensi !== undefined ? updates.progres_asistensi : existing.progres_asistensi,
+      realisasi: updates.realisasi !== undefined ? updates.realisasi : existing.realisasi,
       validated_lat: updatedLat,
       validated_lng: updatedLng,
       has_coordinates: hasCoords,
@@ -984,6 +1069,20 @@ class ProtestDataStore {
           validated_at = ?,
           validated_by_id = ?,
           validated_by_name = ?,
+          urutan_bulan = ?,
+          tahun = ?,
+          bulan = ?,
+          kategori_kejadian = ?,
+          kp_kpw = ?,
+          regional = ?,
+          kategori_isu = ?,
+          dampak = ?,
+          keterangan_dampak = ?,
+          nama_pelapor = ?,
+          info_awal = ?,
+          tindak_lanjut = ?,
+          progres_asistensi = ?,
+          realisasi = ?,
           updated_at = ?
         WHERE id = ?
       `).run(
@@ -1024,6 +1123,20 @@ class ProtestDataStore {
         updatedEvent.validated_at ?? null,
         updatedEvent.validated_by_id ?? null,
         updatedEvent.validated_by_name ?? null,
+        updatedEvent.urutan_bulan ?? null,
+        updatedEvent.tahun ?? null,
+        updatedEvent.bulan ?? null,
+        updatedEvent.kategori_kejadian ?? null,
+        updatedEvent.kp_kpw ?? null,
+        updatedEvent.regional ?? null,
+        updatedEvent.kategori_isu ?? null,
+        updatedEvent.dampak ?? null,
+        updatedEvent.keterangan_dampak ?? null,
+        updatedEvent.nama_pelapor ?? null,
+        updatedEvent.info_awal ?? null,
+        updatedEvent.tindak_lanjut ?? null,
+        updatedEvent.progres_asistensi ?? null,
+        updatedEvent.realisasi ?? null,
         now,
         existing.id
       );
@@ -2237,7 +2350,23 @@ class ProtestDataStore {
       created_at: String(r.created_at),
       updated_at: String(r.updated_at),
       deleted_at: r.deleted_at ? String(r.deleted_at) : null,
-      last_synced_at: r.last_synced_at ? String(r.last_synced_at) : null
+      last_synced_at: r.last_synced_at ? String(r.last_synced_at) : null,
+
+      // Excel C:AC Source Attributes
+      urutan_bulan: r.urutan_bulan != null ? Number(r.urutan_bulan) : null,
+      tahun: r.tahun != null ? Number(r.tahun) : (r.tanggal ? new Date(String(r.tanggal)).getFullYear() : null),
+      bulan: r.bulan ? String(r.bulan) : null,
+      kategori_kejadian: r.kategori_kejadian ? String(r.kategori_kejadian) : "Unjuk Rasa",
+      kp_kpw: r.kp_kpw ? String(r.kp_kpw) : null,
+      regional: r.regional ? String(r.regional) : null,
+      kategori_isu: r.kategori_isu ? String(r.kategori_isu) : null,
+      dampak: r.dampak ? String(r.dampak) : "Tidak Ada",
+      keterangan_dampak: r.keterangan_dampak ? String(r.keterangan_dampak) : null,
+      nama_pelapor: r.nama_pelapor ? String(r.nama_pelapor) : null,
+      info_awal: r.info_awal ? String(r.info_awal) : null,
+      tindak_lanjut: r.tindak_lanjut ? String(r.tindak_lanjut) : null,
+      progres_asistensi: r.progres_asistensi ? String(r.progres_asistensi) : null,
+      realisasi: r.realisasi ? String(r.realisasi) : null
     };
   }
 }

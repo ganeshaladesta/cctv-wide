@@ -83,8 +83,32 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 
     const body = await request.json();
 
+    if (body.estimasi_massa_source !== undefined && body.estimasi_massa_source !== null && body.estimasi_massa_source !== '') {
+      const massa = Number(body.estimasi_massa_source);
+      if (isNaN(massa) || massa < 0) {
+        return NextResponse.json(
+          { success: false, error: 'Jumlah massa harus berupa angka bernilai 0 atau lebih.' },
+          { status: 400 }
+        );
+      }
+    }
+
     const updated = await protestStore.updateProtest(existing.id, {
+      tanggal: body.tanggal,
+      waktu_mulai: body.waktu_mulai,
+      waktu_selesai: body.waktu_selesai,
+      lokasi: body.lokasi,
+      titik_kumpul: body.titik_kumpul,
+      sasaran_aksi: body.sasaran_aksi,
+      isu_tuntutan: body.isu_tuntutan,
+      organisasi_kelompok: body.organisasi_kelompok,
+      korlap_pimpinan: body.korlap_pimpinan,
+      wilayah_hukum: body.wilayah_hukum,
+      provinsi: body.provinsi,
+      kota_kabupaten: body.kota_kabupaten,
+      status: body.status,
       situation_summary: body.situation_summary,
+      estimasi_massa_source: body.estimasi_massa_source !== undefined ? (body.estimasi_massa_source === null || body.estimasi_massa_source === '' ? null : Number(body.estimasi_massa_source)) : undefined,
       actual_crowd_size: body.actual_crowd_size !== undefined ? (body.actual_crowd_size === null ? null : Number(body.actual_crowd_size)) : undefined,
       validated_lat: body.validated_lat !== undefined ? (body.validated_lat === null ? null : Number(body.validated_lat)) : undefined,
       validated_lng: body.validated_lng !== undefined ? (body.validated_lng === null ? null : Number(body.validated_lng)) : undefined,
@@ -96,9 +120,23 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       validated_by_name: body.validated_lat !== undefined && body.validated_lat !== null ? user.name : body.validated_by_name,
       urgency: body.urgency,
       category_id: body.category_id,
-      editorial_draft: body.editorial_draft,
+      editorial_draft: body.editorial_draft || body.redaksi,
       editorial_final: body.editorial_final,
-      is_archived: body.is_archived !== undefined ? Boolean(body.is_archived) : undefined
+      is_archived: body.is_archived !== undefined ? Boolean(body.is_archived) : undefined,
+
+      // Excel C:AC Source Attributes
+      urutan_bulan: body.urutan_bulan !== undefined ? (body.urutan_bulan === null ? null : Number(body.urutan_bulan)) : undefined,
+      kategori_kejadian: body.kategori_kejadian,
+      kp_kpw: body.kp_kpw,
+      regional: body.regional,
+      kategori_isu: body.kategori_isu,
+      dampak: body.dampak,
+      keterangan_dampak: body.keterangan_dampak,
+      nama_pelapor: body.nama_pelapor,
+      info_awal: body.info_awal,
+      tindak_lanjut: body.tindak_lanjut,
+      progres_asistensi: body.progres_asistensi,
+      realisasi: body.realisasi
     }, user);
 
     return NextResponse.json({

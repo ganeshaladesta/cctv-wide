@@ -33,6 +33,7 @@ import {
 } from "@/lib/types/protests";
 import { Camera } from "@/lib/types";
 import dynamic from "next/dynamic";
+import { ProtestFormModal } from "./protest-form-modal";
 
 const ProtestLocationPicker = dynamic(
   () => import("./protest-location-picker").then((mod) => mod.ProtestLocationPicker),
@@ -88,6 +89,7 @@ export function ProtestDetailModal({
   const [latInput, setLatInput] = useState("");
   const [lngInput, setLngInput] = useState("");
   const [isPickerOpen, setIsPickerOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [savingSummary, setSavingSummary] = useState(false);
 
   const fetchDetail = async (id: string) => {
@@ -385,12 +387,23 @@ export function ProtestDetailModal({
               </p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg text-[#98A4B8] hover:text-white hover:bg-white/5 transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsEditModalOpen(true)}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-600/20 text-blue-400 border border-blue-500/30 hover:bg-blue-600 hover:text-white transition-all flex items-center gap-1.5 cursor-pointer"
+              title="Edit Data Unras Lengkap (C:AC)"
+            >
+              <Edit3 className="w-3.5 h-3.5" />
+              <span>Edit Data Unras</span>
+            </button>
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-lg text-[#98A4B8] hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Navigation Tabs */}
@@ -509,6 +522,18 @@ export function ProtestDetailModal({
                         <span className="text-white font-medium">{eventData.id_kejadian} / {eventData.kode_unras}</span>
                       </div>
                       <div>
+                        <span className="text-[#98A4B8] block">Kategori Kejadian:</span>
+                        <span className="text-white font-medium">{eventData.kategori_kejadian || "Unjuk Rasa"}</span>
+                      </div>
+                      <div>
+                        <span className="text-[#98A4B8] block">KP / KPw & Regional:</span>
+                        <span className="text-white font-medium">{eventData.kp_kpw || "-"} • {eventData.regional || "-"}</span>
+                      </div>
+                      <div>
+                        <span className="text-[#98A4B8] block">Provinsi & Lokasi (Kota/Kab):</span>
+                        <span className="text-white font-medium">{eventData.provinsi || "-"} • {eventData.kota_kabupaten || "-"}</span>
+                      </div>
+                      <div>
                         <span className="text-[#98A4B8] block">Waktu Pelaksanaan:</span>
                         <span className="text-white font-medium">{eventData.tanggal} ({eventData.waktu_mulai || "09:00 WIB"})</span>
                       </div>
@@ -521,8 +546,24 @@ export function ProtestDetailModal({
                         <span className="text-white font-medium">{eventData.titik_kumpul || "-"} / {eventData.sasaran_aksi || "-"}</span>
                       </div>
                       <div>
-                        <span className="text-[#98A4B8] block">Elemen / Organisasi:</span>
+                        <span className="text-[#98A4B8] block">Elemen / Aliansi Massa:</span>
                         <span className="text-white font-medium">{eventData.organisasi_kelompok || "Massa Gabungan"}</span>
+                      </div>
+                      <div>
+                        <span className="text-[#98A4B8] block">Kategori Isu:</span>
+                        <span className="text-white font-medium">{eventData.kategori_isu || "-"}</span>
+                      </div>
+                      <div>
+                        <span className="text-[#98A4B8] block">Dampak & Keterangan:</span>
+                        <span className="text-white font-medium">{eventData.dampak || "Tidak Ada"} {eventData.keterangan_dampak ? `(${eventData.keterangan_dampak})` : ""}</span>
+                      </div>
+                      <div>
+                        <span className="text-[#98A4B8] block">Pelapor & Realisasi:</span>
+                        <span className="text-white font-medium">{eventData.nama_pelapor || "-"} • Realisasi: {eventData.realisasi || "-"}</span>
+                      </div>
+                      <div>
+                        <span className="text-[#98A4B8] block">Progres Asistensi:</span>
+                        <span className="text-white font-medium">{eventData.progres_asistensi || "-"}</span>
                       </div>
                       <div>
                         <span className="text-[#98A4B8] block">Korlap / Penanggung Jawab:</span>
@@ -531,10 +572,6 @@ export function ProtestDetailModal({
                       <div>
                         <span className="text-[#98A4B8] block">Wilayah Hukum:</span>
                         <span className="text-white font-medium">{eventData.wilayah_hukum || "-"} ({eventData.provinsi})</span>
-                      </div>
-                      <div>
-                        <span className="text-[#98A4B8] block">Keterangan Sumber:</span>
-                        <span className="text-white font-medium">{eventData.keterangan_source || "-"}</span>
                       </div>
                     </div>
                   </div>
@@ -1095,43 +1132,63 @@ export function ProtestDetailModal({
         </div>
       </div>
     </div>
-
-    {/* Expanded Interactive Map Picker Overlay (75-80% Screen Width) */}
-    {isPickerOpen && (
-      <div
-        className="fixed inset-0 z-[100000] bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto pointer-events-auto unras-picker-overlay"
-        onClick={(e) => {
-          if (e.target === e.currentTarget) setIsPickerOpen(false);
-        }}
-      >
-        <div
-          className="relative w-full max-w-4xl lg:max-w-5xl my-auto pointer-events-auto"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <ProtestLocationPicker
-            initialLat={latInput ? parseFloat(latInput) : (eventData?.validated_lat ?? null)}
-            initialLng={lngInput ? parseFloat(lngInput) : (eventData?.validated_lng ?? null)}
-            initialLocationName={eventData?.lokasi}
-            city={eventData?.kota_kabupaten || undefined}
-            province={eventData?.provinsi || undefined}
-            suggestedLat={eventData?.suggested_lat}
-            suggestedLng={eventData?.suggested_lng}
-            suggestedAddress={eventData?.suggested_address}
-            suggestedConfidence={eventData?.geocoding_confidence}
-            compact={false}
-            onSelectLocation={(pickedLat, pickedLng, label) => {
-              setLatInput(pickedLat !== null ? String(pickedLat) : "");
-              setLngInput(pickedLng !== null ? String(pickedLng) : "");
-              setIsPickerOpen(false);
-            }}
-            onClose={() => setIsPickerOpen(false)}
-          />
-        </div>
-      </div>
-    )}
   </div>
   );
 
-  return createPortal(modalContent, document.body);
+  return (
+    <>
+      {createPortal(modalContent, document.body)}
+
+      {/* Standalone Map Picker Modal Portaled directly to document.body */}
+      {isPickerOpen && typeof document !== "undefined" && createPortal(
+        <div
+          className="fixed inset-0 z-[100000] bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto pointer-events-auto"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setIsPickerOpen(false);
+          }}
+        >
+          <div
+            className="relative w-full max-w-4xl lg:max-w-5xl my-auto pointer-events-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <ProtestLocationPicker
+              initialLat={latInput ? parseFloat(latInput) : (eventData?.validated_lat ?? null)}
+              initialLng={lngInput ? parseFloat(lngInput) : (eventData?.validated_lng ?? null)}
+              initialLocationName={eventData?.lokasi}
+              city={eventData?.kota_kabupaten || undefined}
+              province={eventData?.provinsi || undefined}
+              suggestedLat={eventData?.suggested_lat}
+              suggestedLng={eventData?.suggested_lng}
+              suggestedAddress={eventData?.suggested_address}
+              suggestedConfidence={eventData?.geocoding_confidence}
+              compact={false}
+              onSelectLocation={(pickedLat, pickedLng, label) => {
+                setLatInput(pickedLat !== null ? String(pickedLat) : "");
+                setLngInput(pickedLng !== null ? String(pickedLng) : "");
+                setIsPickerOpen(false);
+              }}
+              onClose={() => setIsPickerOpen(false)}
+            />
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Edit Data Unras Modal */}
+      {isEditModalOpen && eventData && (
+        <ProtestFormModal
+          isOpen={isEditModalOpen}
+          onClose={() => setIsEditModalOpen(false)}
+          mode="edit"
+          initialData={eventData}
+          onSaved={(updated) => {
+            setEventData(updated);
+            if (protestId) fetchDetail(protestId);
+            notifyUpdated();
+          }}
+        />
+      )}
+    </>
+  );
 }
 

@@ -78,6 +78,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Validation of numeric crowd size >= 0
+    let massaNum: number | null = null;
+    if (body.estimasi_massa_source !== undefined && body.estimasi_massa_source !== null && body.estimasi_massa_source !== '') {
+      massaNum = Number(body.estimasi_massa_source);
+      if (isNaN(massaNum) || massaNum < 0) {
+        return NextResponse.json(
+          { success: false, error: 'Jumlah massa harus berupa angka bernilai 0 atau lebih.' },
+          { status: 400 }
+        );
+      }
+    }
+
     const created = await protestStore.createProtest({
       id_kejadian: body.id_kejadian,
       kode_unras: body.kode_unras,
@@ -88,7 +100,7 @@ export async function POST(request: NextRequest) {
       titik_kumpul: body.titik_kumpul || null,
       sasaran_aksi: body.sasaran_aksi || null,
       isu_tuntutan: body.isu_tuntutan,
-      estimasi_massa_source: body.estimasi_massa_source ? Number(body.estimasi_massa_source) : null,
+      estimasi_massa_source: massaNum,
       organisasi_kelompok: body.organisasi_kelompok || null,
       korlap_pimpinan: body.korlap_pimpinan || null,
       wilayah_hukum: body.wilayah_hukum || null,
@@ -101,7 +113,23 @@ export async function POST(request: NextRequest) {
       validated_lat: body.validated_lat !== undefined && body.validated_lat !== null ? Number(body.validated_lat) : null,
       validated_lng: body.validated_lng !== undefined && body.validated_lng !== null ? Number(body.validated_lng) : null,
       situation_summary: body.situation_summary || null,
-      source_type: "manual"
+      editorial_draft: body.editorial_draft || body.redaksi || null,
+      editorial_final: body.editorial_final || null,
+      source_type: "manual",
+
+      // Excel C:AC Source Attributes
+      urutan_bulan: body.urutan_bulan !== undefined && body.urutan_bulan !== null ? Number(body.urutan_bulan) : null,
+      kategori_kejadian: body.kategori_kejadian || 'Unjuk Rasa',
+      kp_kpw: body.kp_kpw || (body.provinsi === 'DKI Jakarta' ? 'KPBI' : 'KPwDN'),
+      regional: body.regional || (body.provinsi === 'DKI Jakarta' ? 'Kantor Pusat' : 'Jawa'),
+      kategori_isu: body.kategori_isu || null,
+      dampak: body.dampak || 'Tidak Ada',
+      keterangan_dampak: body.keterangan_dampak || null,
+      nama_pelapor: body.nama_pelapor || user.name || null,
+      info_awal: body.info_awal || null,
+      tindak_lanjut: body.tindak_lanjut || null,
+      progres_asistensi: body.progres_asistensi || null,
+      realisasi: body.realisasi || null
     }, user);
 
     return NextResponse.json(

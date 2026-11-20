@@ -7,6 +7,7 @@ import { getSupabaseAdminClient, isSupabaseConfigured } from "./supabase";
 import { normalizeTimeString } from "./time-normalization";
 import { geocodingService } from "./geocoding/geocoding-service";
 import { ensureValidUuid } from "./auth-roles";
+import { deriveTahunBulan, deriveEventTimestamps, generateIdKejadian, generateKodeUnras } from "./unras-helpers";
 import {
   ProtestEvent,
   ProtestFilterParams,
@@ -75,7 +76,23 @@ function mapRowToProtest(row: any): ProtestEvent {
     updated_at: row.updated_at ? new Date(row.updated_at).toISOString() : new Date().toISOString(),
     deleted_at: row.deleted_at ? new Date(row.deleted_at).toISOString() : null,
     last_synced_at: row.last_synced_at ? new Date(row.last_synced_at).toISOString() : null,
-    source_type: row.source_type || (row.raw_source_payload?.source_type) || "excel_sync"
+    source_type: row.source_type || (row.raw_source_payload?.source_type) || "excel_sync",
+
+    // Excel C:AC Source Attributes
+    urutan_bulan: row.urutan_bulan !== null && row.urutan_bulan !== undefined ? Number(row.urutan_bulan) : null,
+    tahun: row.tahun !== null && row.tahun !== undefined ? Number(row.tahun) : (row.tanggal ? new Date(row.tanggal).getFullYear() : null),
+    bulan: row.bulan || null,
+    kategori_kejadian: row.kategori_kejadian || "Unjuk Rasa",
+    kp_kpw: row.kp_kpw || null,
+    regional: row.regional || null,
+    kategori_isu: row.kategori_isu || null,
+    dampak: row.dampak || "Tidak Ada",
+    keterangan_dampak: row.keterangan_dampak || null,
+    nama_pelapor: row.nama_pelapor || null,
+    info_awal: row.info_awal || null,
+    tindak_lanjut: row.tindak_lanjut || null,
+    progres_asistensi: row.progres_asistensi || null,
+    realisasi: row.realisasi || null
   };
 }
 
@@ -162,7 +179,7 @@ export async function queryProtestsFromSupabase(filters: ProtestFilterParams = {
   if (filters.q && filters.q.trim()) {
     const term = `%${filters.q.trim()}%`;
     query = query.or(
-      `isu_tuntutan.ilike.${term},lokasi.ilike.${term},organisasi_kelompok.ilike.${term},kode_unras.ilike.${term},id_kejadian.ilike.${term}`
+      `isu_tuntutan.ilike.${term},lokasi.ilike.${term},organisasi_kelompok.ilike.${term},korlap_pimpinan.ilike.${term},kategori_isu.ilike.${term},nama_pelapor.ilike.${term},kode_unras.ilike.${term},id_kejadian.ilike.${term}`
     );
   }
 
@@ -215,13 +232,18 @@ export async function createProtestInSupabase(
   const supabase = getSupabaseAdminClient();
   if (!supabase) throw new Error("Supabase is not configured.");
 
+  const tb = deriveTahunBulan(payload.tanggal || "");
+  const timestamps = deriveEventTimestamps(payload.tanggal || "", payload.waktu_mulai || "09:00 WIB");
+  const autoIdKejadian = payload.id_kejadian || generateIdKejadian(payload.provinsi, payload.tanggal);
+  const autoKodeUnras = payload.kode_unras || generateKodeUnras(payload.tanggal, payload.lokasi);
+
   const row = {
-    id_kejadian: payload.id_kejadian || `MANUAL-${Date.now()}`,
-    kode_unras: payload.kode_unras || `UR-${Date.now().toString().slice(-6)}`,
+    id_kejadian: autoIdKejadian,
+    kode_unras: autoKodeUnras,
     tanggal: payload.tanggal,
-    waktu_mulai: payload.waktu_mulai ? normalizeTimeString(payload.waktu_mulai).time : null,
+    waktu_mulai: timestamps.normalizedTime,
     waktu_selesai: payload.waktu_selesai ? normalizeTimeString(payload.waktu_selesai).time : null,
-    event_datetime: payload.event_datetime || (payload.tanggal ? `${payload.tanggal}T09:00:00+07:00` : new Date().toISOString()),
+    event_datetime: payload.event_datetime || timestamps.eventDatetimeIso,
     lokasi: payload.lokasi,
     titik_kumpul: payload.titik_kumpul || null,
     sasaran_aksi: payload.sasaran_aksi || null,
@@ -252,7 +274,23 @@ export async function createProtestInSupabase(
     editorial_final: payload.editorial_final || null,
     is_archived: Boolean(payload.is_archived),
     source_type: payload.source_type || "manual",
-    raw_source_payload: { source_type: payload.source_type || "manual" }
+    raw_source_payload: { source_type: payload.source_type || "manual" },
+
+    // Excel C:AC Source Attributes
+    urutan_bulan: payload.urutan_bulan ?? null,
+    tahun: payload.tahun || tb.tahun,
+    bulan: payload.bulan || tb.bulan,
+    kategori_kejadian: payload.kategori_kejadian || "Unjuk Rasa",
+    kp_kpw: payload.kp_kpw || (payload.provinsi === "DKI Jakarta" ? "KPBI" : "KPwDN"),
+    regional: payload.regional || (payload.provinsi === "DKI Jakarta" ? "Kantor Pusat" : "Jawa"),
+    kategori_isu: payload.kategori_isu || null,
+    dampak: payload.dampak || "Tidak Ada",
+    keterangan_dampak: payload.keterangan_dampak || null,
+    nama_pelapor: payload.nama_pelapor || (_user?.name || null),
+    info_awal: payload.info_awal || null,
+    tindak_lanjut: payload.tindak_lanjut || null,
+    progres_asistensi: payload.progres_asistensi || null,
+    realisasi: payload.realisasi || null
   };
 
   const { data, error } = await supabase
@@ -334,6 +372,32 @@ export async function updateProtestInSupabase(
   if (updates.completed_at !== undefined) patch.completed_at = updates.completed_at;
   if (updates.completed_by_id !== undefined) patch.completed_by_id = updates.completed_by_id ? ensureValidUuid(updates.completed_by_id) : null;
   if (updates.completed_by_name !== undefined) patch.completed_by_name = updates.completed_by_name;
+
+  // Excel C:AC Source Attributes
+  if (updates.urutan_bulan !== undefined) patch.urutan_bulan = updates.urutan_bulan;
+  if (updates.kategori_kejadian !== undefined) patch.kategori_kejadian = updates.kategori_kejadian;
+  if (updates.kp_kpw !== undefined) patch.kp_kpw = updates.kp_kpw;
+  if (updates.regional !== undefined) patch.regional = updates.regional;
+  if (updates.kategori_isu !== undefined) patch.kategori_isu = updates.kategori_isu;
+  if (updates.dampak !== undefined) patch.dampak = updates.dampak;
+  if (updates.keterangan_dampak !== undefined) patch.keterangan_dampak = updates.keterangan_dampak;
+  if (updates.nama_pelapor !== undefined) patch.nama_pelapor = updates.nama_pelapor;
+  if (updates.info_awal !== undefined) patch.info_awal = updates.info_awal;
+  if (updates.tindak_lanjut !== undefined) patch.tindak_lanjut = updates.tindak_lanjut;
+  if (updates.progres_asistensi !== undefined) patch.progres_asistensi = updates.progres_asistensi;
+  if (updates.realisasi !== undefined) patch.realisasi = updates.realisasi;
+
+  if (updates.tanggal !== undefined) {
+    patch.tanggal = updates.tanggal;
+    const tb = deriveTahunBulan(updates.tanggal);
+    patch.tahun = updates.tahun !== undefined ? updates.tahun : tb.tahun;
+    patch.bulan = updates.bulan !== undefined ? updates.bulan : tb.bulan;
+    const timestamps = deriveEventTimestamps(updates.tanggal, updates.waktu_mulai || existing.waktu_mulai || "09:00 WIB");
+    patch.event_datetime = timestamps.eventDatetimeIso;
+  } else {
+    if (updates.tahun !== undefined) patch.tahun = updates.tahun;
+    if (updates.bulan !== undefined) patch.bulan = updates.bulan;
+  }
 
   const { data, error } = await supabase
     .from("protests")
