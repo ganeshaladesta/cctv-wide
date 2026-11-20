@@ -1,0 +1,277 @@
+{
+  "recordsCount": 1603,
+  "kpKpwCounts": {
+    "KPwDN": 398,
+    "KPBI": 1204,
+    "KPWDN": 1
+  },
+  "kpKpwRegional": {
+    "KPwDN": {
+      "KTI": 191,
+      "SUMATERA": 117,
+      "JAWA": 82,
+      "Sumatera": 4,
+      "Jawa": 1,
+      "Kantor Pusat": 2,
+      "Papua": 1
+    },
+    "KPBI": {
+      "Kantor Pusat": 1204
+    },
+    "KPWDN": {
+      "SUMATERA": 1
+    }
+  },
+  "hierarchy": {
+    "KPwDN": {
+      "KTI": {
+        "Kalimantan Timur": {
+          "Samarinda": 78,
+          "Balikpapan": 3
+        },
+        "Kalimantan Tengah": {
+          "Palangkaraya": 15
+        },
+        "Kalimantan Selatan": {
+          "Banjarmasin": 22
+        },
+        "Kalimantan Utara": {
+          "Tarakan": 4
+        },
+        "Nusa Tenggara Barat": {
+          "Mataram": 8,
+          "NTB": 1
+        },
+        "Papua": {
+          "Jayapura": 2
+        },
+        "Sulawesi Utara": {
+          "Manado": 5
+        },
+        "Maluku Utara": {
+          "Ternate": 2
+        },
+        "Nusa Tenggara Timur": {
+          "Kupang": 5
+        },
+        "Sulawesi Barat": {
+          "Mamudju": 10
+        },
+        "Papua Barat": {
+          "Manokwari": 2
+        },
+        "Bali": {
+          "Denpasar": 2
+        },
+        "Sulawesi Tengah": {
+          "Palu": 14
+        },
+        "Maluku": {
+          "Ambon": 2
+        },
+        "Gorontalo": {
+          "Gorontalo": 1
+        },
+        "Sulawesi Selatan": {
+          "Makassar": 1
+        },
+        "Kalimantang Tengah": {
+          "Palangkaraya": 1
+        },
+        "Sultra": {
+          "Kendari": 1
+        },
+        "Kaltim": {
+          "Samarinda": 2
+        },
+        "NTB": {
+          "Mataram": 5
+        },
+        "Sulawesi Tenggara": {
+          "Kendari": 1
+        },
+        "Sulaweri Tenggara": {
+          "Kendari": 1
+        },
+        "Kepulauan Riau": {
+          "Batam": 2
+        },
+        "KALIMANTAN SELATAN": {
+          "Banjarmasin": 1
+        }
+      },
+      "SUMATERA": {
+        "Kepulauan Riau": {
+          "Batam": 33
+        },
+        "Bangka Belitung": {
+          "Pangkal Pinang": 24
+        },
+        "Riau": {
+          "Pekanbaru": 4
+        },
+        "Jambi": {
+          "Jambi": 15
+        },
+        "Sumatera Utara": {
+          "Pematangsiantar": 3,
+          "Sibolga": 2,
+          "Medan": 10
+        },
+        "Aceh": {
+          "Lhokseumawe": 1,
+          "Banda Aceh": 5
+        },
+        "Sumatera Barat": {
+          "Padang": 2
+        },
+        "Bengkulu": {
+          "Bengkulu": 8
+        },
+        "Sumatera Selatan": {
+          "Palembang": 1
+        },
+        "Lampung": {
+          "Bandar Lampung": 3
+        },
+        "Pematangsiantar": {
+          "Pematangsiantar": 2
+        },
+        "Kep. Riau": {
+          "Batam": 1
+        },
+        "Provinsi Sumatera Utara": {
+          "Medan": 1
+        },
+        "Kepulauan Bangka Belitung": {
+          "Pangkal Pinang": 1
+        },
+        "BANGKA BELITUNG": {
+          "Pangkal Pinang": 1
+        }
+      },
+      "JAWA": {
+        "Jawa Barat": {
+          "Bandung": 14,
+          "Tasikmalaya": 2,
+          "Cirebon": 1
+        },
+        "Jawa Timur": {
+          "Surabaya": 20,
+          "Malang": 5,
+          "Kediri": 3
+        },
+        "DI Yogyakarta": {
+          "Yogyakarta": 14,
+          "DI Yogyakarta": 1
+        },
+        "Jawa Tengah": {
+          "Semarang": 15,
+          "Solo": 2,
+          "Purwokerto": 2
+        },
+        "DKI Jakarta": {
+          "Jakarta": 1,
+          "LUAR KOPERBI": 1
+        },
+        "Purwokerto": {
+          "Purwokerto": 1
+        }
+      },
+      "Sumatera": {
+        "Kep. Riau": {
+          "Batam": 1
+        },
+        "Pematangsiantar": {
+          "Pematangsiantar": 1
+        },
+        "Sumatera Barat": {
+          "Padang": 2
+        }
+      },
+      "Jawa": {
+        "Jawa TImur": {
+          "Surabaya": 1
+        }
+      },
+      "Kantor Pusat": {
+        "Sumatera Utara": {
+          "Medan": 2
+        }
+      },
+      "Papua": {
+        "Papua": {
+          "Jayapura": 1
+        }
+      }
+    },
+    "KPBI": {
+      "Kantor Pusat": {
+        "DKI Jakarta": {
+          "Koperbi Thamrin": 35,
+          "LUAR KOPERBI": 1165
+        },
+        "Jawa Barat": {
+          "Koperbi Sinergi": 3
+        },
+        "DKI JAKARTA": {
+          "LUAR KOPERBI": 1
+        }
+      }
+    },
+    "KPWDN": {
+      "SUMATERA": {
+        "Kepulauan Bangka Belitung": {
+          "Bangka Belitung": 1
+        }
+      }
+    }
+  },
+  "anomalies": [
+    {
+      "type": "SUSPICIOUS_TYPO_OR_EMPTY",
+      "row": 729,
+      "id": "KEJ - 000000000003310",
+      "kpKpw": "KPwDN",
+      "regional": "KTI",
+      "provinsi": "Kalimantang Tengah",
+      "lokasi": "Palangkaraya"
+    },
+    {
+      "type": "SUSPICIOUS_TYPO_OR_EMPTY",
+      "row": 824,
+      "id": "KEJ - 000000000003405",
+      "kpKpw": "KPwDN",
+      "regional": "KTI",
+      "provinsi": "Sulaweri Tenggara",
+      "lokasi": "Kendari"
+    },
+    {
+      "type": "SUSPICIOUS_TYPO_OR_EMPTY",
+      "row": 868,
+      "id": "KEJ - 000000000003449",
+      "kpKpw": "KPwDN",
+      "regional": "JAWA",
+      "provinsi": "Purwokerto",
+      "lokasi": "Purwokerto"
+    },
+    {
+      "type": "KPwDN_KANTOR_PUSAT",
+      "row": 1003,
+      "id": "KEJ - 000000000003584",
+      "kpKpw": "KPwDN",
+      "regional": "Kantor Pusat",
+      "provinsi": "Sumatera Utara",
+      "lokasi": "Medan"
+    },
+    {
+      "type": "KPwDN_KANTOR_PUSAT",
+      "row": 1007,
+      "id": "KEJ - 000000000003588",
+      "kpKpw": "KPwDN",
+      "regional": "Kantor Pusat",
+      "provinsi": "Sumatera Utara",
+      "lokasi": "Medan"
+    }
+  ]
+}

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { protestStore } from '@/lib/protest-store';
 import { resolveCurrentUser, canEditProtest, canDeleteProtest } from '@/lib/auth-roles';
+import { masterDataService } from '@/lib/master-data-service';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -88,6 +89,27 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       if (isNaN(massa) || massa < 0) {
         return NextResponse.json(
           { success: false, error: 'Jumlah massa harus berupa angka bernilai 0 atau lebih.' },
+          { status: 400 }
+        );
+      }
+    }
+
+    // Validation of Master Data Cascading Hierarchy on Update
+    const checkKp = body.kp_kpw || existing.kp_kpw;
+    const checkReg = body.regional || existing.regional;
+    const checkProv = body.provinsi || existing.provinsi;
+    const checkLok = body.kota_kabupaten !== undefined ? body.kota_kabupaten : existing.kota_kabupaten;
+
+    if (checkKp && checkReg && checkProv) {
+      const hierarchyCheck = await masterDataService.validateHierarchy(
+        checkKp,
+        checkReg,
+        checkProv,
+        checkLok
+      );
+      if (!hierarchyCheck.valid) {
+        return NextResponse.json(
+          { success: false, error: hierarchyCheck.reason || 'Kombinasi hierarki wilayah tidak valid.' },
           { status: 400 }
         );
       }

@@ -271,4 +271,70 @@ CREATE TABLE IF NOT EXISTS protest_sync_logs (
 );
 CREATE INDEX IF NOT EXISTS idx_protest_sync_logs_started ON protest_sync_logs(started_at);
 
+-- UNRAS Hierarchical Master Data Tables
+CREATE TABLE IF NOT EXISTS master_kp_kpw (
+    id TEXT PRIMARY KEY,
+    code TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    normalized_name TEXT NOT NULL,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS master_regional (
+    id TEXT PRIMARY KEY,
+    kp_kpw_id TEXT NOT NULL REFERENCES master_kp_kpw(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    normalized_name TEXT NOT NULL,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (kp_kpw_id, normalized_name)
+);
+CREATE INDEX IF NOT EXISTS idx_regional_kp_kpw ON master_regional(kp_kpw_id);
+
+CREATE TABLE IF NOT EXISTS master_provinsi (
+    id TEXT PRIMARY KEY,
+    regional_id TEXT NOT NULL REFERENCES master_regional(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    normalized_name TEXT NOT NULL,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (regional_id, normalized_name)
+);
+CREATE INDEX IF NOT EXISTS idx_provinsi_regional ON master_provinsi(regional_id);
+
+CREATE TABLE IF NOT EXISTS master_lokasi (
+    id TEXT PRIMARY KEY,
+    provinsi_id TEXT NOT NULL REFERENCES master_provinsi(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    normalized_name TEXT NOT NULL,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (provinsi_id, normalized_name)
+);
+CREATE INDEX IF NOT EXISTS idx_lokasi_provinsi ON master_lokasi(provinsi_id);
+
+CREATE TABLE IF NOT EXISTS master_data_audit_review (
+    id TEXT PRIMARY KEY,
+    row_number INTEGER,
+    source_id_kejadian TEXT,
+    raw_kp_kpw TEXT,
+    raw_regional TEXT,
+    raw_provinsi TEXT,
+    raw_lokasi TEXT,
+    normalized_kp_kpw TEXT,
+    normalized_regional TEXT,
+    normalized_provinsi TEXT,
+    normalized_lokasi TEXT,
+    issues TEXT NOT NULL,
+    review_status TEXT NOT NULL DEFAULT 'pending_review',
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_audit_review_status ON master_data_audit_review(review_status);
+
+
 

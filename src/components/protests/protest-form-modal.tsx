@@ -35,6 +35,12 @@ import {
   generateIdKejadian
 } from "@/lib/unras-helpers";
 import {
+  GROUNDED_KP_KPW,
+  getHierarchyRegionals,
+  getHierarchyProvinces,
+  getHierarchyLocations
+} from "@/lib/master-data-hierarchy";
+import {
   PROVINCES,
   getProvincesByRegional,
   getCitiesByProvince,
@@ -85,7 +91,7 @@ export function ProtestFormModal({
     kp_kpw: "KPBI",
     regional: "Kantor Pusat",
     provinsi: "DKI Jakarta",
-    kota_kabupaten: "Jakarta Pusat",
+    kota_kabupaten: "LUAR KOPERBI",
 
     // Section C: Waktu & Lokasi
     waktu_mulai: "09:00 WIB",
@@ -123,6 +129,8 @@ export function ProtestFormModal({
     realisasi: "Terealisasi"
   });
 
+  const [showCustomLocationInput, setShowCustomLocationInput] = useState(false);
+
   useEffect(() => {
     setMounted(true);
     return () => setMounted(false);
@@ -131,6 +139,7 @@ export function ProtestFormModal({
   // Initialize or reset form on open / initialData change
   useEffect(() => {
     if (!isOpen) return;
+    setShowCustomLocationInput(false);
 
     if (mode === "edit" && initialData) {
       const p = initialData;
@@ -142,7 +151,7 @@ export function ProtestFormModal({
         kp_kpw: p.kp_kpw || (p.provinsi === "DKI Jakarta" ? "KPBI" : "KPwDN"),
         regional: p.regional || findRegionalByProvince(p.provinsi || ""),
         provinsi: p.provinsi || "DKI Jakarta",
-        kota_kabupaten: p.kota_kabupaten || "Jakarta Pusat",
+        kota_kabupaten: p.kota_kabupaten || (p.kp_kpw === "KPBI" ? "LUAR KOPERBI" : ""),
         waktu_mulai: p.waktu_mulai || "09:00 WIB",
         waktu_selesai: p.waktu_selesai || "",
         lokasi: p.lokasi || "",
@@ -180,7 +189,7 @@ export function ProtestFormModal({
         kp_kpw: "KPBI",
         regional: "Kantor Pusat",
         provinsi: "DKI Jakarta",
-        kota_kabupaten: "Jakarta Pusat",
+        kota_kabupaten: "LUAR KOPERBI",
         waktu_mulai: "09:00 WIB",
         waktu_selesai: "",
         lokasi: "",
@@ -216,59 +225,70 @@ export function ProtestFormModal({
     return deriveTahunBulan(formData.tanggal);
   }, [formData.tanggal]);
 
-  // Dependent Provinces based on Regional
+  // Cascading dropdown options based on grounded master data
+  const availableRegionals = useMemo(() => {
+    return getHierarchyRegionals(formData.kp_kpw);
+  }, [formData.kp_kpw]);
+
   const availableProvinces = useMemo(() => {
-    return getProvincesByRegional(formData.regional);
-  }, [formData.regional]);
+    return getHierarchyProvinces(formData.regional, formData.kp_kpw);
+  }, [formData.regional, formData.kp_kpw]);
 
-  // Dependent Cities based on Provinsi
-  const availableCities = useMemo(() => {
-    return getCitiesByProvince(formData.provinsi);
-  }, [formData.provinsi]);
+  const availableLocations = useMemo(() => {
+    return getHierarchyLocations(formData.provinsi, formData.regional, formData.kp_kpw);
+  }, [formData.provinsi, formData.regional, formData.kp_kpw]);
 
-  // Handler for form field change
+  // Handler for form field change with cascading reset
   const handleChange = (field: string, value: any) => {
     setIsDirty(true);
     setFormData((prev) => {
       const updated = { ...prev, [field]: value };
 
-      // Business logic: When KP/KPw changes
+      // 1. When KP/KPw changes: reset Regional, Provinsi, Lokasi
       if (field === "kp_kpw") {
-        if (value === "KPBI") {
-          updated.regional = "Kantor Pusat";
-          updated.provinsi = "DKI Jakarta";
-          updated.kota_kabupaten = "Jakarta Pusat";
-          updated.wilayah_hukum = "Polres Metro Jakarta Pusat";
-        } else if (value === "KPwDN" && prev.regional === "Kantor Pusat") {
-          updated.regional = "Jawa";
-          updated.provinsi = "Jawa Barat";
-          updated.kota_kabupaten = "Bandung";
-          updated.wilayah_hukum = "Polrestabes Bandung";
+        if (value !== prev.kp_kpw) {
+          setShowCustomLocationInput(false);
+          if (value === "KPBI") {
+            updated.regional = "Kantor Pusat";
+            updated.provinsi = "DKI Jakarta";
+            updated.kota_kabupaten = "LUAR KOPERBI";
+            updated.wilayah_hukum = "Polres Metro Jakarta Pusat";
+          } else if (value === "KPwDN") {
+            updated.regional = "";
+            updated.provinsi = "";
+            updated.kota_kabupaten = "";
+            updated.wilayah_hukum = "";
+          } else {
+            updated.regional = "";
+            updated.provinsi = "";
+            updated.kota_kabupaten = "";
+          }
         }
       }
 
-      // Business logic: When Regional changes
+      // 2. When Regional changes: reset Provinsi and Lokasi
       if (field === "regional") {
-        const provs = getProvincesByRegional(value);
-        if (provs.length > 0 && !provs.some((p) => p.name === prev.provinsi)) {
-          updated.provinsi = provs[0].name;
-          const cities = getCitiesByProvince(provs[0].name);
-          updated.kota_kabupaten = cities.length > 0 ? cities[0].name : "";
+        if (value !== prev.regional) {
+          setShowCustomLocationInput(false);
+          updated.provinsi = "";
+          updated.kota_kabupaten = "";
         }
       }
 
-      // Business logic: When Provinsi changes
+      // 3. When Provinsi changes: reset Lokasi and recalculate ID Kejadian
       if (field === "provinsi") {
-        const cities = getCitiesByProvince(value);
-        updated.kota_kabupaten = cities.length > 0 ? cities[0].name : "";
-        if (mode === "create") {
+        if (value !== prev.provinsi) {
+          setShowCustomLocationInput(false);
+          updated.kota_kabupaten = "";
+        }
+        if (value && mode === "create") {
           updated.id_kejadian = generateIdKejadian(value, prev.tanggal);
         }
       }
 
-      // Business logic: When Tanggal changes
+      // 4. When Tanggal changes in create mode
       if (field === "tanggal" && mode === "create") {
-        updated.id_kejadian = generateIdKejadian(prev.provinsi, value);
+        updated.id_kejadian = generateIdKejadian(prev.provinsi || "DKI Jakarta", value);
       }
 
       return updated;
@@ -529,87 +549,149 @@ export function ProtestFormModal({
             </div>
           </div>
 
-          {/* SECTION B: WILAYAH KEJADIAN */}
+          {/* SECTION B: WILAYAH KEJADIAN (DROPDOWN BERTINGKAT HIERARKIS) */}
           <div className="p-4 rounded-xl bg-[#121826] border border-[var(--border-subtle)] space-y-3">
             <div className="flex items-center justify-between border-b border-white/5 pb-2.5">
               <div className="flex items-center gap-2 text-xs font-bold text-blue-400 uppercase tracking-wider">
                 <Building className="w-4 h-4" />
-                <span>Bagian B: Wilayah Kejadian</span>
+                <span>Bagian B: Wilayah Kejadian (Hierarki Master Data)</span>
               </div>
-              <span className="text-[10px] text-[#64748B]">Kolom F s/d I</span>
+              <span className="text-[10px] text-[#64748B]">Kolom F s/d I • 4 Tingkat Bertingkat</span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+              {/* 1. KP / KPw */}
               <div>
-                <label className="block text-[11px] font-semibold text-[#98A4B8] mb-1">
-                  KP / KPw <span className="text-red-400">*</span>
+                <label className="block text-[11px] font-semibold text-[#98A4B8] mb-1 flex items-center justify-between">
+                  <span>KP / KPw <span className="text-red-400">*</span></span>
+                  <span className="text-[10px] text-blue-400/80 font-mono">Tingkat 1</span>
                 </label>
                 <select
                   value={formData.kp_kpw}
                   onChange={(e) => handleChange("kp_kpw", e.target.value)}
                   className="w-full bg-[#182132] border border-[var(--border-default)] rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500 cursor-pointer"
                 >
-                  {LIST_KP_KPW.map((opt) => (
-                    <option key={opt} value={opt}>
-                      {opt === "KPBI" ? "KPBI (Kantor Pusat)" : "KPwDN (Kantor Perwakilan Dalam Negeri)"}
-                    </option>
-                  ))}
+                  <option value="">-- Pilih KP / KPw --</option>
+                  <option value="KPBI">KPBI (Kantor Pusat)</option>
+                  <option value="KPwDN">KPwDN (Kantor Perwakilan Dalam Negeri)</option>
                 </select>
               </div>
 
+              {/* 2. Regional */}
               <div>
-                <label className="block text-[11px] font-semibold text-[#98A4B8] mb-1">
-                  Regional <span className="text-red-400">*</span>
+                <label className="block text-[11px] font-semibold text-[#98A4B8] mb-1 flex items-center justify-between">
+                  <span>Regional <span className="text-red-400">*</span></span>
+                  <span className="text-[10px] text-blue-400/80 font-mono">Tingkat 2</span>
                 </label>
                 <select
+                  disabled={!formData.kp_kpw}
                   value={formData.regional}
                   onChange={(e) => handleChange("regional", e.target.value)}
-                  className="w-full bg-[#182132] border border-[var(--border-default)] rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500 cursor-pointer"
+                  className={`w-full bg-[#182132] border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500 ${
+                    !formData.kp_kpw
+                      ? "opacity-50 cursor-not-allowed border-white/5 bg-[#0e131d]"
+                      : "border-[var(--border-default)] cursor-pointer"
+                  }`}
                 >
-                  {LIST_REGIONAL.map((opt) => (
-                    <option key={opt} value={opt}>
-                      {opt}
+                  <option value="">
+                    {!formData.kp_kpw ? "-- Pilih KP/KPw Dulu --" : "-- Pilih Regional --"}
+                  </option>
+                  {availableRegionals.map((reg) => (
+                    <option key={reg} value={reg}>
+                      {reg}
                     </option>
                   ))}
+                  {formData.regional && !availableRegionals.includes(formData.regional) && (
+                    <option value={formData.regional}>
+                      {formData.regional} (Non-standar)
+                    </option>
+                  )}
                 </select>
               </div>
 
+              {/* 3. Provinsi */}
               <div>
-                <label className="block text-[11px] font-semibold text-[#98A4B8] mb-1">
-                  Provinsi <span className="text-red-400">*</span>
+                <label className="block text-[11px] font-semibold text-[#98A4B8] mb-1 flex items-center justify-between">
+                  <span>Provinsi <span className="text-red-400">*</span></span>
+                  <span className="text-[10px] text-blue-400/80 font-mono">Tingkat 3</span>
                 </label>
                 <select
+                  disabled={!formData.regional}
                   value={formData.provinsi}
                   onChange={(e) => handleChange("provinsi", e.target.value)}
-                  className="w-full bg-[#182132] border border-[var(--border-default)] rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500 cursor-pointer"
+                  className={`w-full bg-[#182132] border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500 ${
+                    !formData.regional
+                      ? "opacity-50 cursor-not-allowed border-white/5 bg-[#0e131d]"
+                      : "border-[var(--border-default)] cursor-pointer"
+                  }`}
                 >
+                  <option value="">
+                    {!formData.regional ? "-- Pilih Regional Dulu --" : "-- Pilih Provinsi --"}
+                  </option>
                   {availableProvinces.map((prov) => (
-                    <option key={prov.id} value={prov.name}>
-                      {prov.name}
+                    <option key={prov} value={prov}>
+                      {prov}
                     </option>
                   ))}
+                  {formData.provinsi && !availableProvinces.includes(formData.provinsi) && (
+                    <option value={formData.provinsi}>
+                      {formData.provinsi} (Non-standar)
+                    </option>
+                  )}
                 </select>
               </div>
 
+              {/* 4. Lokasi */}
               <div>
-                <label className="block text-[11px] font-semibold text-[#98A4B8] mb-1">
-                  Lokasi (Kota / Kabupaten)
+                <label className="block text-[11px] font-semibold text-[#98A4B8] mb-1 flex items-center justify-between">
+                  <span>Lokasi (Satker/Kota) <span className="text-red-400">*</span></span>
+                  <span className="text-[10px] text-blue-400/80 font-mono">Tingkat 4</span>
                 </label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    list="city-options"
-                    value={formData.kota_kabupaten}
-                    onChange={(e) => handleChange("kota_kabupaten", e.target.value)}
-                    className="w-full bg-[#182132] border border-[var(--border-default)] rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
-                    placeholder="Contoh: Jakarta Pusat"
-                  />
-                  <datalist id="city-options">
-                    {availableCities.map((city) => (
-                      <option key={city.id} value={city.name} />
-                    ))}
-                  </datalist>
-                </div>
+                <select
+                  disabled={!formData.provinsi}
+                  value={showCustomLocationInput ? "__CUSTOM__" : formData.kota_kabupaten || ""}
+                  onChange={(e) => {
+                    if (e.target.value === "__CUSTOM__") {
+                      setShowCustomLocationInput(true);
+                    } else {
+                      setShowCustomLocationInput(false);
+                      handleChange("kota_kabupaten", e.target.value);
+                    }
+                  }}
+                  className={`w-full bg-[#182132] border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500 ${
+                    !formData.provinsi
+                      ? "opacity-50 cursor-not-allowed border-white/5 bg-[#0e131d]"
+                      : "border-[var(--border-default)] cursor-pointer"
+                  }`}
+                >
+                  <option value="">
+                    {!formData.provinsi ? "-- Pilih Provinsi Dulu --" : "-- Pilih Lokasi --"}
+                  </option>
+                  {availableLocations.map((lok) => (
+                    <option key={lok} value={lok}>
+                      {lok}
+                    </option>
+                  ))}
+                  {formData.kota_kabupaten && !availableLocations.includes(formData.kota_kabupaten) && !showCustomLocationInput && (
+                    <option value={formData.kota_kabupaten}>
+                      {formData.kota_kabupaten} (Non-standar)
+                    </option>
+                  )}
+                  <option value="__CUSTOM__">+ Input Manual Lokasi Khusus...</option>
+                </select>
+
+                {showCustomLocationInput && (
+                  <div className="mt-2">
+                    <input
+                      type="text"
+                      autoFocus
+                      placeholder="Ketik nama lokasi..."
+                      value={formData.kota_kabupaten}
+                      onChange={(e) => handleChange("kota_kabupaten", e.target.value)}
+                      className="w-full bg-[#0D121B] border border-blue-500/50 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none"
+                    />
+                  </div>
+                )}
               </div>
             </div>
           </div>
