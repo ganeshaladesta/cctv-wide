@@ -4,6 +4,7 @@
  */
 
 import { getSupabaseAdminClient, isSupabaseConfigured } from "./supabase";
+import { getDataStore } from "./data-store";
 import { normalizeTimeString } from "./time-normalization";
 import { geocodingService } from "./geocoding/geocoding-service";
 import { ensureValidUuid } from "./auth-roles";
@@ -572,21 +573,45 @@ export async function fetchCameraLinksFromSupabase(protestId: string): Promise<P
     .eq("protest_id", protest.id);
 
   if (error || !data) return [];
-  return data.map((l) => ({
-    id: l.id,
-    protest_id: l.protest_id,
-    camera_id: l.camera_id,
-    camera_name: l.camera_name,
-    camera_stream_url: l.camera_stream_url,
-    camera_protocol: l.camera_protocol,
-    camera_status: l.camera_status,
-    distance_meters: Number(l.distance_meters) || 0,
-    notes: l.notes,
-    is_recommended: Boolean(l.is_recommended),
-    linked_by_id: l.linked_by_id,
-    linked_by_name: l.linked_by_name,
-    created_at: new Date(l.created_at).toISOString()
-  }));
+  const cctvStore = getDataStore();
+  return data.map((l) => {
+    const cam = cctvStore.getCameraById(l.camera_id);
+    return {
+      id: l.id,
+      protest_id: l.protest_id,
+      camera_id: l.camera_id,
+      camera_name: l.camera_name,
+      camera_stream_url: l.camera_stream_url,
+      camera_protocol: l.camera_protocol,
+      camera_status: l.camera_status,
+      distance_meters: Number(l.distance_meters) || 0,
+      notes: l.notes,
+      is_recommended: Boolean(l.is_recommended),
+      linked_by_id: l.linked_by_id,
+      linked_by_name: l.linked_by_name,
+      created_at: new Date(l.created_at).toISOString(),
+      camera: cam || {
+        id: l.camera_id,
+        name: l.camera_name,
+        province_id: "",
+        province_name: "",
+        city_id: "",
+        city_name: "",
+        source_id: "",
+        source_name: "",
+        location: "",
+        latitude: 0,
+        longitude: 0,
+        stream_url: l.camera_stream_url || "",
+        source_url: "",
+        protocol: (l.camera_protocol as any) || "HLS",
+        status: (l.camera_status as any) || "ONLINE",
+        last_checked_at: new Date().toISOString(),
+        created_at: l.created_at,
+        updated_at: l.created_at
+      }
+    };
+  });
 }
 
 export async function linkCameraInSupabase(link: Partial<ProtestCameraLink>): Promise<ProtestCameraLink> {

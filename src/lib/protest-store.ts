@@ -303,10 +303,29 @@ class ProtestDataStore {
 
       if (fs.existsSync(schemaPath)) {
         const schemaSql = fs.readFileSync(schemaPath, "utf8");
-        this.db.exec(schemaSql);
+        try {
+          this.db.exec(schemaSql);
+        } catch {
+          // If bulk exec fails (e.g. index referencing not yet migrated column), execute per-statement
+          const statements = schemaSql.split(";").map((s) => s.trim()).filter(Boolean);
+          for (const stmt of statements) {
+            try {
+              this.db.exec(stmt + ";");
+            } catch {
+              // Ignore individual statement failure so remaining tables are created
+            }
+          }
+        }
       }
 
       // Self-healing migration for SQLite columns
+      try {
+        const auditCols = (this.db.prepare("PRAGMA table_info(master_data_audit_review)").all() as Array<{ name: string }>).map((c) => c.name);
+        if (auditCols.length > 0 && !auditCols.includes("review_status")) {
+          this.db.exec("ALTER TABLE master_data_audit_review ADD COLUMN review_status TEXT NOT NULL DEFAULT 'pending_review';");
+          this.db.exec("CREATE INDEX IF NOT EXISTS idx_audit_review_status ON master_data_audit_review(review_status);");
+        }
+      } catch {}
       const syncCols = (this.db.prepare("PRAGMA table_info(protest_sync_logs)").all() as Array<{ name: string }>).map((c) => c.name);
       if (!syncCols.includes("period_start")) {
         this.db.exec("ALTER TABLE protest_sync_logs ADD COLUMN period_start TEXT;");

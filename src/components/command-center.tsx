@@ -183,6 +183,8 @@ export default function CommandCenter({
   const [focusProtestEvent, setFocusProtestEvent] = useState<ProtestEvent | null>(null);
   const [selectedProtestForModal, setSelectedProtestForModal] = useState<string | null>(null);
   const [isProtestModalOpen, setIsProtestModalOpen] = useState(false);
+  const [unrasMonitoringContext, setUnrasMonitoringContext] = useState<ProtestEvent | null>(null);
+  const [protestReturnModalId, setProtestReturnModalId] = useState<string | null>(null);
 
   // Mutually Exclusive Camera Interaction State Machine
   const [cameraInteraction, setCameraInteraction] =
@@ -567,7 +569,14 @@ export default function CommandCenter({
   // 4. Close any open camera interface
   const handleCloseCameraInterface = useCallback(() => {
     setCameraInteraction({ type: "none" });
-  }, []);
+    // Safe return to UNRAS detail modal if opened from there
+    if (protestReturnModalId) {
+      const returnId = protestReturnModalId;
+      setProtestReturnModalId(null);
+      setSelectedProtestForModal(returnId);
+      setIsProtestModalOpen(true);
+    }
+  }, [protestReturnModalId]);
 
   const handleAddToMultiView = useCallback((cam: Camera) => {
     setMultiViewCameras((prev) => {
@@ -591,11 +600,55 @@ export default function CommandCenter({
     }
   }, []);
 
+  // Play Camera & resolve modal lifecycle without duplicate/stuck backdrops
   const handleSelectCameraToPlay = useCallback(
     (camera: Camera) => {
+      if (selectedProtestForModal) {
+        setProtestReturnModalId(selectedProtestForModal);
+      }
+      setIsProtestModalOpen(false);
+      setSelectedProtestForModal(null);
       handleDirectoryCameraClick(camera.id, camera);
     },
-    [handleDirectoryCameraClick]
+    [selectedProtestForModal, handleDirectoryCameraClick]
+  );
+
+  // Dedicated UNRAS MultiView Monitoring
+  const handleOpenDedicatedMultiView = useCallback(
+    (event: ProtestEvent, cameras: Camera[]) => {
+      setUnrasMonitoringContext(event);
+      if (cameras.length > 0) {
+        setMultiViewCameras(cameras);
+      }
+      setIsProtestModalOpen(false);
+      setSelectedProtestForModal(null);
+      setCameraInteraction({ type: "none" });
+      setActiveTab("multiview");
+    },
+    []
+  );
+
+  // Unlink a camera from dedicated UNRAS MultiView
+  const handleUnlinkCameraFromMultiView = useCallback(
+    async (cameraId: string) => {
+      if (!unrasMonitoringContext) return;
+      try {
+        const res = await fetch(
+          `/api/protests/${unrasMonitoringContext.id}/cameras?camera_id=${encodeURIComponent(cameraId)}`,
+          {
+            method: "DELETE",
+            headers: { "x-scc-user-role": "operator" }
+          }
+        );
+        if (res.ok) {
+          setMultiViewCameras((prev) => prev.filter((c) => c.id !== cameraId));
+          fetchProtestEvents();
+        }
+      } catch (err) {
+        console.error("Failed to unlink camera:", err);
+      }
+    },
+    [unrasMonitoringContext, fetchProtestEvents]
   );
 
   const handleVerifyStreamLive = useCallback(async (cam: Camera) => {
@@ -1047,6 +1100,22 @@ export default function CommandCenter({
             cameras={multiViewCameras}
             onSetCameras={setMultiViewCameras}
             onSelectDetail={(cam) => handleDirectoryCameraClick(cam.id, cam)}
+            unrasContext={
+              unrasMonitoringContext
+                ? {
+                    event: unrasMonitoringContext,
+                    onReturnToDetail: () => {
+                      setSelectedProtestForModal(unrasMonitoringContext.id);
+                      setIsProtestModalOpen(true);
+                    },
+                    onExitUnrasMode: () => {
+                      setUnrasMonitoringContext(null);
+                      setMultiViewCameras(initialCameras.slice(0, 4));
+                    },
+                    onUnlinkCamera: handleUnlinkCameraFromMultiView
+                  }
+                : null
+            }
           />
         )}
 
@@ -1246,6 +1315,22 @@ export default function CommandCenter({
         onVerifyStreamLive={handleVerifyStreamLive}
         onAddToMultiView={handleAddToMultiView}
         onSelectNearbyCamera={(nc) => handleDirectoryCameraClick(nc.id, nc)}
+        onReturnToProtest={
+          protestReturnModalId
+            ? () => {
+                const returnId = protestReturnModalId;
+                setProtestReturnModalId(null);
+                setCameraInteraction({ type: "none" });
+                setSelectedProtestForModal(returnId);
+                setIsProtestModalOpen(true);
+              }
+            : undefined
+        }
+        returnToProtestTitle={
+          protestReturnModalId
+            ? protestEvents.find((p) => p.id === protestReturnModalId)?.lokasi || "UNRAS"
+            : undefined
+        }
       />
 
       {/* Portaled Protest Detail Modal for Map Click or Dashboard Click */}
@@ -1258,6 +1343,7 @@ export default function CommandCenter({
         }}
         onUpdated={fetchProtestEvents}
         onSelectCameraToPlay={handleSelectCameraToPlay}
+        onOpenDedicatedMultiView={handleOpenDedicatedMultiView}
       />
 
       {/* Breathing Footer */}

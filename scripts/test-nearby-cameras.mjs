@@ -18,3 +18,4 @@ if (nearby.length > 0 && !nearby[0].name) {
 } else {
   console.log("SUCCESS: Camera names and metadata are populated correctly!");
 }
+

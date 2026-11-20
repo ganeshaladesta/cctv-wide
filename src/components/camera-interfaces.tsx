@@ -325,6 +325,8 @@ export interface CameraDetailModalProps {
   onVerifyStreamLive: (camera: Camera) => void;
   onAddToMultiView: (camera: Camera) => void;
   onSelectNearbyCamera: (camera: Camera) => void;
+  onReturnToProtest?: () => void;
+  returnToProtestTitle?: string;
 }
 
 export function CameraDetailModal({
@@ -335,7 +337,9 @@ export function CameraDetailModal({
   onClose,
   onVerifyStreamLive,
   onAddToMultiView,
-  onSelectNearbyCamera
+  onSelectNearbyCamera,
+  onReturnToProtest,
+  returnToProtestTitle
 }: CameraDetailModalProps) {
   const [mounted, setMounted] = useState(false);
 
@@ -409,6 +413,21 @@ export function CameraDetailModal({
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 shrink-0">
+                {onReturnToProtest && (
+                  <button
+                    type="button"
+                    onClick={onReturnToProtest}
+                    className="px-2.5 sm:px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 border border-blue-400 text-xs font-semibold text-white transition-colors flex items-center gap-1.5 cursor-pointer shadow-md shadow-blue-600/30"
+                    title="Tutup Player dan Kembali ke Detail Aksi Unjuk Rasa"
+                  >
+                    <span>← Kembali ke Detail Unras</span>
+                    {returnToProtestTitle && (
+                      <span className="max-w-[120px] truncate hidden md:inline font-normal opacity-90 text-[11px]">
+                        ({returnToProtestTitle})
+                      </span>
+                    )}
+                  </button>
+                )}
                 <FavoritesButton
                   cameraId={camera.id}
                   cameraName={camera.name}

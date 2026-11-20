@@ -20,7 +20,8 @@ import {
   Link as LinkIcon,
   Trash2,
   RefreshCw,
-  Edit3
+  Edit3,
+  Grid
 } from "lucide-react";
 import {
   ProtestEvent,
@@ -46,6 +47,7 @@ interface ProtestDetailModalProps {
   onClose: () => void;
   onUpdated?: () => void;
   onSelectCameraToPlay?: (camera: Camera) => void;
+  onOpenDedicatedMultiView?: (event: ProtestEvent, cameras: Camera[]) => void;
 }
 
 type TabType = "ringkasan" | "laporan" | "status" | "cctv" | "editorial";
@@ -55,7 +57,8 @@ export function ProtestDetailModal({
   isOpen,
   onClose,
   onUpdated,
-  onSelectCameraToPlay
+  onSelectCameraToPlay,
+  onOpenDedicatedMultiView
 }: ProtestDetailModalProps) {
   const [activeTab, setActiveTab] = useState<TabType>("ringkasan");
   const [mounted, setMounted] = useState(false);
@@ -254,6 +257,22 @@ export function ProtestDetailModal({
     } catch (err: any) {
       alert(err.message);
     }
+  };
+
+  // Play Camera & close modal safely to prevent overlapping dialogs
+  const handlePlayCamera = (cam: Camera) => {
+    onClose();
+    onSelectCameraToPlay?.(cam);
+  };
+
+  // Open Dedicated MultiView Monitoring for this UNRAS event
+  const handleOpenMultiView = () => {
+    if (!eventData || cameraLinks.length === 0) return;
+    const resolvedCameras: Camera[] = cameraLinks
+      .map((l) => l.camera)
+      .filter((c): c is Camera => Boolean(c));
+    onClose();
+    onOpenDedicatedMultiView?.(eventData, resolvedCameras);
   };
 
   // Generate Editorial Text
@@ -937,32 +956,74 @@ export function ProtestDetailModal({
               {/* TAB 4: KAMERA CCTV TERTAUT & REKOMENDASI SPASIAL */}
               {activeTab === "cctv" && (
                 <div className="space-y-4">
+                  {/* Dedicated Multi-View Monitoring Action Bar */}
+                  <div className="p-3.5 rounded-xl bg-gradient-to-r from-blue-950/60 via-[#131B2E] to-blue-900/40 border border-blue-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-lg">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="flex h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                        <h4 className="text-xs font-bold text-white uppercase tracking-wider">
+                          Dedicated Multi-View Workspace
+                        </h4>
+                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                          {cameraLinks.length} Kamera
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-[#98A4B8] mt-0.5">
+                        Pantau seluruh perimeter aksi unjuk rasa ini secara simultan di Multi-View
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={cameraLinks.length === 0}
+                      onClick={handleOpenMultiView}
+                      className="px-4 py-2 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white shadow-lg shadow-blue-500/20 flex items-center justify-center gap-2 transition-all cursor-pointer shrink-0"
+                    >
+                      <Grid className="w-4 h-4 text-emerald-300" />
+                      <span>MONITORING MULTI-VIEW ({cameraLinks.length})</span>
+                    </button>
+                  </div>
+
                   {/* Linked Cameras */}
                   <div>
-                    <h3 className="font-bold text-white uppercase text-[11px] tracking-wider mb-2 text-blue-400">
-                      Kamera CCTV Tertaut ({cameraLinks.length})
-                    </h3>
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="font-bold text-white uppercase text-[11px] tracking-wider text-blue-400">
+                        Kamera CCTV Tertaut ({cameraLinks.length})
+                      </h3>
+                      {cameraLinks.length > 0 && (
+                        <span className="text-[10px] text-[#64748B]">
+                          Klik &apos;Putar&apos; untuk memantau atau &apos;Buka Multi-View&apos; untuk streaming simultan
+                        </span>
+                      )}
+                    </div>
 
                     {cameraLinks.length === 0 ? (
                       <div className="p-4 text-center text-xs text-[#64748B] bg-[#111622] rounded-xl border border-[var(--border-subtle)]">
-                        Belum ada kamera CCTV yang ditautkan ke perimeter unjuk rasa ini.
+                        Belum ada kamera CCTV yang ditautkan ke perimeter unjuk rasa ini. Silakan pilih dari rekomendasi terdekat di bawah.
                       </div>
                     ) : (
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         {cameraLinks.map((link) => (
                           <div
                             key={link.id}
-                            className="p-3 bg-[#111622] border border-[var(--border-subtle)] rounded-xl flex items-center justify-between gap-3 text-xs"
+                            className="p-3 bg-[#111622] border border-[var(--border-subtle)] rounded-xl flex items-center justify-between gap-3 text-xs hover:border-[var(--border-accent)] transition-colors"
                           >
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center gap-2">
                                 <Video className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-                                <span className="text-white font-semibold truncate">{link.camera_name}</span>
+                                <span className="text-white font-semibold truncate block" title={link.camera_name}>
+                                  {link.camera_name}
+                                </span>
                               </div>
-                              <div className="flex items-center gap-2 text-[11px] text-[#98A4B8] mt-0.5">
-                                <span>Jarak: <strong className="text-white">{link.distance_meters}m</strong></span>
+                              <div className="flex flex-wrap items-center gap-2 text-[11px] text-[#98A4B8] mt-1">
+                                <span className="font-mono text-[10px] px-1 py-0.5 rounded bg-white/5 text-blue-300">
+                                  {link.camera_id}
+                                </span>
                                 <span>•</span>
-                                <span className="text-emerald-400">{link.camera_status || "ONLINE"}</span>
+                                <span>Jarak: <strong className="text-emerald-400 font-mono">{link.distance_meters}m</strong></span>
+                                <span>•</span>
+                                <span className={link.camera_status === "ONLINE" || !link.camera_status ? "text-emerald-400 font-semibold text-[10px]" : "text-red-400 font-semibold text-[10px]"}>
+                                  {link.camera_status || "ONLINE"}
+                                </span>
                               </div>
                             </div>
 
@@ -970,16 +1031,21 @@ export function ProtestDetailModal({
                               {link.camera && onSelectCameraToPlay && (
                                 <button
                                   type="button"
-                                  onClick={() => onSelectCameraToPlay(link.camera!)}
-                                  className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-blue-600/20 text-blue-400 border border-blue-500/30 hover:bg-blue-600/30 transition-colors"
+                                  onClick={() => handlePlayCamera(link.camera!)}
+                                  className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-blue-600/20 text-blue-400 border border-blue-500/30 hover:bg-blue-600/30 transition-colors cursor-pointer"
+                                  title="Putar CCTV ini (tutup modal pemilihan)"
                                 >
                                   Putar
                                 </button>
                               )}
                               <button
                                 type="button"
-                                onClick={() => handleUnlinkCamera(link.camera_id)}
-                                className="p-1.5 rounded-lg text-red-400 hover:bg-red-500/10 transition-colors"
+                                onClick={() => {
+                                  if (window.confirm(`Cabut tautan kamera "${link.camera_name}" dari pantauan aksi unjuk rasa ini?`)) {
+                                    handleUnlinkCamera(link.camera_id);
+                                  }
+                                }}
+                                className="p-1.5 rounded-lg text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer"
                                 title="Cabut Tautan"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
@@ -1024,7 +1090,7 @@ export function ProtestDetailModal({
                           return (
                             <div
                               key={camId || `cam-rec-${idx}`}
-                              className="p-3 bg-[#111622] border border-[var(--border-subtle)] rounded-xl flex items-center justify-between gap-3 text-xs"
+                              className="p-3 bg-[#111622] border border-[var(--border-subtle)] rounded-xl flex items-center justify-between gap-3 text-xs hover:border-[var(--border-accent)] transition-colors"
                             >
                               <div className="min-w-0 flex-1">
                                 <div className="flex items-center gap-1.5">
@@ -1033,10 +1099,14 @@ export function ProtestDetailModal({
                                     {camName}
                                   </span>
                                 </div>
-                                <div className="flex items-center gap-2 text-[11px] text-[#98A4B8] mt-1">
+                                <div className="flex flex-wrap items-center gap-2 text-[11px] text-[#98A4B8] mt-1">
+                                  <span className="font-mono text-[10px] px-1 py-0.5 rounded bg-white/5 text-blue-300">
+                                    {camId}
+                                  </span>
+                                  <span>•</span>
                                   <span>Jarak: <strong className="text-emerald-400 font-mono">{camDist}m</strong></span>
                                   <span>•</span>
-                                  <span className="truncate max-w-[130px]">{camSource}</span>
+                                  <span className="truncate max-w-[110px]">{camSource}</span>
                                   <span>•</span>
                                   <span className={camStatus === "ONLINE" || camStatus === 1 ? "text-emerald-400 text-[10px]" : "text-red-400 text-[10px]"}>
                                     {camStatus === "ONLINE" || camStatus === 1 ? "ONLINE" : "OFFLINE"}
@@ -1048,9 +1118,9 @@ export function ProtestDetailModal({
                                 {cam && onSelectCameraToPlay && (
                                   <button
                                     type="button"
-                                    onClick={() => onSelectCameraToPlay(cam)}
-                                    className="px-2 py-1 rounded-lg text-[11px] font-semibold bg-blue-600/20 text-blue-400 border border-blue-500/30 hover:bg-blue-600/30 transition-colors"
-                                    title="Preview Live Stream"
+                                    onClick={() => handlePlayCamera(cam)}
+                                    className="px-2 py-1 rounded-lg text-[11px] font-semibold bg-blue-600/20 text-blue-400 border border-blue-500/30 hover:bg-blue-600/30 transition-colors cursor-pointer"
+                                    title="Putar CCTV ini (tutup modal)"
                                   >
                                     Putar
                                   </button>

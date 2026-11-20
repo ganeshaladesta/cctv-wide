@@ -14,16 +14,25 @@ import {
   Check
 } from "lucide-react";
 import { Camera } from "@/lib/types";
+import { ProtestEvent } from "@/lib/types/protests";
 import CCTVPlayer from "@/components/cctv-player";
 import { FavoritesButton, ProgramsCard } from "@/components/motion-ui";
 import { SPRINGS } from "@/lib/motion";
 
 export type GridLayoutSize = 1 | 2 | 4 | 6 | 9;
 
-interface MultiViewGridProps {
+export interface UnrasMonitoringContext {
+  event: ProtestEvent;
+  onReturnToDetail: () => void;
+  onExitUnrasMode: () => void;
+  onUnlinkCamera?: (cameraId: string) => Promise<void>;
+}
+
+export interface MultiViewGridProps {
   cameras: Camera[];
   onSetCameras: (cams: Camera[]) => void;
   onSelectDetail: (cam: Camera) => void;
+  unrasContext?: UnrasMonitoringContext | null;
 }
 
 const LAYOUT_OPTIONS: Array<{
@@ -58,7 +67,8 @@ const REGIONAL_PRESETS: Array<{ label: string; query: string }> = [
 export default function MultiViewGrid({
   cameras,
   onSetCameras,
-  onSelectDetail
+  onSelectDetail,
+  unrasContext
 }: MultiViewGridProps) {
   const [layoutSize, setLayoutSize] = useState<GridLayoutSize>(4);
   const [pickerSlot, setPickerSlot] = useState<number | null>(null);
@@ -71,6 +81,24 @@ export default function MultiViewGrid({
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  // In UNRAS monitoring mode, auto-tune optimal layout size according to camera count
+  useEffect(() => {
+    if (unrasContext) {
+      const count = cameras.length;
+      if (count <= 1) {
+        setLayoutSize(1);
+      } else if (count === 2) {
+        setLayoutSize(2);
+      } else if (count <= 4) {
+        setLayoutSize(4);
+      } else if (count <= 6) {
+        setLayoutSize(6);
+      } else {
+        setLayoutSize(9);
+      }
+    }
+  }, [unrasContext, cameras.length]);
 
   useEffect(() => {
     if (pickerSlot === null || typeof document === "undefined") return;
@@ -270,6 +298,53 @@ export default function MultiViewGrid({
 
   return (
     <div className="space-y-4">
+      {/* UNRAS Dedicated Workspace Banner */}
+      {unrasContext && (
+        <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-950/60 via-[#111622] to-indigo-950/50 border border-blue-500/40 shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2 mb-1.5">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/40 tracking-wider uppercase animate-pulse">
+                <span className="w-2 h-2 rounded-full bg-blue-400" />
+                WORKSPACE MONITORING UNJUK RASA
+              </span>
+              <span className="text-xs font-mono font-bold text-white px-2 py-0.5 rounded bg-white/10 border border-white/15">
+                {unrasContext.event.kode_unras || unrasContext.event.id_kejadian}
+              </span>
+              <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/30">
+                {unrasContext.event.status}
+              </span>
+              <span className="text-[11px] text-[#98A4B8]">
+                Estimasi Massa: <strong className="text-white">±{unrasContext.event.estimasi_massa_source || "-"}</strong> orang
+              </span>
+            </div>
+            <h2 className="text-sm sm:text-base font-bold text-white truncate">
+              {unrasContext.event.isu_tuntutan || unrasContext.event.lokasi || "Pantauan Aksi Unjuk Rasa"}
+            </h2>
+            <p className="text-xs text-[#98A4B8] truncate mt-0.5">
+              Perimeter: <strong className="text-white">{unrasContext.event.lokasi}</strong> • {unrasContext.event.kota_kabupaten}, {unrasContext.event.provinsi}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={unrasContext.onReturnToDetail}
+              className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs transition-colors flex items-center gap-1.5 shadow-md shadow-blue-500/20 cursor-pointer"
+            >
+              <span>📋 Buka Detail Aksi</span>
+            </button>
+            <button
+              type="button"
+              onClick={unrasContext.onExitUnrasMode}
+              className="px-3 py-1.5 rounded-xl bg-[#161C2B] hover:bg-[#1C2436] border border-[var(--border-default)] text-xs font-medium text-[#98A4B8] hover:text-white transition-colors cursor-pointer"
+              title="Kembali ke Multi-View Global"
+            >
+              <span>✕ Keluar Mode UNRAS</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Control Header */}
       <div className="p-3.5 sm:p-4 rounded-2xl ee-surface flex flex-col lg:flex-row lg:items-center justify-between gap-3">
         <div className="flex items-start sm:items-center gap-2.5 min-w-0">
@@ -279,14 +354,16 @@ export default function MultiViewGrid({
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-sm font-bold text-[#F3F6FB]">
-                Multi-View Command Wall
+                {unrasContext ? "Multi-View Pantauan Perimeter Aksi" : "Multi-View Command Wall"}
               </h2>
               <span className="px-2 py-0.5 rounded-full bg-white/[0.04] text-[#E2E8F0] border border-[var(--border-subtle)] text-[10px] font-mono uppercase tracking-wider">
-                REAL-TIME • MULTI-STREAM
+                {unrasContext ? "UNRAS SCOPED" : "REAL-TIME • MULTI-STREAM"}
               </span>
             </div>
             <p className="text-xs text-[#98A4B8]">
-              Pantau 1, 2, 4, 6, atau 9 kamera CCTV secara simultan dengan lazy-loading otomatis.
+              {unrasContext
+                ? `Monitoring terisolasi khusus aksi: ${unrasContext.event.lokasi} • ${cameras.length} kamera aktif`
+                : "Pantau 1, 2, 4, 6, atau 9 kamera CCTV secara simultan dengan lazy-loading otomatis."}
             </p>
           </div>
         </div>
@@ -404,10 +481,33 @@ export default function MultiViewGrid({
                     >
                       Ganti
                     </button>
+                    {unrasContext?.onUnlinkCamera && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (
+                            window.confirm(
+                              `Cabut tautan kamera "${cam.name}" dari aksi unras ini secara permanen?`
+                            )
+                          ) {
+                            unrasContext.onUnlinkCamera?.(cam.id);
+                          }
+                        }}
+                        title="Cabut tautan kamera dari aksi unras ini secara permanen"
+                        className="px-1.5 py-0.5 rounded-md bg-amber-950/80 hover:bg-amber-900 text-[10px] font-medium text-amber-200 border border-amber-800/60 transition-colors cursor-pointer"
+                      >
+                        Cabut
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => removeCameraAt(idx)}
                       aria-label={`Hapus slot ${idx + 1}`}
+                      title={
+                        unrasContext
+                          ? "Sembunyikan dari layar (kamera tetap tertaut ke aksi unras)"
+                          : "Hapus dari slot layar"
+                      }
                       className="px-1.5 py-0.5 rounded-md bg-red-950/80 hover:bg-red-900 text-[10px] font-medium text-red-200 border border-red-800/60 transition-colors"
                     >
                       ✕
