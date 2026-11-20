@@ -393,3 +393,33 @@ CREATE TABLE IF NOT EXISTS protest_crowd_observations (
 CREATE INDEX IF NOT EXISTS idx_crowd_obs_point_id ON protest_crowd_observations(point_id);
 CREATE INDEX IF NOT EXISTS idx_crowd_obs_element_id ON protest_crowd_observations(element_id);
 CREATE INDEX IF NOT EXISTS idx_crowd_obs_timestamp ON protest_crowd_observations(observation_timestamp);
+
+
+-- Migration 009: Bank Indonesia Offices Master Data
+CREATE TABLE IF NOT EXISTS bi_offices (
+    id TEXT PRIMARY KEY,
+    office_id TEXT UNIQUE NOT NULL,
+    office_name TEXT NOT NULL,
+    short_name TEXT NOT NULL,
+    office_type TEXT NOT NULL,
+    regional TEXT NOT NULL,
+    island_group TEXT NOT NULL,
+    latitude REAL,
+    longitude REAL,
+    address TEXT NOT NULL,
+    postal_code TEXT,
+    phone TEXT,
+    fax TEXT,
+    administrative_code TEXT,
+    source TEXT NOT NULL DEFAULT 'koordinat (1).csv',
+    validation_status TEXT NOT NULL DEFAULT 'verified',
+    validation_reason TEXT,
+    raw_coordinates_text TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_bi_offices_type ON bi_offices(office_type);
+CREATE INDEX IF NOT EXISTS idx_bi_offices_regional ON bi_offices(regional);
+CREATE INDEX IF NOT EXISTS idx_bi_offices_coords ON bi_offices(latitude, longitude);
+CREATE INDEX IF NOT EXISTS idx_bi_offices_validation ON bi_offices(validation_status);

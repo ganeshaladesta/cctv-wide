@@ -11,11 +11,20 @@ import {
   Maximize2,
   Minimize2,
   RotateCcw,
-  Navigation
+  Navigation,
+  Building2,
+  Radar,
+  ShieldAlert,
+  Crosshair
 } from "lucide-react";
 import { Camera, CompactMarker, Province } from "@/lib/types";
 import { ProtestEvent } from "@/lib/types/protests";
+import { BIOffice, BIOfficeType } from "@/lib/types/bi-offices";
 import { CameraMapPreview } from "@/components/camera-interfaces";
+import {
+  TacticalGeoIntHud,
+  calculateHaversineDistanceMeters
+} from "@/components/tactical-geoint-hud";
 
 interface InteractiveMapProps {
   markers: CompactMarker[];
@@ -31,6 +40,8 @@ interface InteractiveMapProps {
   protestEvents?: ProtestEvent[];
   focusProtestEvent?: ProtestEvent | null;
   onProtestMarkerClick?: (protest: ProtestEvent) => void;
+  biOffices?: BIOffice[];
+  onSelectBIOffice?: (office: BIOffice) => void;
 }
 
 const OSM_TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
@@ -193,7 +204,158 @@ function createProtestMarkerIcon(status: string): L.DivIcon {
   });
 }
 
-function createProtestPopupHtml(p: ProtestEvent): string {
+function createBIOfficeMarkerIcon(officeType: BIOfficeType, isSelected = false): L.DivIcon {
+  let html = "";
+  let size = 36;
+  let anchor = 18;
+
+  if (officeType === "Kantor Pusat") {
+    size = 42;
+    anchor = 21;
+    html = `
+      <div class="relative flex items-center justify-center cursor-pointer group" style="width:42px;height:42px;">
+        <div class="absolute w-10 h-10 rounded-full bg-amber-400/30 animate-ping"></div>
+        <div class="w-8 h-8 rounded-full bg-gradient-to-tr from-[#0F172A] to-[#1E3A8A] border-2 ${
+          isSelected ? "border-amber-300 ring-4 ring-amber-400/50" : "border-amber-400"
+        } shadow-[0_0_14px_rgba(245,158,11,0.85)] flex items-center justify-center text-amber-300 font-bold text-xs">
+          🏛️
+        </div>
+      </div>
+    `;
+  } else if (officeType === "KOPERBI IKN") {
+    size = 40;
+    anchor = 20;
+    html = `
+      <div class="relative flex items-center justify-center cursor-pointer group" style="width:40px;height:40px;">
+        <div class="absolute w-9 h-9 rounded-full bg-emerald-400/35 animate-pulse"></div>
+        <div class="w-8 h-8 rounded-full bg-gradient-to-tr from-[#064E3B] to-[#059669] border-2 ${
+          isSelected ? "border-emerald-300 ring-4 ring-emerald-400/50" : "border-emerald-400"
+        } shadow-[0_0_12px_rgba(52,211,153,0.8)] flex items-center justify-center text-white font-bold text-xs">
+          🏛️
+        </div>
+      </div>
+    `;
+  } else {
+    // KPwDN
+    size = 34;
+    anchor = 17;
+    html = `
+      <div class="relative flex items-center justify-center cursor-pointer group" style="width:34px;height:34px;">
+        <div class="w-7 h-7 rounded-full bg-gradient-to-tr from-[#0B1528] to-[#0284C7] border-2 ${
+          isSelected ? "border-cyan-300 ring-4 ring-cyan-400/50" : "border-cyan-400"
+        } shadow-[0_0_10px_rgba(56,189,248,0.7)] flex items-center justify-center text-white font-bold text-[11px]">
+          🏢
+        </div>
+      </div>
+    `;
+  }
+
+  return L.divIcon({
+    className: "scc-bi-office-pin-marker",
+    html,
+    iconSize: [size, size],
+    iconAnchor: [anchor, anchor]
+  });
+}
+
+function createBIOfficePopupHtml(
+  office: BIOffice,
+  nearestProtest: { event: ProtestEvent; distanceMeters: number } | null
+): string {
+  const safeName = escapeHtml(office.office_name);
+  const safeAddress = escapeHtml(office.address);
+  const coordsFormatted =
+    office.latitude !== null && office.longitude !== null
+      ? `${office.latitude.toFixed(5)}, ${office.longitude.toFixed(5)}`
+      : "-";
+
+  const typeBadgeClass =
+    office.office_type === "Kantor Pusat"
+      ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
+      : office.office_type === "KOPERBI IKN"
+      ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
+      : "bg-cyan-500/20 text-cyan-300 border-cyan-500/40";
+
+  let unrasAlertHtml = "";
+  if (nearestProtest) {
+    const isCritical = nearestProtest.distanceMeters <= 1000;
+    const isWarning = nearestProtest.distanceMeters <= 3000;
+    const alertBg = isCritical
+      ? "bg-red-950/50 border-red-500/50 text-red-300"
+      : isWarning
+      ? "bg-amber-950/50 border-amber-500/50 text-amber-300"
+      : "bg-blue-950/40 border-blue-500/40 text-blue-300";
+
+    const distText =
+      nearestProtest.distanceMeters >= 1000
+        ? `${(nearestProtest.distanceMeters / 1000).toFixed(2)} km`
+        : `${nearestProtest.distanceMeters} m`;
+
+    unrasAlertHtml = `
+      <div class="p-2 rounded-lg border ${alertBg} text-[10px] space-y-1 mb-2">
+        <div class="flex items-center justify-between font-bold">
+          <span>⚠️ PROKSIMITAS UNRAS TERDEKAT</span>
+          <span class="font-mono">${distText}</span>
+        </div>
+        <p class="truncate text-white font-medium">${escapeHtml(nearestProtest.event.isu_tuntutan)}</p>
+      </div>
+    `;
+  } else {
+    unrasAlertHtml = `
+      <div class="p-2 rounded-lg border border-emerald-500/30 bg-emerald-950/20 text-emerald-300 text-[10px] flex items-center gap-1.5 mb-2">
+        <span>✓</span>
+        <span>Perimeter Aman (Tidak ada unras aktif &lt; 5km)</span>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="p-3 text-left font-sans text-white" style="min-width: 280px; max-width: 320px;">
+      <div class="flex items-center justify-between gap-1.5 pb-2 mb-2 border-b border-[#1E293B]">
+        <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${typeBadgeClass}">
+          ${office.office_type}
+        </span>
+        <span class="font-mono text-[10px] text-blue-400 font-bold">
+          ${office.office_id || office.id}
+        </span>
+      </div>
+
+      <h4 class="text-xs font-bold text-white leading-snug mb-1">
+        ${safeName}
+      </h4>
+      <p class="text-[10px] text-slate-400 mb-2 leading-relaxed">
+        ${safeAddress}
+      </p>
+
+      <div class="space-y-1 text-[11px] text-slate-300 mb-2.5 pb-2 border-b border-[#1E293B]/60">
+        <div class="flex items-center justify-between text-[10px]">
+          <span class="text-slate-400">Regional / Wilayah:</span>
+          <span class="text-white font-medium">${office.regional} (${office.island_group})</span>
+        </div>
+        <div class="flex items-center justify-between text-[10px]">
+          <span class="text-slate-400">Koordinat Valid:</span>
+          <span class="font-mono text-emerald-400">${coordsFormatted}</span>
+        </div>
+      </div>
+
+      ${unrasAlertHtml}
+
+      <button
+        type="button"
+        id="btn-bi-office-hud-${office.id}"
+        class="w-full py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center justify-center gap-1.5 shadow-lg shadow-blue-500/20 transition-all cursor-pointer"
+      >
+        <span>Analisis GeoINT & Perimeter</span>
+        <span>→</span>
+      </button>
+    </div>
+  `;
+}
+
+function createProtestPopupHtml(
+  p: ProtestEvent,
+  nearestOffice?: { office: BIOffice; distanceMeters: number } | null
+): string {
   const sBadge = getProtestStatusMeta(p.status);
   const uBadge = getProtestUrgencyMeta(p.urgency);
   const safeIsu = escapeHtml(p.isu_tuntutan || "Aksi Unjuk Rasa");
@@ -225,6 +387,31 @@ function createProtestPopupHtml(p: ProtestEvent): string {
       </div>
     `
     : "";
+
+  let biOfficeProximityHtml = "";
+  if (nearestOffice) {
+    const distText =
+      nearestOffice.distanceMeters >= 1000
+        ? `${(nearestOffice.distanceMeters / 1000).toFixed(2)} km`
+        : `${nearestOffice.distanceMeters} m`;
+
+    const isClose = nearestOffice.distanceMeters <= 3000;
+
+    biOfficeProximityHtml = `
+      <div class="flex items-center justify-between text-[10px] ${
+        isClose
+          ? "bg-amber-950/50 border border-amber-500/40 text-amber-300"
+          : "bg-blue-950/40 border border-blue-500/30 text-blue-300"
+      } px-2 py-1 rounded-lg">
+        <span class="flex items-center gap-1 font-semibold truncate max-w-[190px]">
+          🏢 BI: ${escapeHtml(nearestOffice.office.short_name || nearestOffice.office.office_name)}
+        </span>
+        <span class="font-mono font-bold text-white shrink-0">
+          ${distText}
+        </span>
+      </div>
+    `;
+  }
 
   return `
     <div class="p-3 text-left font-sans text-white" style="min-width: 270px; max-width: 320px;">
@@ -265,17 +452,28 @@ function createProtestPopupHtml(p: ProtestEvent): string {
           <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0"></span>
           <span class="truncate">Koordinat Valid: ${coordsFormatted}</span>
         </div>
+        ${biOfficeProximityHtml}
         ${elementsHtml}
       </div>
 
-      <button
-        type="button"
-        id="btn-protest-popup-${p.id}"
-        class="w-full py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center justify-center gap-1.5 shadow-lg shadow-blue-500/20 transition-all cursor-pointer"
-      >
-        <span>Pantau Situasi & CCTV Terkait</span>
-        <span>→</span>
-      </button>
+      <div class="grid grid-cols-2 gap-1.5">
+        <button
+          type="button"
+          id="btn-protest-geoint-${p.id}"
+          class="py-1.5 px-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-blue-300 text-[11px] font-semibold flex items-center justify-center gap-1 border border-blue-500/25 transition-all cursor-pointer"
+        >
+          <Radar class="w-3 h-3 text-blue-400" />
+          <span>GeoINT HUD</span>
+        </button>
+        <button
+          type="button"
+          id="btn-protest-popup-${p.id}"
+          class="py-1.5 px-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-semibold flex items-center justify-center gap-1 shadow-lg shadow-blue-500/20 transition-all cursor-pointer"
+        >
+          <span>Pantau Situasi</span>
+          <span>→</span>
+        </button>
+      </div>
     </div>
   `;
 }
@@ -293,7 +491,9 @@ export default function InteractiveMap({
   onAddToMultiView,
   protestEvents,
   focusProtestEvent,
-  onProtestMarkerClick
+  onProtestMarkerClick,
+  biOffices: externalBIOffices,
+  onSelectBIOffice
 }: InteractiveMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -301,16 +501,54 @@ export default function InteractiveMap({
   const clusterGroupRef = useRef<L.MarkerClusterGroup | null>(null);
   const plainLayerGroupRef = useRef<L.LayerGroup | null>(null);
   const protestLayerGroupRef = useRef<L.LayerGroup | null>(null);
+  const biOfficeLayerGroupRef = useRef<L.LayerGroup | null>(null);
+  const biRadiusLayerGroupRef = useRef<L.LayerGroup | null>(null);
+  const unrasRadiusLayerGroupRef = useRef<L.LayerGroup | null>(null);
+
   const protestMarkersRef = useRef<Map<string, L.Marker>>(new Map());
+  const biOfficeMarkersRef = useRef<Map<string, L.Marker>>(new Map());
+
   const onMarkerClickRef = useRef(onMarkerClick);
   onMarkerClickRef.current = onMarkerClick;
   const onProtestMarkerClickRef = useRef(onProtestMarkerClick);
   onProtestMarkerClickRef.current = onProtestMarkerClick;
+  const onSelectBIOfficeRef = useRef(onSelectBIOffice);
+  onSelectBIOfficeRef.current = onSelectBIOffice;
 
   const [darkFilter, setDarkFilter] = useState(true);
   const [clustering, setClustering] = useState(true);
   const [showProtestLayer, setShowProtestLayer] = useState(true);
+  const [showBIOfficeLayer, setShowBIOfficeLayer] = useState(true);
+  const [officeRadiusDistance, setOfficeRadiusDistance] = useState<number>(3000); // 0, 1000, 3000, 5000, 10000, -1
+  const [unrasRadiusDistance, setUnrasRadiusDistance] = useState<number>(1000); // 0, 250, 500, 1000, 1500
+  const [fetchedBIOffices, setFetchedBIOffices] = useState<BIOffice[]>([]);
+  const [selectedGeoIntAsset, setSelectedGeoIntAsset] = useState<
+    { type: "office"; office: BIOffice } | { type: "protest"; protest: ProtestEvent } | null
+  >(null);
+  const [isGeoIntHudOpen, setIsGeoIntHudOpen] = useState(false);
+  const [mapZoom, setMapZoom] = useState(5);
   const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Load BI offices from API if not provided via props
+  useEffect(() => {
+    if (externalBIOffices && externalBIOffices.length > 0) return;
+    let isMounted = true;
+    fetch("/api/bi-offices")
+      .then((res) => res.json())
+      .then((json) => {
+        if (isMounted && json.success && Array.isArray(json.data)) {
+          setFetchedBIOffices(json.data);
+        }
+      })
+      .catch((err) => console.warn("Could not fetch BI offices:", err));
+    return () => {
+      isMounted = false;
+    };
+  }, [externalBIOffices]);
+
+  const allBIOffices = useMemo(() => {
+    return externalBIOffices && externalBIOffices.length > 0 ? externalBIOffices : fetchedBIOffices;
+  }, [externalBIOffices, fetchedBIOffices]);
 
   // Strict coordinate validation:
   // latitude >= -90 && latitude <= 90 && longitude >= -180 && longitude <= 180
@@ -376,13 +614,27 @@ export default function InteractiveMap({
 
     const plainGroup = L.layerGroup();
     const protestGroup = L.layerGroup();
+    const biOfficeGroup = L.layerGroup();
+    const biRadiusGroup = L.layerGroup();
+    const unrasRadiusGroup = L.layerGroup();
+
     map.addLayer(clusterGroup);
+    map.addLayer(biRadiusGroup);
+    map.addLayer(unrasRadiusGroup);
     map.addLayer(protestGroup);
+    map.addLayer(biOfficeGroup);
 
     mapRef.current = map;
     clusterGroupRef.current = clusterGroup;
     plainLayerGroupRef.current = plainGroup;
     protestLayerGroupRef.current = protestGroup;
+    biOfficeLayerGroupRef.current = biOfficeGroup;
+    biRadiusLayerGroupRef.current = biRadiusGroup;
+    unrasRadiusLayerGroupRef.current = unrasRadiusGroup;
+
+    map.on("zoomend", () => {
+      setMapZoom(map.getZoom());
+    });
 
     // Automatically invalidate map size when container or navigation resizes
     const containerEl = mapContainerRef.current;
@@ -404,12 +656,26 @@ export default function InteractiveMap({
       resizeObs?.disconnect();
       clusterGroup.clearLayers();
       plainGroup.clearLayers();
+      protestGroup.clearLayers();
+      biOfficeGroup.clearLayers();
+      biRadiusGroup.clearLayers();
+      unrasRadiusGroup.clearLayers();
+
       if (map.hasLayer(clusterGroup)) map.removeLayer(clusterGroup);
       if (map.hasLayer(plainGroup)) map.removeLayer(plainGroup);
+      if (map.hasLayer(protestGroup)) map.removeLayer(protestGroup);
+      if (map.hasLayer(biOfficeGroup)) map.removeLayer(biOfficeGroup);
+      if (map.hasLayer(biRadiusGroup)) map.removeLayer(biRadiusGroup);
+      if (map.hasLayer(unrasRadiusGroup)) map.removeLayer(unrasRadiusGroup);
+
       map.remove();
       mapRef.current = null;
       clusterGroupRef.current = null;
       plainLayerGroupRef.current = null;
+      protestLayerGroupRef.current = null;
+      biOfficeLayerGroupRef.current = null;
+      biRadiusLayerGroupRef.current = null;
+      unrasRadiusLayerGroupRef.current = null;
     };
   }, []);
 
@@ -594,6 +860,19 @@ export default function InteractiveMap({
         continue; // Unmapped protests MUST NOT be plotted on the live map
       }
 
+      // Calculate nearest verified BI Office
+      let nearestOffice: { office: BIOffice; distanceMeters: number } | null = null;
+      let minOfficeDist = Infinity;
+      for (const off of allBIOffices) {
+        if (off.latitude !== null && off.longitude !== null && off.validation_status === "verified") {
+          const d = calculateHaversineDistanceMeters(p.validated_lat, p.validated_lng, off.latitude, off.longitude);
+          if (d < minOfficeDist) {
+            minOfficeDist = d;
+            nearestOffice = { office: off, distanceMeters: d };
+          }
+        }
+      }
+
       const statusMeta = getProtestStatusMeta(p.status);
       const crowdCount = p.actual_crowd_size || p.estimasi_massa_source;
       const crowdText = crowdCount
@@ -612,20 +891,30 @@ export default function InteractiveMap({
         { direction: "top", offset: [0, -18] }
       );
 
-      marker.bindPopup(createProtestPopupHtml(p), {
+      marker.bindPopup(createProtestPopupHtml(p, nearestOffice), {
         className: "scc-leaflet-protest-popup",
         maxWidth: 320,
         autoPanPadding: [24, 24]
       });
 
       marker.on("popupopen", () => {
-        const btn = document.getElementById(`btn-protest-popup-${p.id}`);
-        if (btn) {
-          btn.onclick = (e) => {
+        const btnDetail = document.getElementById(`btn-protest-popup-${p.id}`);
+        if (btnDetail) {
+          btnDetail.onclick = (e) => {
             e.stopPropagation();
             e.preventDefault();
             marker.closePopup();
             onProtestMarkerClickRef.current?.(p);
+          };
+        }
+        const btnGeoInt = document.getElementById(`btn-protest-geoint-${p.id}`);
+        if (btnGeoInt) {
+          btnGeoInt.onclick = (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            marker.closePopup();
+            setSelectedGeoIntAsset({ type: "protest", protest: p });
+            setIsGeoIntHudOpen(true);
           };
         }
       });
@@ -633,7 +922,208 @@ export default function InteractiveMap({
       protestMarkersRef.current.set(p.id, marker);
       group.addLayer(marker);
     }
-  }, [protestEvents, showProtestLayer]);
+  }, [protestEvents, showProtestLayer, allBIOffices]);
+
+  // Render Bank Indonesia Office Markers
+  useEffect(() => {
+    const group = biOfficeLayerGroupRef.current;
+    const map = mapRef.current;
+    if (!group || !map) return;
+    group.clearLayers();
+    biOfficeMarkersRef.current.clear();
+
+    if (!showBIOfficeLayer) {
+      if (map.hasLayer(group)) map.removeLayer(group);
+      return;
+    }
+
+    if (!map.hasLayer(group)) {
+      map.addLayer(group);
+    }
+
+    for (const off of allBIOffices) {
+      if (
+        off.latitude === null ||
+        off.longitude === null ||
+        off.validation_status !== "verified" ||
+        !isValidLatLng(off.latitude, off.longitude)
+      ) {
+        continue;
+      }
+
+      // Find nearest active UNRAS event within 15 km
+      let nearestProtest: { event: ProtestEvent; distanceMeters: number } | null = null;
+      let minProtestDist = Infinity;
+      if (protestEvents) {
+        for (const pr of protestEvents) {
+          if (pr.validated_lat !== null && pr.validated_lng !== null) {
+            const d = calculateHaversineDistanceMeters(off.latitude, off.longitude, pr.validated_lat, pr.validated_lng);
+            if (d < minProtestDist && d <= 15000) {
+              minProtestDist = d;
+              nearestProtest = { event: pr, distanceMeters: d };
+            }
+          }
+        }
+      }
+
+      const isSelected = selectedGeoIntAsset?.type === "office" && selectedGeoIntAsset.office.id === off.id;
+      const icon = createBIOfficeMarkerIcon(off.office_type, isSelected);
+
+      const marker = L.marker([off.latitude, off.longitude], {
+        icon,
+        zIndexOffset: off.office_type === "Kantor Pusat" ? 4000 : off.office_type === "KOPERBI IKN" ? 3800 : 3600
+      });
+
+      marker.bindTooltip(
+        `[${off.office_type.toUpperCase()}] ${off.office_name}`,
+        { direction: "top", offset: [0, -18] }
+      );
+
+      marker.bindPopup(createBIOfficePopupHtml(off, nearestProtest), {
+        className: "scc-leaflet-bi-popup",
+        maxWidth: 320,
+        autoPanPadding: [24, 24]
+      });
+
+      marker.on("click", () => {
+        onSelectBIOfficeRef.current?.(off);
+      });
+
+      marker.on("popupopen", () => {
+        const btn = document.getElementById(`btn-bi-office-hud-${off.id}`);
+        if (btn) {
+          btn.onclick = (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            marker.closePopup();
+            setSelectedGeoIntAsset({ type: "office", office: off });
+            setIsGeoIntHudOpen(true);
+          };
+        }
+      });
+
+      biOfficeMarkersRef.current.set(off.id, marker);
+      group.addLayer(marker);
+    }
+  }, [allBIOffices, showBIOfficeLayer, protestEvents, selectedGeoIntAsset]);
+
+  // Render Bank Indonesia Office Radius Rings
+  useEffect(() => {
+    const group = biRadiusLayerGroupRef.current;
+    const map = mapRef.current;
+    if (!group || !map) return;
+    group.clearLayers();
+
+    if (!showBIOfficeLayer || officeRadiusDistance === 0) {
+      if (map.hasLayer(group)) map.removeLayer(group);
+      return;
+    }
+
+    if (!map.hasLayer(group)) {
+      map.addLayer(group);
+    }
+
+    // Zoom threshold: only render all circles if zoom >= 7 OR render selected office circle
+    const selectedOfficeId = selectedGeoIntAsset?.type === "office" ? selectedGeoIntAsset.office.id : null;
+
+    for (const off of allBIOffices) {
+      if (
+        off.latitude === null ||
+        off.longitude === null ||
+        off.validation_status !== "verified" ||
+        !isValidLatLng(off.latitude, off.longitude)
+      ) {
+        continue;
+      }
+
+      const isSelected = selectedOfficeId === off.id;
+      // Skip if zoom < 7 unless this office is selected
+      if (mapZoom < 7 && !isSelected) {
+        continue;
+      }
+
+      if (officeRadiusDistance === -1) {
+        // Concentric rings: 1km, 3km, 5km, 10km
+        const concentric = [
+          { r: 1000, color: "#38BDF8", weight: 2, dash: "3, 3", opacity: 0.12, fill: "#0284C7" },
+          { r: 3000, color: "#0284C7", weight: 1.5, dash: "4, 4", opacity: 0.08, fill: "#0369A1" },
+          { r: 5000, color: "#0369A1", weight: 1, dash: "5, 5", opacity: 0.04, fill: "#1E3A8A" },
+          { r: 10000, color: "#1E3A8A", weight: 1, dash: "6, 6", opacity: 0.02, fill: "#0F172A" }
+        ];
+
+        for (const ring of concentric) {
+          const circle = L.circle([off.latitude, off.longitude], {
+            radius: ring.r,
+            color: isSelected ? "#38BDF8" : ring.color,
+            weight: isSelected ? ring.weight + 0.5 : ring.weight,
+            dashArray: ring.dash,
+            fillColor: ring.fill,
+            fillOpacity: isSelected ? ring.opacity * 1.5 : ring.opacity,
+            interactive: false
+          });
+          group.addLayer(circle);
+        }
+      } else {
+        // Single radius
+        const circle = L.circle([off.latitude, off.longitude], {
+          radius: officeRadiusDistance,
+          color: isSelected ? "#38BDF8" : "#0284C7",
+          weight: isSelected ? 2.5 : 1.5,
+          dashArray: "4, 4",
+          fillColor: "#0284C7",
+          fillOpacity: isSelected ? 0.15 : 0.08,
+          interactive: false
+        });
+        group.addLayer(circle);
+      }
+    }
+  }, [allBIOffices, showBIOfficeLayer, officeRadiusDistance, mapZoom, selectedGeoIntAsset]);
+
+  // Render UNRAS Radius Rings
+  useEffect(() => {
+    const group = unrasRadiusLayerGroupRef.current;
+    const map = mapRef.current;
+    if (!group || !map) return;
+    group.clearLayers();
+
+    if (!showProtestLayer || unrasRadiusDistance === 0 || !protestEvents) {
+      if (map.hasLayer(group)) map.removeLayer(group);
+      return;
+    }
+
+    if (!map.hasLayer(group)) {
+      map.addLayer(group);
+    }
+
+    const selectedProtestId = selectedGeoIntAsset?.type === "protest" ? selectedGeoIntAsset.protest.id : null;
+
+    for (const p of protestEvents) {
+      if (
+        p.validated_lat === null ||
+        p.validated_lng === null ||
+        !isValidLatLng(p.validated_lat, p.validated_lng)
+      ) {
+        continue;
+      }
+
+      const isSelected = selectedProtestId === p.id;
+      // Skip if zoom < 7 unless this event is selected
+      if (mapZoom < 7 && !isSelected) {
+        continue;
+      }
+
+      const circle = L.circle([p.validated_lat, p.validated_lng], {
+        radius: unrasRadiusDistance,
+        color: isSelected ? "#F87171" : "#EF4444",
+        weight: isSelected ? 2.5 : 1.5,
+        dashArray: "4, 4",
+        fillColor: "#DC2626",
+        fillOpacity: isSelected ? 0.15 : 0.08,
+        interactive: false
+      });
+      group.addLayer(circle);
+    }
+  }, [protestEvents, showProtestLayer, unrasRadiusDistance, mapZoom, selectedGeoIntAsset]);
 
   const handleResetView = () => {
     mapRef.current?.flyTo([-2.5489, 118.0149], 5, { duration: 1.0 });
@@ -689,7 +1179,7 @@ export default function InteractiveMap({
         style={{ zIndex: 20 }}
         className="absolute top-2.5 inset-x-2.5 z-[20] flex flex-wrap items-center justify-between gap-1.5 pointer-events-none"
       >
-        {/* Left: Map Status Pill & Cluster Toggle */}
+        {/* Left: Tactical Map Layers & Radius Controls */}
         <div className="flex flex-wrap items-center gap-1.5 pointer-events-auto max-w-full">
           <div
             data-testid="map-camera-counter"
@@ -705,7 +1195,7 @@ export default function InteractiveMap({
             <span className="font-semibold text-[#F3F6FB] font-mono tabular-nums">
               {validMarkers.length.toLocaleString("id-ID")}
             </span>
-            <span className="text-[#98A4B8]">kamera di peta</span>
+            <span className="text-[#98A4B8]">kamera</span>
             <span className="hidden sm:inline text-[11px] text-[#10B981] font-mono tabular-nums border-l border-[var(--border-subtle)] pl-2">
               {onlineValidCount.toLocaleString("id-ID")} Online
             </span>
@@ -714,35 +1204,124 @@ export default function InteractiveMap({
           <button
             type="button"
             onClick={() => setClustering((c) => !c)}
-            className={`px-2.5 py-1.5 rounded-xl text-[11px] sm:text-xs font-medium border backdrop-blur-md transition-colors shadow-lg ${
+            className={`px-2.5 py-1.5 rounded-xl text-[11px] sm:text-xs font-medium border backdrop-blur-md transition-colors shadow-lg cursor-pointer ${
               clustering
                 ? "bg-[#3B82F6]/20 border-[#3B82F6]/45 text-white"
                 : "bg-[#090C12]/92 border-[var(--border-default)] text-[#98A4B8] hover:text-white"
             }`}
           >
-            Cluster: {clustering ? "AKTIF" : "NONAKTIF"}
+            Cluster: {clustering ? "ON" : "OFF"}
           </button>
 
+          {/* UNRAS Layer & Radius */}
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setShowProtestLayer((l) => !l)}
+              title="Aktifkan / Nonaktifkan Layer Peta Aksi Unjuk Rasa"
+              className={`px-2.5 sm:px-3 py-1.5 rounded-xl text-[11px] sm:text-xs font-semibold border backdrop-blur-md transition-all shadow-lg flex items-center gap-1.5 cursor-pointer ${
+                showProtestLayer
+                  ? "bg-red-500/20 border-red-500/40 text-red-400 shadow-red-500/10"
+                  : "bg-[#090C12]/92 border-[var(--border-default)] text-[#98A4B8] hover:text-white"
+              }`}
+            >
+              <span className="relative flex h-2 w-2">
+                {showProtestLayer && (
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                )}
+                <span className={`relative inline-flex rounded-full h-2 w-2 ${showProtestLayer ? "bg-red-500" : "bg-slate-500"}`}></span>
+              </span>
+              <span>Unras</span>
+              <span className="font-mono text-[10px] px-1.5 py-0.5 rounded-full bg-red-500/20 text-white tabular-nums border border-red-500/30">
+                {protestEvents ? protestEvents.filter((p) => p.validated_lat !== null && p.validated_lng !== null && isValidLatLng(p.validated_lat, p.validated_lng)).length : 0}
+              </span>
+            </button>
+
+            {showProtestLayer && (
+              <button
+                type="button"
+                onClick={() => {
+                  const nextMap: Record<number, number> = {
+                    1000: 1500,
+                    1500: 0,
+                    0: 250,
+                    250: 500,
+                    500: 1000
+                  };
+                  setUnrasRadiusDistance(nextMap[unrasRadiusDistance] ?? 1000);
+                }}
+                title="Siklus Radius Perimeter Unjuk Rasa: 250m, 500m, 1km, 1.5km, Nonaktif"
+                className="px-2 py-1.5 rounded-xl text-[10px] sm:text-[11px] font-mono font-medium border bg-[#090C12]/92 border-red-500/30 text-red-300 hover:text-white backdrop-blur-md transition-colors shadow-lg cursor-pointer"
+              >
+                Rad: {unrasRadiusDistance === 0 ? "OFF" : unrasRadiusDistance >= 1000 ? `${unrasRadiusDistance / 1000}km` : `${unrasRadiusDistance}m`}
+              </button>
+            )}
+          </div>
+
+          {/* Bank Indonesia Layer & Radius */}
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setShowBIOfficeLayer((l) => !l)}
+              title="Aktifkan / Nonaktifkan Layer Kantor Bank Indonesia (47 Kantor)"
+              className={`px-2.5 sm:px-3 py-1.5 rounded-xl text-[11px] sm:text-xs font-semibold border backdrop-blur-md transition-all shadow-lg flex items-center gap-1.5 cursor-pointer ${
+                showBIOfficeLayer
+                  ? "bg-cyan-500/20 border-cyan-500/40 text-cyan-300 shadow-cyan-500/10"
+                  : "bg-[#090C12]/92 border-[var(--border-default)] text-[#98A4B8] hover:text-white"
+              }`}
+            >
+              <Building2 className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Kantor BI</span>
+              <span className="font-mono text-[10px] px-1.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 tabular-nums border border-cyan-500/30">
+                {allBIOffices.filter((o) => o.validation_status === "verified").length}
+              </span>
+            </button>
+
+            {showBIOfficeLayer && (
+              <button
+                type="button"
+                onClick={() => {
+                  const nextMap: Record<number, number> = {
+                    3000: 5000,
+                    5000: 10000,
+                    10000: -1,
+                    [-1]: 0,
+                    0: 1000,
+                    1000: 3000
+                  };
+                  setOfficeRadiusDistance(nextMap[officeRadiusDistance] ?? 3000);
+                }}
+                title="Siklus Radius Perimeter Kantor BI: 1km, 3km, 5km, 10km, Konsentris, Nonaktif"
+                className="px-2 py-1.5 rounded-xl text-[10px] sm:text-[11px] font-mono font-medium border bg-[#090C12]/92 border-cyan-500/30 text-cyan-300 hover:text-white backdrop-blur-md transition-colors shadow-lg cursor-pointer"
+              >
+                Rad: {officeRadiusDistance === -1 ? "Konsentris" : officeRadiusDistance === 0 ? "OFF" : `${officeRadiusDistance / 1000}km`}
+              </button>
+            )}
+          </div>
+
+          {/* Tactical GeoINT HUD Trigger */}
           <button
             type="button"
-            onClick={() => setShowProtestLayer((l) => !l)}
-            title="Aktifkan / Nonaktifkan Layer Peta Aksi Unjuk Rasa"
-            className={`px-2.5 sm:px-3 py-1.5 rounded-xl text-[11px] sm:text-xs font-semibold border backdrop-blur-md transition-all shadow-lg flex items-center gap-1.5 cursor-pointer ${
-              showProtestLayer
-                ? "bg-red-500/20 border-red-500/40 text-red-400 shadow-red-500/10"
-                : "bg-[#090C12]/92 border-[var(--border-default)] text-[#98A4B8] hover:text-white"
+            onClick={() => {
+              if (!selectedGeoIntAsset) {
+                // If no asset selected, pick first verified BI Office or first protest
+                if (allBIOffices.length > 0) {
+                  const firstVerified = allBIOffices.find((o) => o.validation_status === "verified");
+                  if (firstVerified) {
+                    setSelectedGeoIntAsset({ type: "office", office: firstVerified });
+                  }
+                }
+              }
+              setIsGeoIntHudOpen((o) => !o);
+            }}
+            className={`px-2.5 py-1.5 rounded-xl text-[11px] sm:text-xs font-semibold border backdrop-blur-md transition-all shadow-lg flex items-center gap-1.5 cursor-pointer ${
+              isGeoIntHudOpen
+                ? "bg-blue-600 border-blue-400 text-white shadow-blue-500/25"
+                : "bg-[#090C12]/92 border-blue-500/30 text-blue-400 hover:text-white"
             }`}
           >
-            <span className="relative flex h-2 w-2">
-              {showProtestLayer && (
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-              )}
-              <span className={`relative inline-flex rounded-full h-2 w-2 ${showProtestLayer ? "bg-red-500" : "bg-slate-500"}`}></span>
-            </span>
-            <span>Layer Unras</span>
-            <span className="font-mono text-[10px] px-1.5 py-0.5 rounded-full bg-red-500/20 text-white tabular-nums border border-red-500/30">
-              {protestEvents ? protestEvents.filter((p) => p.validated_lat !== null && p.validated_lng !== null && isValidLatLng(p.validated_lat, p.validated_lng)).length : 0}
-            </span>
+            <Radar className={`w-3.5 h-3.5 ${isGeoIntHudOpen ? "animate-spin" : ""}`} />
+            <span className="hidden sm:inline">Tactical</span> HUD
           </button>
         </div>
 
@@ -785,7 +1364,7 @@ export default function InteractiveMap({
             onClick={handleLocateMe}
             title="Lokasi Saya"
             aria-label="Lokasi Saya"
-            className="p-1.5 sm:p-2 rounded-xl bg-[#090C12]/92 backdrop-blur-md border border-[var(--border-default)] text-[#E2E8F0] hover:bg-[#161C2B] hover:text-white shadow-lg transition-colors"
+            className="p-1.5 sm:p-2 rounded-xl bg-[#090C12]/92 backdrop-blur-md border border-[var(--border-default)] text-[#E2E8F0] hover:bg-[#161C2B] hover:text-white shadow-lg transition-colors cursor-pointer"
           >
             <Navigation className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
           </button>
@@ -795,7 +1374,7 @@ export default function InteractiveMap({
             onClick={handleResetView}
             title="Reset Peta Indonesia"
             aria-label="Reset Peta Indonesia"
-            className="p-1.5 sm:p-2 rounded-xl bg-[#090C12]/92 backdrop-blur-md border border-[var(--border-default)] text-[#E2E8F0] hover:bg-[#161C2B] hover:text-white shadow-lg transition-colors"
+            className="p-1.5 sm:p-2 rounded-xl bg-[#090C12]/92 backdrop-blur-md border border-[var(--border-default)] text-[#E2E8F0] hover:bg-[#161C2B] hover:text-white shadow-lg transition-colors cursor-pointer"
           >
             <RotateCcw className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
           </button>
@@ -805,7 +1384,7 @@ export default function InteractiveMap({
             onClick={toggleFullscreen}
             title="Peta Layar Penuh"
             aria-label="Peta Layar Penuh"
-            className="p-1.5 sm:p-2 rounded-xl bg-[#090C12]/92 backdrop-blur-md border border-[var(--border-default)] text-[#E2E8F0] hover:bg-[#161C2B] hover:text-white shadow-lg transition-colors"
+            className="p-1.5 sm:p-2 rounded-xl bg-[#090C12]/92 backdrop-blur-md border border-[var(--border-default)] text-[#E2E8F0] hover:bg-[#161C2B] hover:text-white shadow-lg transition-colors cursor-pointer"
           >
             {isFullscreen ? (
               <Minimize2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
@@ -815,6 +1394,24 @@ export default function InteractiveMap({
           </button>
         </div>
       </div>
+
+      {/* Floating Tactical GeoINT Intelligence HUD Panel */}
+      <TacticalGeoIntHud
+        isOpen={isGeoIntHudOpen}
+        onClose={() => setIsGeoIntHudOpen(false)}
+        asset={selectedGeoIntAsset}
+        biOffices={allBIOffices}
+        protestEvents={protestEvents || []}
+        markers={validMarkers}
+        officeRadius={officeRadiusDistance}
+        unrasRadius={unrasRadiusDistance}
+        onChangeOfficeRadius={setOfficeRadiusDistance}
+        onChangeUnrasRadius={setUnrasRadiusDistance}
+        onPlayCamera={(cam) => onMarkerClickRef.current(cam.id, cam)}
+        onFocusMap={(lat, lng, zoom = 15) => {
+          mapRef.current?.flyTo([lat, lng], zoom, { duration: 1.0 });
+        }}
+      />
 
       {/* Compact Floating Map Preview — Rendered ONLY when interaction.type === "map-preview" */}
       <CameraMapPreview
