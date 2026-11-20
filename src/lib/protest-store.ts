@@ -51,6 +51,7 @@ import {
   fetchStatusHistoryFromSupabase,
   fetchStatsFromSupabase,
   fetchSyncLogsFromSupabase,
+  fetchSyncLogByIdFromSupabase,
   createSyncLogInSupabase,
   updateSyncLogInSupabase,
   upsertExcelBatchInSupabase
@@ -908,7 +909,7 @@ class ProtestDataStore {
       lokasi: string;
       isu_tuntutan: string;
     },
-    user: UserProfile
+    user?: UserProfile
   ): Promise<ProtestEvent> {
     if (isSupabaseConfigured()) {
       try {
@@ -932,7 +933,7 @@ class ProtestDataStore {
       lokasi: string;
       isu_tuntutan: string;
     },
-    user: UserProfile
+    user?: UserProfile
   ): ProtestEvent {
     const id = input.id || crypto.randomUUID();
     const now = new Date().toISOString();
@@ -977,8 +978,8 @@ class ProtestDataStore {
       geocoding_confidence: input.geocoding_confidence || null,
       geocoding_alternatives: input.geocoding_alternatives || [],
       validated_at: hasCoords ? now : null,
-      validated_by_id: hasCoords ? user.id : null,
-      validated_by_name: hasCoords ? user.name : null,
+      validated_by_id: hasCoords ? (user?.id || null) : null,
+      validated_by_name: hasCoords ? (user?.name || null) : null,
       actual_crowd_size: input.actual_crowd_size ?? null,
       situation_summary: input.situation_summary || null,
       editorial_draft: input.editorial_draft || null,
@@ -1002,7 +1003,7 @@ class ProtestDataStore {
       kategori_isu: input.kategori_isu || null,
       dampak: input.dampak || "Tidak Ada",
       keterangan_dampak: input.keterangan_dampak || null,
-      nama_pelapor: input.nama_pelapor || user.name || null,
+      nama_pelapor: input.nama_pelapor || user?.name || null,
       info_awal: input.info_awal || null,
       tindak_lanjut: input.tindak_lanjut || null,
       progres_asistensi: input.progres_asistensi || null,
@@ -1531,7 +1532,7 @@ class ProtestDataStore {
     from_status: ProtestStatus | null;
     to_status: ProtestStatus;
     reason: string | null;
-    user: UserProfile;
+    user?: UserProfile;
   }): void {
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
@@ -1541,8 +1542,8 @@ class ProtestDataStore {
       from_status: params.from_status,
       to_status: params.to_status,
       reason: params.reason,
-      changed_by_id: params.user.id,
-      changed_by_name: params.user.name,
+      changed_by_id: params.user?.id || "00000000-0000-0000-0000-000000000000",
+      changed_by_name: params.user?.name || "System",
       created_at: now
     };
 
@@ -2417,6 +2418,46 @@ class ProtestDataStore {
     }
 
     return this.memorySyncLogs.slice(0, limit);
+  }
+
+  async getSyncLogById(id: string): Promise<ProtestSyncLog | null> {
+    if (isSupabaseConfigured()) {
+      try {
+        const remote = await fetchSyncLogByIdFromSupabase(id);
+        if (remote) return remote;
+      } catch (err) {
+        console.error("[ProtestDataStore] Supabase getSyncLogById failed, fallback to local:", err);
+      }
+    }
+    return this.getSyncLogByIdLocal(id);
+  }
+
+  getSyncLogByIdLocal(id: string): ProtestSyncLog | null {
+    if (this.db) {
+      const r = this.db.prepare("SELECT * FROM protest_sync_logs WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+      if (!r) return null;
+      return {
+        id: String(r.id),
+        started_at: String(r.started_at),
+        completed_at: r.completed_at ? String(r.completed_at) : null,
+        period_start: r.period_start ? String(r.period_start) : null,
+        period_end: r.period_end ? String(r.period_end) : null,
+        status: r.status as ProtestSyncLog["status"],
+        triggered_by: r.triggered_by as ProtestSyncLog["triggered_by"],
+        triggered_by_user: r.triggered_by_user ? String(r.triggered_by_user) : null,
+        source_worksheet: String(r.source_worksheet),
+        records_received: Number(r.records_received || 0),
+        records_processed: Number(r.records_processed || 0),
+        records_created: Number(r.records_created || 0),
+        records_updated: Number(r.records_updated || 0),
+        records_skipped: Number(r.records_skipped || 0),
+        records_failed: Number(r.records_failed || 0),
+        error_details: r.error_details ? String(r.error_details) : null,
+        duration_ms: r.duration_ms != null ? Number(r.duration_ms) : null
+      };
+    }
+    const log = this.memorySyncLogs.find((l) => l.id === id);
+    return log || null;
   }
 
   // ---------------------------------------------------------------------------

@@ -76,9 +76,9 @@ export function ProtestSyncModal({
 
   if (!isOpen || !mounted || typeof document === "undefined") return null;
 
-  const handleRunSync = async (forceFixture: boolean = false) => {
+  const handleRunSync = async () => {
     setLoading(true);
-    setStatusMessage(null);
+    setStatusMessage("Mengirim permintaan sinkronisasi manual ke Power Automate...");
     setErrorMessage(null);
 
     try {
@@ -88,19 +88,57 @@ export function ProtestSyncModal({
           "Content-Type": "application/json",
           "x-scc-user-role": "admin"
         },
-        body: JSON.stringify({ forceFixture })
+        body: JSON.stringify({})
       });
 
       const json = await res.json();
-      if (!res.ok && res.status !== 200 && res.status !== 409) {
+      if (!res.ok) {
         throw new Error(json.error || "Gagal menjalankan sinkronisasi data.");
       }
 
-      setStatusMessage(json.message || "Penyelarasan data unjuk rasa selesai.");
-      await fetchSyncStatus();
-      onSyncCompleted();
-      if (typeof window !== "undefined") {
-        window.dispatchEvent(new CustomEvent("scc-protest-updated"));
+      const executionId = json.execution_id;
+      setStatusMessage("Sinkronisasi dimulai. Menunggu eksekusi Power Automate...");
+
+      let isCompleted = false;
+      const startTime = Date.now();
+      while (!isCompleted && Date.now() - startTime < 60000) {
+        await new Promise((r) => setTimeout(r, 2500));
+        try {
+          const pollUrl = executionId
+            ? `/api/protests/sync?execution_id=${encodeURIComponent(executionId)}`
+            : "/api/protests/sync";
+          const pollRes = await fetch(pollUrl, { cache: "no-store" });
+          const pollJson = await pollRes.json();
+          if (pollRes.ok && pollJson.success) {
+            const currentLog: ProtestSyncLog | undefined =
+              pollJson.execution || (pollJson.latestSyncLogs && pollJson.latestSyncLogs[0]);
+            if (currentLog && currentLog.status !== "running") {
+              isCompleted = true;
+              await fetchSyncStatus();
+              if (currentLog.status === "success") {
+                setStatusMessage(
+                  `Sinkronisasi Selesai: +${currentLog.records_created} baru, ~${currentLog.records_updated} diperbarui, /${currentLog.records_skipped} dilewati.`
+                );
+              } else if (currentLog.status === "partial") {
+                setStatusMessage(
+                  `Sinkronisasi Sebagian: +${currentLog.records_created} baru, ~${currentLog.records_updated} diperbarui.`
+                );
+              } else {
+                setErrorMessage(currentLog.error_details || "Eksekusi Power Automate gagal.");
+              }
+              onSyncCompleted();
+              if (typeof window !== "undefined") {
+                window.dispatchEvent(new CustomEvent("scc-protest-updated"));
+              }
+              break;
+            }
+          }
+        } catch {}
+      }
+
+      if (!isCompleted) {
+        await fetchSyncStatus();
+        setStatusMessage("Proses sinkronisasi masih berjalan di background pada Power Automate.");
       }
     } catch (err: any) {
       setErrorMessage(err.message || "Terjadi kesalahan pada proses sinkronisasi.");
@@ -187,7 +225,7 @@ export function ProtestSyncModal({
         <div className="mt-4 flex flex-col sm:flex-row items-center gap-2.5">
           <button
             type="button"
-            onClick={() => handleRunSync(false)}
+            onClick={() => handleRunSync()}
             disabled={loading}
             className="w-full sm:flex-1 py-2.5 px-4 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-500/20 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
           >
@@ -199,21 +237,10 @@ export function ProtestSyncModal({
             ) : (
               <>
                 <RefreshCw className="w-3.5 h-3.5" />
-                <span>Jalankan Sinkronisasi Sekarang</span>
+                <span>Jalankan Sinkronisasi Sekarang (Admin)</span>
               </>
             )}
           </button>
-
-          {!isGraphConfigured && (
-            <button
-              type="button"
-              onClick={() => handleRunSync(true)}
-              disabled={loading}
-              className="w-full sm:w-auto py-2.5 px-3 rounded-xl text-xs font-medium bg-[#161C2B] hover:bg-[#1E2638] text-[#98A4B8] hover:text-white border border-[var(--border-default)] transition-colors"
-            >
-              Uji Paksa Sample Fixture
-            </button>
-          )}
         </div>
 
         {/* Sync History Audit */}

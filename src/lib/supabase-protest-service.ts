@@ -849,6 +849,20 @@ export async function updateSyncLogInSupabase(id: string, log: Partial<ProtestSy
     .eq("id", id);
 }
 
+export async function fetchSyncLogByIdFromSupabase(id: string): Promise<ProtestSyncLog | null> {
+  const supabase = getSupabaseAdminClient();
+  if (!supabase) return null;
+
+  const { data, error } = await supabase
+    .from("protest_sync_logs")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (error || !data) return null;
+  return data as unknown as ProtestSyncLog;
+}
+
 /**
  * 11. Idempotent Batch Upsert from Excel into Supabase
  * Strictly preserves operator fields: status, reports, validated_lat, validated_lng,

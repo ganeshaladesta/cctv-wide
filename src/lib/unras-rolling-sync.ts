@@ -315,7 +315,24 @@ export async function processSameDaySync(
   triggeredByUser?: string
 ): Promise<ProtestSyncResult> {
   const startTime = Date.now();
-  const executionId = `sync-h0-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
+  let executionId = (payload as any).execution_id;
+  let finalTriggeredBy = (payload as any).triggered_by || triggeredBy;
+  let finalTriggeredByUser = (payload as any).triggered_by_user || triggeredByUser;
+
+  if (!executionId) {
+    // Check if there is an active manual trigger log waiting for Power Automate completion
+    const recentLogs = await protestStore.getSyncLogs(5);
+    const activeManual = recentLogs.find(
+      (l) => l.status === "running" && l.triggered_by === "manual_admin" && (Date.now() - new Date(l.started_at).getTime() < 180000)
+    );
+    if (activeManual) {
+      executionId = activeManual.id;
+      finalTriggeredBy = activeManual.triggered_by;
+      finalTriggeredByUser = activeManual.triggered_by_user || finalTriggeredByUser;
+    } else {
+      executionId = `sync-h0-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
+    }
+  }
 
   // 1. Concurrency Guard Lock
   if (isSameDaySyncActive) {
@@ -369,26 +386,36 @@ export async function processSameDaySync(
 
   const { startMs, endMs } = validation;
 
-  // 3. Create Audit Log Record
-  await protestStore.createSyncLog({
-    id: executionId,
-    started_at: new Date(startTime).toISOString(),
-    completed_at: null,
-    period_start: payload.period_start,
-    period_end: payload.period_end,
-    status: "running",
-    triggered_by: triggeredBy,
-    triggered_by_user: triggeredByUser || null,
-    source_worksheet: "NEW UNRAS 2022-2026",
-    records_received: payload.events.length,
-    records_processed: 0,
-    records_created: 0,
-    records_updated: 0,
-    records_skipped: 0,
-    records_failed: 0,
-    error_details: null,
-    duration_ms: null
-  });
+  // 3. Create or Update Audit Log Record
+  const existingLog = await protestStore.getSyncLogById(executionId);
+  if (existingLog) {
+    await protestStore.updateSyncLog(executionId, {
+      period_start: payload.period_start,
+      period_end: payload.period_end,
+      records_received: payload.events.length,
+      status: "running"
+    });
+  } else {
+    await protestStore.createSyncLog({
+      id: executionId,
+      started_at: new Date(startTime).toISOString(),
+      completed_at: null,
+      period_start: payload.period_start,
+      period_end: payload.period_end,
+      status: "running",
+      triggered_by: finalTriggeredBy,
+      triggered_by_user: finalTriggeredByUser || null,
+      source_worksheet: "NEW UNRAS 2022-2026",
+      records_received: payload.events.length,
+      records_processed: 0,
+      records_created: 0,
+      records_updated: 0,
+      records_skipped: 0,
+      records_failed: 0,
+      error_details: null,
+      duration_ms: null
+    });
+  }
 
   const errors: string[] = [];
   let inserted = 0;

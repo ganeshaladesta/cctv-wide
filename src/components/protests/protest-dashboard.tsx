@@ -76,7 +76,11 @@ export function ProtestDashboard({
   // Sync state for dedicated sync panel
   const [syncLogs, setSyncLogs] = useState<ProtestSyncLog[]>([]);
   const [syncLoading, setSyncLoading] = useState(false);
-  const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
+  const [syncFeedback, setSyncFeedback] = useState<{
+    type: "info" | "success" | "warning" | "error";
+    message: string;
+  } | null>(null);
+  const [syncButtonText, setSyncButtonText] = useState("Sync Sekarang (Admin)");
 
   // Fetch KPI Stats (never flash fake 0)
   const fetchStats = async () => {
@@ -108,8 +112,15 @@ export function ProtestDashboard({
   };
 
   const triggerDashboardManualSync = async () => {
+    if (syncLoading) return;
+
     setSyncLoading(true);
-    setSyncFeedback(null);
+    setSyncButtonText("Mengirim permintaan sinkronisasi...");
+    setSyncFeedback({
+      type: "info",
+      message: "Menghubungi server untuk memicu alur sinkronisasi Power Automate..."
+    });
+
     try {
       const res = await fetch("/api/protests/sync", {
         method: "POST",
@@ -121,20 +132,82 @@ export function ProtestDashboard({
       });
       const json = await res.json();
       if (!res.ok) {
-        throw new Error(json.error || "Gagal sinkronisasi data unjuk rasa.");
+        throw new Error(json.error || "Gagal memulai sinkronisasi data unjuk rasa.");
       }
-      setSyncFeedback(
-        `Sinkronisasi Selesai: +${json.summary?.inserted ?? 0} baru, ~${json.summary?.updated ?? 0} diperbarui, /${json.summary?.skipped ?? 0} dilewati.`
-      );
-      await Promise.all([
-        fetchStats(),
-        fetchSyncData(),
-        fetchProtests()
-      ]);
+
+      const executionId = json.execution_id;
+      setSyncButtonText("Sinkronisasi dimulai...");
+      setSyncFeedback({
+        type: "info",
+        message: "Sinkronisasi dimulai. Menunggu eksekusi Power Automate & pelaporan data..."
+      });
+
+      // Poll execution status until backend confirms completion
+      let isCompleted = false;
+      const startTime = Date.now();
+      const maxPollingMs = 60000; // 60 seconds failsafe timeout
+
+      while (!isCompleted && Date.now() - startTime < maxPollingMs) {
+        await new Promise((resolve) => setTimeout(resolve, 2500));
+        try {
+          const pollUrl = executionId
+            ? `/api/protests/sync?execution_id=${encodeURIComponent(executionId)}`
+            : "/api/protests/sync";
+          const pollRes = await fetch(pollUrl, { cache: "no-store" });
+          const pollJson = await pollRes.json();
+          if (pollRes.ok && pollJson.success) {
+            const currentLog: ProtestSyncLog | undefined =
+              pollJson.execution || (pollJson.latestSyncLogs && pollJson.latestSyncLogs[0]);
+
+            if (currentLog && currentLog.status !== "running") {
+              isCompleted = true;
+              await fetchSyncData();
+
+              if (currentLog.status === "success") {
+                setSyncFeedback({
+                  type: "success",
+                  message: `Sinkronisasi Berhasil (Manual): +${currentLog.records_created} baru, ~${currentLog.records_updated} diperbarui, /${currentLog.records_skipped} dilewati, !${currentLog.records_failed ?? 0} gagal.`
+                });
+              } else if (currentLog.status === "partial") {
+                setSyncFeedback({
+                  type: "warning",
+                  message: `Sinkronisasi Selesai Sebagian: +${currentLog.records_created} baru, ~${currentLog.records_updated} diperbarui, /${currentLog.records_skipped} dilewati. Peringatan: ${currentLog.error_details || "Terdapat baris data yang dilewati."}`
+                });
+              } else if (currentLog.status === "failed") {
+                setSyncFeedback({
+                  type: "error",
+                  message: `Sinkronisasi Gagal: ${currentLog.error_details || "Eksekusi Power Automate atau penulisan data gagal."}`
+                });
+              }
+
+              // Refresh UNRAS dashboard data
+              await Promise.all([fetchStats(), fetchProtests()]);
+              if (typeof window !== "undefined") {
+                window.dispatchEvent(new CustomEvent("scc-protest-updated"));
+              }
+              break;
+            }
+          }
+        } catch (pollErr) {
+          console.warn("[ProtestDashboard] Polling status warning:", pollErr);
+        }
+      }
+
+      if (!isCompleted) {
+        await fetchSyncData();
+        setSyncFeedback({
+          type: "info",
+          message: "Proses sinkronisasi masih berjalan di background pada Power Automate. Status akan otomatis terbarui pada panel riwayat."
+        });
+      }
     } catch (err: any) {
-      setSyncFeedback(`Error: ${err.message}`);
+      setSyncFeedback({
+        type: "error",
+        message: err.message || "Terjadi kesalahan saat memicu sinkronisasi."
+      });
     } finally {
       setSyncLoading(false);
+      setSyncButtonText("Sync Sekarang (Admin)");
     }
   };
 
@@ -400,51 +473,80 @@ export function ProtestDashboard({
                         : "bg-red-500/15 text-red-400 border border-red-500/30"
                     }`}
                   >
-                    Status: {latestLog.status}
+                    {latestLog.status === "running" ? "Sedang Berjalan" : `Status: ${latestLog.status}`}
                   </span>
                 )}
                 <button
                   type="button"
                   onClick={triggerDashboardManualSync}
                   disabled={syncLoading}
-                  className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-500/20 transition-all flex items-center gap-1.5 disabled:opacity-50"
-                  title="Manual sync terbatas untuk peran Administrator"
+                  className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-500/20 transition-all flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                  title="Manual sync terbatas untuk peran Administrator Komando"
                 >
                   <RefreshCw className={`w-3 h-3 ${syncLoading ? "animate-spin" : ""}`} />
-                  <span>{syncLoading ? "Menyelaraskan..." : "Sync Sekarang (Admin)"}</span>
+                  <span>{syncButtonText}</span>
                 </button>
               </div>
             </div>
 
             {syncFeedback && (
-              <div className="p-2.5 rounded-xl bg-blue-500/10 border border-blue-500/30 text-xs text-blue-300">
-                {syncFeedback}
+              <div
+                className={`p-2.5 rounded-xl text-xs border flex items-start gap-2 ${
+                  syncFeedback.type === "success"
+                    ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-300"
+                    : syncFeedback.type === "warning"
+                    ? "bg-amber-500/10 border-amber-500/30 text-amber-300"
+                    : syncFeedback.type === "error"
+                    ? "bg-red-500/10 border-red-500/30 text-red-300"
+                    : "bg-blue-500/10 border-blue-500/30 text-blue-300"
+                }`}
+              >
+                <span>{syncFeedback.message}</span>
               </div>
             )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
               <div className="p-2.5 rounded-xl bg-[#141A28] border border-[var(--border-subtle)]">
-                <span className="text-[10px] text-[#64748B] block">Sinkronisasi Terakhir (Sukses)</span>
+                <span className="text-[10px] text-[#64748B] block">Sinkronisasi Terakhir</span>
                 <span className="text-white font-medium mt-0.5 block truncate">
-                  {formatWib(lastSuccessLog?.completed_at || latestLog?.completed_at)}
+                  {formatWib(latestLog?.completed_at || lastSuccessLog?.completed_at)}
                 </span>
                 <span className="text-[10px] text-[#98A4B8]">
-                  Percobaan: {formatWib(latestLog?.started_at)}
+                  Waktu Mulai: {formatWib(latestLog?.started_at)}
                 </span>
-              </div>
-
-              <div className="p-2.5 rounded-xl bg-[#141A28] border border-[var(--border-subtle)] col-span-1 md:col-span-2">
-                <span className="text-[10px] text-[#64748B] block">Jendela Sinkronisasi H-0 (Hari Ini)</span>
-                <div className="text-white font-medium mt-0.5 flex flex-wrap items-center gap-1">
-                  <span>{formatWib(latestLog?.period_start)}</span>
-                  <span className="text-[#64748B]">s/d</span>
-                  <span>{formatWib(latestLog?.period_end)}</span>
-                </div>
-                <span className="text-[10px] text-[#98A4B8]">Inklusi: 00:00:00 s/d 24:00:00 WIB (Asia/Jakarta)</span>
               </div>
 
               <div className="p-2.5 rounded-xl bg-[#141A28] border border-[var(--border-subtle)]">
-                <span className="text-[10px] text-[#64748B] block">Rangkuman Rekaman Batch</span>
+                <span className="text-[10px] text-[#64748B] block">Mode Eksekusi</span>
+                <span className="text-white font-medium mt-0.5 block truncate">
+                  {latestLog?.triggered_by === "manual_admin"
+                    ? `Manual (${latestLog.triggered_by_user || "Admin"})`
+                    : "Otomatis (Jadwal 05:00 WIB)"}
+                </span>
+                <span className="text-[10px] text-[#98A4B8] truncate block">
+                  Jendela H-0: {formatWib(latestLog?.period_start)} s/d {formatWib(latestLog?.period_end)}
+                </span>
+              </div>
+
+              <div className="p-2.5 rounded-xl bg-[#141A28] border border-[var(--border-subtle)]">
+                <span className="text-[10px] text-[#64748B] block">Rekaman Sumber (Excel)</span>
+                <div className="flex items-center gap-3 mt-1">
+                  <div>
+                    <span className="text-[#64748B] text-[10px] block">Diterima</span>
+                    <span className="text-white font-bold">{latestLog?.records_received ?? 0}</span>
+                  </div>
+                  <div className="border-l border-[var(--border-subtle)] pl-3">
+                    <span className="text-[#64748B] text-[10px] block">Diproses</span>
+                    <span className="text-emerald-400 font-bold">{latestLog?.records_processed ?? 0}</span>
+                  </div>
+                </div>
+                <span className="text-[10px] text-[#98A4B8] block mt-0.5">
+                  Worksheet: {latestLog?.source_worksheet || "NEW UNRAS 2022-2026"}
+                </span>
+              </div>
+
+              <div className="p-2.5 rounded-xl bg-[#141A28] border border-[var(--border-subtle)]">
+                <span className="text-[10px] text-[#64748B] block">Hasil Upsert Database</span>
                 <div className="flex items-center gap-2 mt-1">
                   <span className="text-emerald-400 font-bold" title="Baru Dibuat">
                     +{latestLog?.records_created ?? 0}
@@ -460,10 +562,17 @@ export function ProtestDashboard({
                   </span>
                 </div>
                 <span className="text-[10px] text-[#64748B] block mt-0.5">
-                  Total diterima: {latestLog?.records_received ?? 0} baris
+                  (+baru, ~update, /skip, !gagal)
                 </span>
               </div>
             </div>
+
+            {latestLog?.error_details && (latestLog.status === "failed" || latestLog.status === "partial") && (
+              <div className="p-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-[11px] text-red-300 flex flex-col gap-0.5">
+                <span className="font-semibold text-red-400">Pesan Error / Catatan Validasi Terakhir:</span>
+                <span className="break-words line-clamp-3">{latestLog.error_details}</span>
+              </div>
+            )}
           </div>
         );
       })()}
