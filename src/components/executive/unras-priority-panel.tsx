@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import {
   ShieldAlert,
   Flame,
@@ -18,9 +18,20 @@ import {
   Eye,
   Calendar,
   Layers,
-  ChevronLeft
+  ChevronLeft,
+  TrendingUp,
+  TrendingDown,
+  Minus,
+  RefreshCw,
+  CalendarDays
 } from "lucide-react";
-import { ProtestEvent, ProtestStatus, ProtestUrgency } from "@/lib/types/protests";
+import {
+  ProtestEvent,
+  ProtestStatus,
+  ProtestUrgency,
+  DailyUnrasSituationOverview,
+  ProtestPoint
+} from "@/lib/types/protests";
 import { Camera } from "@/lib/types";
 import { FavoritesButton } from "@/components/motion-ui";
 
@@ -73,6 +84,45 @@ export function UnrasPriorityPanel({
     }
   }, []);
 
+  const [selectedDate, setSelectedDate] = useState<string>(todayWib);
+  const [dailyOverview, setDailyOverview] = useState<DailyUnrasSituationOverview | null>(null);
+  const [loadingDailyOverview, setLoadingDailyOverview] = useState<boolean>(false);
+
+  const fetchDailyOverview = useCallback(async (dateStr: string) => {
+    setLoadingDailyOverview(true);
+    try {
+      const res = await fetch(`/api/protests/daily-situation?date=${dateStr}`);
+      const json = await res.json();
+      if (res.ok && json.success) {
+        setDailyOverview(json.data);
+      }
+    } catch (err) {
+      console.error("[UnrasPriorityPanel] Failed to fetch daily situation overview:", err);
+    } finally {
+      setLoadingDailyOverview(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchDailyOverview(selectedDate);
+  }, [selectedDate, fetchDailyOverview]);
+
+  const handlePrevDay = () => {
+    const d = new Date(selectedDate + "T12:00:00Z");
+    d.setUTCDate(d.getUTCDate() - 1);
+    setSelectedDate(d.toISOString().slice(0, 10));
+  };
+
+  const handleNextDay = () => {
+    const d = new Date(selectedDate + "T12:00:00Z");
+    d.setUTCDate(d.getUTCDate() + 1);
+    setSelectedDate(d.toISOString().slice(0, 10));
+  };
+
+  const handleToday = () => {
+    setSelectedDate(todayWib);
+  };
+
   // Filter & Prioritize UNRAS events
   const prioritizedEvents = useMemo(() => {
     let list = protestEvents.filter((p) => !p.deleted_at);
@@ -81,7 +131,7 @@ export function UnrasPriorityPanel({
     if (unrasStatusFilter === "all_active") {
       list = list.filter((p) => ["ongoing", "monitoring", "scheduled"].includes(p.status));
     } else if (unrasStatusFilter === "today") {
-      list = list.filter((p) => p.tanggal === todayWib);
+      list = list.filter((p) => p.tanggal === selectedDate);
     } else if (unrasStatusFilter === "ongoing") {
       list = list.filter((p) => p.status === "ongoing");
     } else if (unrasStatusFilter === "monitoring") {
@@ -203,8 +253,88 @@ export function UnrasPriorityPanel({
       {/* VIEW 1: UNRAS EXECUTIVE SITUATION & PRIORITY PANEL */}
       {activeSidebarTab === "unras" && (
         <div className="flex-1 flex flex-col min-h-0 bg-[#070A0F]/60">
-          {/* Filter Toolbar */}
+          {/* Operational Date Navigator & Situation Overview */}
           <div className="p-2.5 border-b border-[var(--border-subtle)] space-y-2 bg-[#090D14]">
+            {/* Operational Date Bar */}
+            <div className="flex items-center justify-between gap-1.5 p-2 rounded-xl bg-[#0F141F] border border-[var(--border-subtle)] text-xs">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <CalendarDays className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                <span className="text-[11px] font-bold text-white uppercase tracking-wider font-mono truncate">
+                  {selectedDate === todayWib ? "Hari Ini (Operasional)" : selectedDate}
+                </span>
+                {selectedDate !== todayWib && (
+                  <button
+                    type="button"
+                    onClick={handleToday}
+                    className="px-1.5 py-0.5 rounded text-[10px] bg-blue-600/30 text-blue-300 border border-blue-500/30 hover:bg-blue-600 hover:text-white transition-colors cursor-pointer"
+                  >
+                    Hari Ini
+                  </button>
+                )}
+              </div>
+
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={handlePrevDay}
+                  className="p-1 rounded-lg text-[#98A4B8] hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
+                  title="Hari Sebelumnya"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                </button>
+                <input
+                  type="date"
+                  value={selectedDate}
+                  onChange={(e) => e.target.value && setSelectedDate(e.target.value)}
+                  className="bg-transparent border border-white/10 rounded px-1.5 py-0.5 text-[11px] text-[#E2E8F0] font-mono cursor-pointer focus:outline-none focus:border-blue-500"
+                />
+                <button
+                  type="button"
+                  onClick={handleNextDay}
+                  className="p-1 rounded-lg text-[#98A4B8] hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
+                  title="Hari Berikutnya"
+                >
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => fetchDailyOverview(selectedDate)}
+                  className="p-1 rounded-lg text-[#98A4B8] hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
+                  title="Muat Ulang Situasi"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${loadingDailyOverview ? "animate-spin text-blue-400" : ""}`} />
+                </button>
+              </div>
+            </div>
+
+            {/* Daily Situation Overview KPI Strip */}
+            {dailyOverview && (
+              <div className="grid grid-cols-4 gap-1.5 p-2 rounded-xl bg-[#0B0F17] border border-blue-500/20 text-center font-mono">
+                <div className="p-1 rounded-lg bg-white/[0.02]">
+                  <span className="text-[9px] text-[#98A4B8] uppercase block">Titik Pantau</span>
+                  <span className="text-xs font-bold text-white">{dailyOverview.total_points}</span>
+                  <span className="text-[9px] text-emerald-400 block">({dailyOverview.total_active_points} aktif)</span>
+                </div>
+                <div className="p-1 rounded-lg bg-white/[0.02]">
+                  <span className="text-[9px] text-[#98A4B8] uppercase block">Est. Massa</span>
+                  <span className="text-xs font-bold text-amber-300 truncate block">
+                    {dailyOverview.total_estimated_crowd.toLocaleString("id-ID")}
+                  </span>
+                  <span className="text-[9px] text-[#64748B] block">orang</span>
+                </div>
+                <div className="p-1 rounded-lg bg-white/[0.02]">
+                  <span className="text-[9px] text-[#98A4B8] uppercase block">Elemen</span>
+                  <span className="text-xs font-bold text-blue-300">{dailyOverview.total_identified_elements}</span>
+                  <span className="text-[9px] text-[#64748B] block">ormas</span>
+                </div>
+                <div className="p-1 rounded-lg bg-white/[0.02]">
+                  <span className="text-[9px] text-[#98A4B8] uppercase block">CCTV</span>
+                  <span className="text-xs font-bold text-emerald-400">{dailyOverview.linked_cctv_count}</span>
+                  <span className="text-[9px] text-[#64748B] block">kamera</span>
+                </div>
+              </div>
+            )}
+
             {/* Quick Filter Pills */}
             <div className="flex items-center gap-1 overflow-x-auto pb-0.5 text-[11px]">
               <button
@@ -363,11 +493,35 @@ export function UnrasPriorityPanel({
 
                     {/* Crowd & Involved Elements */}
                     <div className="mt-2 pt-2 border-t border-white/[0.06] flex flex-wrap items-center justify-between gap-1.5 text-[11px]">
-                      <div className="flex items-center gap-1 text-[#C5D0E3]">
+                      <div className="flex items-center gap-1.5 text-[#C5D0E3]">
                         <Users className="w-3 h-3 text-amber-400 shrink-0" />
                         <span>
                           Massa: <strong className="text-white font-mono">{crowd ? `±${crowd.toLocaleString("id-ID")}` : "Belum terdata"}</strong> org
                         </span>
+                        {/* Point level trend indicator if single point has observation */}
+                        {(() => {
+                          const eventPoints = dailyOverview?.points.filter((pt) => pt.protest_id === event.id) || [];
+                          if (eventPoints.length === 1 && eventPoints[0].crowd_trend && eventPoints[0].crowd_trend !== "none") {
+                            const pt = eventPoints[0];
+                            return (
+                              <span
+                                className={`text-[10px] font-bold font-mono px-1.5 py-0.2 rounded flex items-center gap-0.5 ${
+                                  pt.crowd_trend === "up"
+                                    ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30"
+                                    : pt.crowd_trend === "down"
+                                    ? "bg-red-500/15 text-red-400 border border-red-500/30"
+                                    : "bg-blue-500/10 text-blue-300"
+                                }`}
+                              >
+                                {pt.crowd_trend === "up" && <TrendingUp className="w-2.5 h-2.5" />}
+                                {pt.crowd_trend === "down" && <TrendingDown className="w-2.5 h-2.5" />}
+                                {pt.crowd_trend === "stable" && <Minus className="w-2.5 h-2.5" />}
+                                <span>{pt.crowd_change_delta ? (pt.crowd_change_delta > 0 ? `+${pt.crowd_change_delta}` : `${pt.crowd_change_delta}`) : "Tetap"}</span>
+                              </span>
+                            );
+                          }
+                          return null;
+                        })()}
                       </div>
 
                       {/* CCTV Badge */}
@@ -383,20 +537,138 @@ export function UnrasPriorityPanel({
                       </span>
                     </div>
 
-                    {/* Involved Elements Tags */}
-                    {elements.length > 0 && (
-                      <div className="flex flex-wrap items-center gap-1 mt-1.5">
-                        {elements.map((el, idx) => (
-                          <span
-                            key={idx}
-                            className="text-[9px] px-1.5 py-0.5 rounded bg-white/5 text-[#98A4B8] border border-white/5 truncate max-w-[140px]"
-                            title={el}
-                          >
-                            {el}
-                          </span>
-                        ))}
-                      </div>
-                    )}
+                    {/* Multi-Point & Elements Breakdown */}
+                    {(() => {
+                      const eventPoints = dailyOverview?.points.filter((pt) => pt.protest_id === event.id) || [];
+                      if (eventPoints.length > 1) {
+                        return (
+                          <div className="mt-2.5 pt-2 border-t border-white/[0.06] space-y-1.5">
+                            <div className="flex items-center justify-between text-[10px] font-bold text-[#98A4B8] uppercase tracking-wider font-mono">
+                              <span>Titik Pemantauan ({eventPoints.length})</span>
+                              <span className="text-emerald-400">
+                                Total: ±{eventPoints.reduce((acc, p) => acc + (p.current_crowd_total || 0), 0).toLocaleString("id-ID")} org
+                              </span>
+                            </div>
+
+                            <div className="space-y-1.5">
+                              {eventPoints.map((pt) => {
+                                const ptCctvCount = pt.linked_camera_count || pt.linked_cameras?.length || 0;
+                                return (
+                                  <div
+                                    key={pt.id}
+                                    className="p-2 rounded-lg bg-[#080B11] border border-white/5 space-y-1"
+                                  >
+                                    <div className="flex items-center justify-between gap-1 text-[11px]">
+                                      <div className="flex items-center gap-1.5 min-w-0">
+                                        <MapPin className="w-3 h-3 text-red-400 shrink-0" />
+                                        <span className="font-semibold text-[#E2E8F0] truncate" title={pt.point_name}>
+                                          {pt.point_name}
+                                        </span>
+                                      </div>
+                                      <span
+                                        className={`px-1.5 py-0.2 rounded text-[9px] font-extrabold uppercase shrink-0 ${
+                                          pt.status === "ongoing"
+                                            ? "bg-red-500/20 text-red-400"
+                                            : pt.status === "monitoring"
+                                            ? "bg-purple-500/20 text-purple-400"
+                                            : "bg-amber-500/20 text-amber-400"
+                                        }`}
+                                      >
+                                        {pt.status}
+                                      </span>
+                                    </div>
+
+                                    {/* Point Crowd & Trend */}
+                                    <div className="flex items-center justify-between text-[10px] text-[#98A4B8] font-mono">
+                                      <div className="flex items-center gap-1.5">
+                                        <Users className="w-2.5 h-2.5 text-amber-400" />
+                                        <span className="text-white font-bold">
+                                          ±{(pt.current_crowd_total || 0).toLocaleString("id-ID")} org
+                                        </span>
+                                        {pt.crowd_trend === "up" && (
+                                          <span className="text-emerald-400 font-bold flex items-center">
+                                            <TrendingUp className="w-2.5 h-2.5" /> +{pt.crowd_change_delta}
+                                          </span>
+                                        )}
+                                        {pt.crowd_trend === "down" && (
+                                          <span className="text-red-400 font-bold flex items-center">
+                                            <TrendingDown className="w-2.5 h-2.5" /> {pt.crowd_change_delta}
+                                          </span>
+                                        )}
+                                        {pt.crowd_trend === "stable" && (
+                                          <span className="text-blue-400 text-[9px]">Tetap</span>
+                                        )}
+                                      </div>
+
+                                      {pt.last_observation_at && (
+                                        <span className="text-[9px] text-[#64748B] flex items-center gap-0.5">
+                                          <Clock className="w-2.5 h-2.5" />
+                                          {new Date(pt.last_observation_at).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })} WIB
+                                        </span>
+                                      )}
+                                    </div>
+
+                                    {/* Elements under this point */}
+                                    {pt.elements && pt.elements.length > 0 && (
+                                      <div className="flex flex-wrap gap-1 pt-0.5">
+                                        {pt.elements.map((el) => (
+                                          <span
+                                            key={el.id}
+                                            className="text-[9px] px-1.5 py-0.5 rounded bg-white/5 text-[#CAD4E0] border border-white/5 truncate max-w-[130px]"
+                                            title={`${el.name}: ${el.latest_crowd || 0} orang`}
+                                          >
+                                            {el.name}: <strong className="text-amber-300 font-mono">{el.latest_crowd || 0}</strong>
+                                          </span>
+                                        ))}
+                                      </div>
+                                    )}
+
+                                    {/* Point-Level CCTV Launcher */}
+                                    {ptCctvCount > 0 && onOpenDedicatedMultiView && (
+                                      <div className="pt-1 flex items-center justify-end">
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            const cams = (pt.linked_cameras || [])
+                                              .map((l) => l.camera)
+                                              .filter((c): c is Camera => Boolean(c));
+                                            onOpenDedicatedMultiView(event, cams);
+                                          }}
+                                          className="px-2 py-0.5 rounded text-[9px] font-bold bg-blue-600/30 hover:bg-blue-600 text-blue-300 hover:text-white border border-blue-500/30 transition-colors flex items-center gap-1 cursor-pointer"
+                                          title={`Buka Multi-View CCTV titik ${pt.point_name}`}
+                                        >
+                                          <Video className="w-2.5 h-2.5 text-emerald-400" />
+                                          <span>Pantau CCTV Titik ({ptCctvCount})</span>
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      // Default single point or un-split elements rendering
+                      if (elements.length > 0) {
+                        return (
+                          <div className="flex flex-wrap items-center gap-1 mt-1.5">
+                            {elements.map((el, idx) => (
+                              <span
+                                key={idx}
+                                className="text-[9px] px-1.5 py-0.5 rounded bg-white/5 text-[#98A4B8] border border-white/5 truncate max-w-[140px]"
+                                title={el}
+                              >
+                                {el}
+                              </span>
+                            ))}
+                          </div>
+                        );
+                      }
+                      return null;
+                    })()}
 
                     {/* Action Buttons Row */}
                     <div className="flex items-center justify-between gap-2 mt-2.5 pt-2 border-t border-white/[0.06]">

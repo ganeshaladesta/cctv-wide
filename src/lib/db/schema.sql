@@ -338,3 +338,58 @@ CREATE INDEX IF NOT EXISTS idx_audit_review_status ON master_data_audit_review(r
 
 
 
+
+
+-- Migration 008: Daily Multi-Point Monitoring, Mass Elements, and Crowd Observation History
+CREATE TABLE IF NOT EXISTS protest_points (
+    id TEXT PRIMARY KEY,
+    protest_id TEXT NOT NULL REFERENCES protests(id) ON DELETE CASCADE,
+    point_name TEXT NOT NULL,
+    location_address TEXT,
+    provinsi TEXT,
+    kota_kabupaten TEXT,
+    regional TEXT,
+    latitude REAL,
+    longitude REAL,
+    status TEXT NOT NULL DEFAULT 'scheduled',
+    urgency TEXT NOT NULL DEFAULT 'medium',
+    notes TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_protest_points_protest_id ON protest_points(protest_id);
+CREATE INDEX IF NOT EXISTS idx_protest_points_status ON protest_points(status);
+CREATE INDEX IF NOT EXISTS idx_protest_points_coords ON protest_points(latitude, longitude);
+
+CREATE TABLE IF NOT EXISTS protest_elements (
+    id TEXT PRIMARY KEY,
+    point_id TEXT NOT NULL REFERENCES protest_points(id) ON DELETE CASCADE,
+    protest_id TEXT NOT NULL REFERENCES protests(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    leader_name TEXT,
+    demand_summary TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_protest_elements_point_id ON protest_elements(point_id);
+CREATE INDEX IF NOT EXISTS idx_protest_elements_protest_id ON protest_elements(protest_id);
+
+CREATE TABLE IF NOT EXISTS protest_crowd_observations (
+    id TEXT PRIMARY KEY,
+    point_id TEXT NOT NULL REFERENCES protest_points(id) ON DELETE CASCADE,
+    element_id TEXT REFERENCES protest_elements(id) ON DELETE SET NULL,
+    element_name TEXT NOT NULL,
+    crowd_estimate INTEGER NOT NULL,
+    observation_timestamp TEXT NOT NULL,
+    observer_source TEXT,
+    verification_status TEXT NOT NULL DEFAULT 'unverified',
+    notes TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_crowd_obs_point_id ON protest_crowd_observations(point_id);
+CREATE INDEX IF NOT EXISTS idx_crowd_obs_element_id ON protest_crowd_observations(element_id);
+CREATE INDEX IF NOT EXISTS idx_crowd_obs_timestamp ON protest_crowd_observations(observation_timestamp);

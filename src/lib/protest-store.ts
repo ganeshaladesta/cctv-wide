@@ -28,7 +28,11 @@ import {
   ProtestStatusHistory,
   ProtestCameraLink,
   ProtestSyncLog,
-  UserProfile
+  UserProfile,
+  ProtestPoint,
+  ProtestElement,
+  ProtestCrowdObservation,
+  DailyUnrasSituationOverview
 } from "@/lib/types/protests";
 import { getDataStore } from "@/lib/data-store";
 import { Camera } from "@/lib/types";
@@ -280,6 +284,9 @@ class ProtestDataStore {
   private memoryReports = new Map<string, ProtestOperatorReport[]>();
   private memoryHistory = new Map<string, ProtestStatusHistory[]>();
   private memoryLinks = new Map<string, ProtestCameraLink[]>();
+  private memoryPoints = new Map<string, ProtestPoint>();
+  private memoryElements = new Map<string, ProtestElement>();
+  private memoryObservations = new Map<string, ProtestCrowdObservation>();
   private memorySyncLogs: ProtestSyncLog[] = [];
 
   constructor() {
@@ -399,6 +406,68 @@ class ProtestDataStore {
         }
       }
 
+      // Migration 008 multi-point tables & columns self-healing
+      try {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS protest_points (
+            id TEXT PRIMARY KEY,
+            protest_id TEXT NOT NULL REFERENCES protests(id) ON DELETE CASCADE,
+            point_name TEXT NOT NULL,
+            location_address TEXT,
+            provinsi TEXT,
+            kota_kabupaten TEXT,
+            regional TEXT,
+            latitude REAL,
+            longitude REAL,
+            status TEXT NOT NULL DEFAULT 'scheduled',
+            urgency TEXT NOT NULL DEFAULT 'medium',
+            notes TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS idx_protest_points_protest_id ON protest_points(protest_id);
+          CREATE INDEX IF NOT EXISTS idx_protest_points_status ON protest_points(status);
+          CREATE INDEX IF NOT EXISTS idx_protest_points_coords ON protest_points(latitude, longitude);
+
+          CREATE TABLE IF NOT EXISTS protest_elements (
+            id TEXT PRIMARY KEY,
+            point_id TEXT NOT NULL REFERENCES protest_points(id) ON DELETE CASCADE,
+            protest_id TEXT NOT NULL REFERENCES protests(id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            leader_name TEXT,
+            demand_summary TEXT,
+            status TEXT NOT NULL DEFAULT 'active',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS idx_protest_elements_point_id ON protest_elements(point_id);
+          CREATE INDEX IF NOT EXISTS idx_protest_elements_protest_id ON protest_elements(protest_id);
+
+          CREATE TABLE IF NOT EXISTS protest_crowd_observations (
+            id TEXT PRIMARY KEY,
+            point_id TEXT NOT NULL REFERENCES protest_points(id) ON DELETE CASCADE,
+            element_id TEXT REFERENCES protest_elements(id) ON DELETE SET NULL,
+            element_name TEXT NOT NULL,
+            crowd_estimate INTEGER NOT NULL,
+            observation_timestamp TEXT NOT NULL,
+            observer_source TEXT,
+            verification_status TEXT NOT NULL DEFAULT 'unverified',
+            notes TEXT,
+            created_at TEXT NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS idx_crowd_obs_point_id ON protest_crowd_observations(point_id);
+          CREATE INDEX IF NOT EXISTS idx_crowd_obs_timestamp ON protest_crowd_observations(observation_timestamp);
+        `);
+
+        const linkCols = (this.db.prepare("PRAGMA table_info(protest_camera_links)").all() as Array<{ name: string }>).map((c) => c.name);
+        if (!linkCols.includes("point_id")) {
+          this.db.exec("ALTER TABLE protest_camera_links ADD COLUMN point_id TEXT;");
+          this.db.exec("CREATE INDEX IF NOT EXISTS idx_camera_links_point_id ON protest_camera_links(point_id);");
+        }
+      } catch (errMigration008) {
+        console.warn("[ProtestDataStore] Migration 008 init notice:", errMigration008);
+      }
+
       // Only seed dummy data if explicitly enabled via SEED_DUMMY_DATA=true
       if (process.env.SEED_DUMMY_DATA === "true") {
         const row = this.db.prepare("SELECT COUNT(*) as count FROM protests").get() as { count: number };
@@ -429,6 +498,9 @@ class ProtestDataStore {
     if (this.db) {
       const countRow = this.db.prepare("SELECT COUNT(*) as count FROM protests").get() as { count: number };
       const count = countRow?.count || 0;
+      this.db.exec("DELETE FROM protest_crowd_observations;");
+      this.db.exec("DELETE FROM protest_elements;");
+      this.db.exec("DELETE FROM protest_points;");
       this.db.exec("DELETE FROM protest_operator_reports;");
       this.db.exec("DELETE FROM protest_status_history;");
       this.db.exec("DELETE FROM protest_camera_links;");
@@ -442,6 +514,9 @@ class ProtestDataStore {
       this.memoryReports.clear();
       this.memoryHistory.clear();
       this.memoryLinks.clear();
+      this.memoryPoints.clear();
+      this.memoryElements.clear();
+      this.memoryObservations.clear();
       this.memorySyncLogs = [];
       return { deleted: count };
     }
@@ -715,12 +790,21 @@ class ProtestDataStore {
     if (isSupabaseConfigured()) {
       try {
         const item = await getProtestByIdFromSupabase(idOrIdentity);
-        if (item) return item;
+        if (item) {
+          item.points = await this.getPointsByProtestId(item.id);
+          if (item.points.length === 0) item.points = this.synthesizePointsForLegacyEvent(item);
+          return item;
+        }
       } catch (err) {
         console.error("[ProtestDataStore] Supabase getProtestById failed, falling back to local SQLite:", err);
       }
     }
-    return this.getProtestByIdLocal(idOrIdentity);
+    const protest = this.getProtestByIdLocal(idOrIdentity);
+    if (protest) {
+      protest.points = await this.getPointsByProtestId(protest.id);
+      if (protest.points.length === 0) protest.points = this.synthesizePointsForLegacyEvent(protest);
+    }
+    return protest;
   }
 
   getProtestByIdSync(idOrIdentity: string): ProtestEvent | null {
@@ -1466,6 +1550,7 @@ class ProtestDataStore {
   async linkCamera(
     input: {
       protest_id: string;
+      point_id?: string | null;
       camera_id: string;
       notes?: string | null;
       is_recommended?: boolean;
@@ -1478,7 +1563,17 @@ class ProtestDataStore {
         const camera = cctvStore.getCameraById(input.camera_id);
         const protest = await this.getProtestById(input.protest_id);
         let distanceMeters = 0;
-        if (protest && protest.validated_lat != null && protest.validated_lng != null && camera) {
+        if (input.point_id) {
+          const pt = await this.getPointById(input.point_id);
+          if (pt && pt.latitude != null && pt.longitude != null && camera) {
+            distanceMeters = calculateDistanceMeters(
+              pt.latitude,
+              pt.longitude,
+              camera.latitude,
+              camera.longitude
+            );
+          }
+        } else if (protest && protest.validated_lat != null && protest.validated_lng != null && camera) {
           distanceMeters = calculateDistanceMeters(
             protest.validated_lat,
             protest.validated_lng,
@@ -1488,6 +1583,7 @@ class ProtestDataStore {
         }
         const res = await linkCameraInSupabase({
           protest_id: input.protest_id,
+          point_id: input.point_id,
           camera_id: input.camera_id,
           camera_name: camera?.name || input.camera_id,
           camera_stream_url: camera?.stream_url,
@@ -1514,6 +1610,7 @@ class ProtestDataStore {
   linkCameraLocal(
     input: {
       protest_id: string;
+      point_id?: string | null;
       camera_id: string;
       notes?: string | null;
       is_recommended?: boolean;
@@ -1526,7 +1623,17 @@ class ProtestDataStore {
     if (!protest) return null;
 
     let distanceMeters = 0;
-    if (protest.validated_lat != null && protest.validated_lng != null && camera) {
+    if (input.point_id) {
+      const pt = this.getPointByIdLocal(input.point_id);
+      if (pt && pt.latitude != null && pt.longitude != null && camera) {
+        distanceMeters = calculateDistanceMeters(
+          pt.latitude,
+          pt.longitude,
+          camera.latitude,
+          camera.longitude
+        );
+      }
+    } else if (protest.validated_lat != null && protest.validated_lng != null && camera) {
       distanceMeters = calculateDistanceMeters(
         protest.validated_lat,
         protest.validated_lng,
@@ -1540,6 +1647,7 @@ class ProtestDataStore {
     const link: ProtestCameraLink = {
       id,
       protest_id: input.protest_id,
+      point_id: input.point_id || null,
       camera_id: camera?.id || input.camera_id,
       camera_name: camera?.name || input.camera_id,
       camera_stream_url: camera?.stream_url || "",
@@ -1557,16 +1665,18 @@ class ProtestDataStore {
     if (this.db) {
       this.db.prepare(`
         INSERT INTO protest_camera_links (
-          id, protest_id, camera_id, camera_name, camera_stream_url, camera_protocol,
+          id, protest_id, point_id, camera_id, camera_name, camera_stream_url, camera_protocol,
           camera_status, distance_meters, notes, is_recommended, linked_by_id, linked_by_name, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(protest_id, camera_id) DO UPDATE SET
+          point_id = excluded.point_id,
           distance_meters = excluded.distance_meters,
           notes = excluded.notes,
           camera_status = excluded.camera_status
       `).run(
         link.id,
         link.protest_id,
+        link.point_id || null,
         link.camera_id,
         link.camera_name,
         link.camera_stream_url || null,
@@ -1628,20 +1738,28 @@ class ProtestDataStore {
     return this.getCameraLinksLocal(protestId);
   }
 
-  getCameraLinksLocal(protestId: string): ProtestCameraLink[] {
+  getCameraLinksLocal(protestId: string, pointId?: string): ProtestCameraLink[] {
     const cctvStore = getDataStore();
     if (this.db) {
-      const rows = this.db.prepare(`
+      let query = `
         SELECT * FROM protest_camera_links
         WHERE protest_id = ?
-        ORDER BY distance_meters ASC
-      `).all(protestId) as Array<Record<string, unknown>>;
+      `;
+      const params: any[] = [protestId];
+      if (pointId) {
+        query += ` AND (point_id = ? OR point_id IS NULL)`;
+        params.push(pointId);
+      }
+      query += ` ORDER BY distance_meters ASC`;
+
+      const rows = this.db.prepare(query).all(...params) as Array<Record<string, unknown>>;
 
       return rows.map((r) => {
         const camId = String(r.camera_id);
         return {
           id: String(r.id),
           protest_id: String(r.protest_id),
+          point_id: r.point_id ? String(r.point_id) : null,
           camera_id: camId,
           camera_name: String(r.camera_name),
           camera_stream_url: r.camera_stream_url ? String(r.camera_stream_url) : undefined,
@@ -1658,7 +1776,11 @@ class ProtestDataStore {
       });
     }
 
-    return this.memoryLinks.get(protestId) || [];
+    const list = this.memoryLinks.get(protestId) || [];
+    if (pointId) {
+      return list.filter((l) => !l.point_id || l.point_id === pointId);
+    }
+    return list;
   }
 
   /**
@@ -2321,6 +2443,590 @@ class ProtestDataStore {
       completed_today: completedToday,
       total_camera_links: this.memoryLinks.size,
       last_successful_sync: this.memorySyncLogs.find((l) => l.status === "success")?.completed_at || null
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Multi-Point UNRAS & Crowd Observation Methods (Migration 008)
+  // ---------------------------------------------------------------------------
+
+  async createPoint(input: Partial<ProtestPoint> & { protest_id: string; point_name: string }): Promise<ProtestPoint> {
+    this.init();
+    const id = input.id || crypto.randomUUID();
+    const now = new Date().toISOString();
+    const point: ProtestPoint = {
+      id,
+      protest_id: input.protest_id,
+      point_name: input.point_name,
+      location_address: input.location_address || null,
+      provinsi: input.provinsi || null,
+      kota_kabupaten: input.kota_kabupaten || null,
+      regional: input.regional || null,
+      latitude: input.latitude != null ? Number(input.latitude) : null,
+      longitude: input.longitude != null ? Number(input.longitude) : null,
+      status: input.status || "scheduled",
+      urgency: input.urgency || "medium",
+      notes: input.notes || null,
+      created_at: now,
+      updated_at: now
+    };
+
+    if (this.db) {
+      this.db.prepare(`
+        INSERT INTO protest_points (
+          id, protest_id, point_name, location_address, provinsi, kota_kabupaten,
+          regional, latitude, longitude, status, urgency, notes, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        point.id,
+        point.protest_id,
+        point.point_name,
+        point.location_address ?? null,
+        point.provinsi ?? null,
+        point.kota_kabupaten ?? null,
+        point.regional ?? null,
+        point.latitude ?? null,
+        point.longitude ?? null,
+        point.status,
+        point.urgency,
+        point.notes ?? null,
+        point.created_at,
+        point.updated_at
+      );
+    } else {
+      this.memoryPoints.set(point.id, point);
+    }
+
+    return point;
+  }
+
+  async getPointsByProtestId(protestId: string): Promise<ProtestPoint[]> {
+    this.init();
+    let points: ProtestPoint[] = [];
+
+    if (this.db) {
+      const rows = this.db.prepare(`
+        SELECT * FROM protest_points
+        WHERE protest_id = ?
+        ORDER BY created_at ASC
+      `).all(protestId) as Array<Record<string, unknown>>;
+
+      points = rows.map((r) => ({
+        id: String(r.id),
+        protest_id: String(r.protest_id),
+        point_name: String(r.point_name),
+        location_address: r.location_address ? String(r.location_address) : null,
+        provinsi: r.provinsi ? String(r.provinsi) : null,
+        kota_kabupaten: r.kota_kabupaten ? String(r.kota_kabupaten) : null,
+        regional: r.regional ? String(r.regional) : null,
+        latitude: r.latitude != null ? Number(r.latitude) : null,
+        longitude: r.longitude != null ? Number(r.longitude) : null,
+        status: (r.status as ProtestStatus) || "scheduled",
+        urgency: (r.urgency as ProtestUrgency) || "medium",
+        notes: r.notes ? String(r.notes) : null,
+        created_at: String(r.created_at),
+        updated_at: String(r.updated_at)
+      }));
+    } else {
+      points = Array.from(this.memoryPoints.values()).filter((p) => p.protest_id === protestId);
+    }
+
+    // Attach elements, crowd observations, and metrics for each point
+    for (const pt of points) {
+      const elements = await this.getElementsByPointId(pt.id);
+      const observations = await this.getCrowdObservationsByPoint(pt.id);
+
+      let totalPointCrowd = 0;
+      let totalPointDelta = 0;
+      const hasAnyObservations = observations.length > 0;
+
+      for (const el of elements) {
+        const elObs = observations
+          .filter((o) => o.element_id === el.id || o.element_name.toLowerCase() === el.name.toLowerCase())
+          .sort((a, b) => b.observation_timestamp.localeCompare(a.observation_timestamp));
+
+        el.observations = elObs;
+        if (elObs.length > 0) {
+          el.latest_crowd = elObs[0].crowd_estimate;
+          el.previous_crowd = elObs.length > 1 ? elObs[1].crowd_estimate : undefined;
+          el.crowd_delta = el.previous_crowd !== undefined ? el.latest_crowd - el.previous_crowd : 0;
+          el.verification_status = elObs[0].verification_status;
+          el.last_observed_at = elObs[0].observation_timestamp;
+
+          totalPointCrowd += el.latest_crowd;
+          totalPointDelta += el.crowd_delta;
+        } else {
+          el.latest_crowd = 0;
+          el.crowd_delta = 0;
+          el.verification_status = "unverified";
+        }
+      }
+
+      pt.elements = elements;
+      pt.current_crowd_total = totalPointCrowd;
+      pt.crowd_change_delta = totalPointDelta;
+      pt.crowd_trend = !hasAnyObservations
+        ? "none"
+        : totalPointDelta > 0
+        ? "up"
+        : totalPointDelta < 0
+        ? "down"
+        : "stable";
+
+      if (observations.length > 0) {
+        pt.last_observation_at = observations[0].observation_timestamp;
+      }
+    }
+
+    return points;
+  }
+
+  getPointByIdLocal(pointId: string): ProtestPoint | null {
+    this.init();
+    if (this.db) {
+      const r = this.db.prepare("SELECT * FROM protest_points WHERE id = ?").get(pointId) as Record<string, unknown> | undefined;
+      if (!r) return null;
+      return {
+        id: String(r.id),
+        protest_id: String(r.protest_id),
+        point_name: String(r.point_name),
+        location_address: r.location_address ? String(r.location_address) : null,
+        provinsi: r.provinsi ? String(r.provinsi) : null,
+        kota_kabupaten: r.kota_kabupaten ? String(r.kota_kabupaten) : null,
+        regional: r.regional ? String(r.regional) : null,
+        latitude: r.latitude != null ? Number(r.latitude) : null,
+        longitude: r.longitude != null ? Number(r.longitude) : null,
+        status: (r.status as ProtestStatus) || "scheduled",
+        urgency: (r.urgency as ProtestUrgency) || "medium",
+        notes: r.notes ? String(r.notes) : null,
+        created_at: String(r.created_at),
+        updated_at: String(r.updated_at)
+      };
+    }
+    return this.memoryPoints.get(pointId) || null;
+  }
+
+  async getPointById(pointId: string): Promise<ProtestPoint | null> {
+    const pt = this.getPointByIdLocal(pointId);
+    if (!pt) return null;
+
+    const elements = await this.getElementsByPointId(pt.id);
+    const observations = await this.getCrowdObservationsByPoint(pt.id);
+    pt.elements = elements;
+
+    let totalPointCrowd = 0;
+    let totalPointDelta = 0;
+    for (const el of elements) {
+      const elObs = observations
+        .filter((o) => o.element_id === el.id || o.element_name.toLowerCase() === el.name.toLowerCase())
+        .sort((a, b) => b.observation_timestamp.localeCompare(a.observation_timestamp));
+      el.observations = elObs;
+      if (elObs.length > 0) {
+        el.latest_crowd = elObs[0].crowd_estimate;
+        el.previous_crowd = elObs.length > 1 ? elObs[1].crowd_estimate : undefined;
+        el.crowd_delta = el.previous_crowd !== undefined ? el.latest_crowd - el.previous_crowd : 0;
+        el.verification_status = elObs[0].verification_status;
+        el.last_observed_at = elObs[0].observation_timestamp;
+
+        totalPointCrowd += el.latest_crowd;
+        totalPointDelta += el.crowd_delta;
+      }
+    }
+    pt.current_crowd_total = totalPointCrowd;
+    pt.crowd_change_delta = totalPointDelta;
+    pt.crowd_trend = observations.length === 0 ? "none" : totalPointDelta > 0 ? "up" : totalPointDelta < 0 ? "down" : "stable";
+    if (observations.length > 0) {
+      pt.last_observation_at = observations[0].observation_timestamp;
+    }
+    return pt;
+  }
+
+  async updatePoint(pointId: string, updates: Partial<ProtestPoint>): Promise<ProtestPoint | null> {
+    this.init();
+    const existing = this.getPointByIdLocal(pointId);
+    if (!existing) return null;
+
+    const now = new Date().toISOString();
+    const updated: ProtestPoint = {
+      ...existing,
+      ...updates,
+      updated_at: now
+    };
+
+    if (this.db) {
+      this.db.prepare(`
+        UPDATE protest_points SET
+          point_name = ?,
+          location_address = ?,
+          provinsi = ?,
+          kota_kabupaten = ?,
+          regional = ?,
+          latitude = ?,
+          longitude = ?,
+          status = ?,
+          urgency = ?,
+          notes = ?,
+          updated_at = ?
+        WHERE id = ?
+      `).run(
+        updated.point_name,
+        updated.location_address ?? null,
+        updated.provinsi ?? null,
+        updated.kota_kabupaten ?? null,
+        updated.regional ?? null,
+        updated.latitude != null ? Number(updated.latitude) : null,
+        updated.longitude != null ? Number(updated.longitude) : null,
+        updated.status,
+        updated.urgency,
+        updated.notes ?? null,
+        updated.updated_at,
+        pointId
+      );
+    } else {
+      this.memoryPoints.set(pointId, updated);
+    }
+
+    return updated;
+  }
+
+  async deletePoint(pointId: string): Promise<boolean> {
+    this.init();
+    if (this.db) {
+      this.db.prepare("DELETE FROM protest_crowd_observations WHERE point_id = ?").run(pointId);
+      this.db.prepare("DELETE FROM protest_elements WHERE point_id = ?").run(pointId);
+      const res = this.db.prepare("DELETE FROM protest_points WHERE id = ?").run(pointId);
+      return res.changes > 0;
+    }
+    this.memoryPoints.delete(pointId);
+    return true;
+  }
+
+  async createElement(input: Partial<ProtestElement> & { point_id: string; protest_id: string; name: string }): Promise<ProtestElement> {
+    this.init();
+    const id = input.id || crypto.randomUUID();
+    const now = new Date().toISOString();
+    const elem: ProtestElement = {
+      id,
+      point_id: input.point_id,
+      protest_id: input.protest_id,
+      name: input.name,
+      leader_name: input.leader_name || null,
+      demand_summary: input.demand_summary || null,
+      status: input.status || "active",
+      created_at: now,
+      updated_at: now
+    };
+
+    if (this.db) {
+      this.db.prepare(`
+        INSERT INTO protest_elements (
+          id, point_id, protest_id, name, leader_name, demand_summary, status, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        elem.id,
+        elem.point_id,
+        elem.protest_id,
+        elem.name,
+        elem.leader_name ?? null,
+        elem.demand_summary ?? null,
+        elem.status,
+        elem.created_at,
+        elem.updated_at
+      );
+    } else {
+      this.memoryElements.set(elem.id, elem);
+    }
+
+    return elem;
+  }
+
+  async getElementsByPointId(pointId: string): Promise<ProtestElement[]> {
+    this.init();
+    if (this.db) {
+      const rows = this.db.prepare(`
+        SELECT * FROM protest_elements
+        WHERE point_id = ?
+        ORDER BY created_at ASC
+      `).all(pointId) as Array<Record<string, unknown>>;
+
+      return rows.map((r) => ({
+        id: String(r.id),
+        point_id: String(r.point_id),
+        protest_id: String(r.protest_id),
+        name: String(r.name),
+        leader_name: r.leader_name ? String(r.leader_name) : null,
+        demand_summary: r.demand_summary ? String(r.demand_summary) : null,
+        status: (r.status as any) || "active",
+        created_at: String(r.created_at),
+        updated_at: String(r.updated_at)
+      }));
+    }
+
+    return Array.from(this.memoryElements.values()).filter((e) => e.point_id === pointId);
+  }
+
+  async addCrowdObservation(input: Partial<ProtestCrowdObservation> & { point_id: string; element_name: string; crowd_estimate: number }): Promise<ProtestCrowdObservation> {
+    this.init();
+    const id = input.id || crypto.randomUUID();
+    const now = new Date().toISOString();
+    const obs: ProtestCrowdObservation = {
+      id,
+      point_id: input.point_id,
+      element_id: input.element_id || null,
+      element_name: input.element_name,
+      crowd_estimate: Math.max(0, Number(input.crowd_estimate) || 0),
+      observation_timestamp: input.observation_timestamp || now,
+      observer_source: input.observer_source || "SCC Command Center",
+      verification_status: input.verification_status || "unverified",
+      notes: input.notes || null,
+      created_at: now
+    };
+
+    if (this.db) {
+      this.db.prepare(`
+        INSERT INTO protest_crowd_observations (
+          id, point_id, element_id, element_name, crowd_estimate,
+          observation_timestamp, observer_source, verification_status, notes, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        obs.id,
+        obs.point_id,
+        obs.element_id ?? null,
+        obs.element_name,
+        obs.crowd_estimate,
+        obs.observation_timestamp,
+        obs.observer_source ?? null,
+        obs.verification_status,
+        obs.notes ?? null,
+        obs.created_at
+      );
+    } else {
+      this.memoryObservations.set(obs.id, obs);
+    }
+
+    return obs;
+  }
+
+  async getCrowdObservationsByPoint(pointId: string): Promise<ProtestCrowdObservation[]> {
+    this.init();
+    if (this.db) {
+      const rows = this.db.prepare(`
+        SELECT * FROM protest_crowd_observations
+        WHERE point_id = ?
+        ORDER BY observation_timestamp DESC
+      `).all(pointId) as Array<Record<string, unknown>>;
+
+      return rows.map((r) => ({
+        id: String(r.id),
+        point_id: String(r.point_id),
+        element_id: r.element_id ? String(r.element_id) : null,
+        element_name: String(r.element_name),
+        crowd_estimate: Number(r.crowd_estimate || 0),
+        observation_timestamp: String(r.observation_timestamp),
+        observer_source: r.observer_source ? String(r.observer_source) : null,
+        verification_status: (r.verification_status as any) || "unverified",
+        notes: r.notes ? String(r.notes) : null,
+        created_at: String(r.created_at)
+      }));
+    }
+
+    return Array.from(this.memoryObservations.values())
+      .filter((o) => o.point_id === pointId)
+      .sort((a, b) => b.observation_timestamp.localeCompare(a.observation_timestamp));
+  }
+
+  synthesizePointsForLegacyEvent(event: ProtestEvent): ProtestPoint[] {
+    const rawElements = event.organisasi_kelompok
+      ? event.organisasi_kelompok
+          .split(/[,;\/\n]+/)
+          .map((s) => s.trim())
+          .filter((s) => s.length > 1)
+      : [];
+
+    const pointId = `point-${event.id}-primary`;
+    const totalCrowd = event.actual_crowd_size ?? event.estimasi_massa_source ?? 0;
+
+    const elements: ProtestElement[] = [];
+    if (rawElements.length > 0) {
+      const crowdPerElem = Math.round(totalCrowd / rawElements.length);
+      for (let i = 0; i < rawElements.length; i++) {
+        const elemName = rawElements[i];
+        elements.push({
+          id: `elem-${event.id}-${i}`,
+          point_id: pointId,
+          protest_id: event.id,
+          name: elemName,
+          leader_name: i === 0 ? event.korlap_pimpinan : null,
+          status: "active",
+          latest_crowd: i === 0 ? (totalCrowd - crowdPerElem * (rawElements.length - 1)) : crowdPerElem,
+          previous_crowd: undefined,
+          crowd_delta: 0,
+          verification_status: event.actual_crowd_size != null ? "verified" : "unverified",
+          last_observed_at: event.updated_at || event.created_at,
+          created_at: event.created_at,
+          updated_at: event.updated_at
+        });
+      }
+    } else {
+      elements.push({
+        id: `elem-${event.id}-0`,
+        point_id: pointId,
+        protest_id: event.id,
+        name: "Elemen Massa Teridentifikasi",
+        leader_name: event.korlap_pimpinan,
+        status: "active",
+        latest_crowd: totalCrowd,
+        previous_crowd: undefined,
+        crowd_delta: 0,
+        verification_status: event.actual_crowd_size != null ? "verified" : "unverified",
+        last_observed_at: event.updated_at || event.created_at,
+        created_at: event.created_at,
+        updated_at: event.updated_at
+      });
+    }
+
+    return [
+      {
+        id: pointId,
+        protest_id: event.id,
+        point_name: event.lokasi || "Titik Utama",
+        location_address: event.lokasi,
+        provinsi: event.provinsi,
+        kota_kabupaten: event.kota_kabupaten,
+        regional: event.regional,
+        latitude: event.validated_lat,
+        longitude: event.validated_lng,
+        status: event.status,
+        urgency: event.urgency,
+        notes: event.situation_summary,
+        created_at: event.created_at,
+        updated_at: event.updated_at,
+        elements,
+        current_crowd_total: totalCrowd,
+        crowd_trend: "none",
+        crowd_change_delta: 0,
+        last_observation_at: event.updated_at || event.created_at,
+        parent_title: event.isu_tuntutan,
+        parent_kode_unras: event.kode_unras,
+        parent_id_kejadian: event.id_kejadian,
+        parent_tanggal: event.tanggal
+      }
+    ];
+  }
+
+  async getDailySituationOverview(dateStr: string): Promise<DailyUnrasSituationOverview> {
+    this.init();
+    let protests: ProtestEvent[] = [];
+    if (this.db) {
+      const rows = this.db.prepare(`
+        SELECT * FROM protests
+        WHERE tanggal = ? AND deleted_at IS NULL
+      `).all(dateStr) as Array<Record<string, unknown>>;
+      protests = rows.map((r) => this.mapRowToProtest(r));
+    } else {
+      protests = Array.from(this.memoryEvents.values()).filter(
+        (e) => e.tanggal === dateStr && !e.deleted_at
+      );
+    }
+
+    const allPoints: ProtestPoint[] = [];
+    const affectedProvincesSet = new Set<string>();
+    const affectedRegionsSet = new Set<string>();
+    const linkedCameraIdsSet = new Set<string>();
+    let totalIdentifiedElements = 0;
+
+    for (const p of protests) {
+      if (p.provinsi) affectedProvincesSet.add(p.provinsi);
+      if (p.regional) affectedRegionsSet.add(p.regional);
+
+      // Fetch points for this protest
+      let points = await this.getPointsByProtestId(p.id);
+      if (points.length === 0) {
+        // Fallback synthesis from legacy event
+        points = this.synthesizePointsForLegacyEvent(p);
+      }
+
+      // Link cameras and attach parent metadata
+      const allParentCameraLinks = this.getCameraLinksLocal(p.id);
+      for (const link of allParentCameraLinks) {
+        linkedCameraIdsSet.add(link.camera_id);
+      }
+
+      for (const pt of points) {
+        pt.parent_title = p.isu_tuntutan;
+        pt.parent_kode_unras = p.kode_unras;
+        pt.parent_id_kejadian = p.id_kejadian;
+        pt.parent_tanggal = p.tanggal;
+
+        if (points.length === 1) {
+          pt.linked_cameras = allParentCameraLinks;
+          pt.linked_camera_count = allParentCameraLinks.length;
+        } else {
+          const ptLinks = allParentCameraLinks.filter((l) => l.point_id === pt.id);
+          pt.linked_cameras = ptLinks;
+          pt.linked_camera_count = ptLinks.length;
+        }
+
+        if (pt.elements) {
+          totalIdentifiedElements += pt.elements.length;
+        }
+
+        allPoints.push(pt);
+      }
+    }
+
+    // Sort points: ongoing > monitoring > scheduled > others, then urgency, then crowd size DESC
+    const statusWeight: Record<ProtestStatus, number> = {
+      ongoing: 4,
+      monitoring: 3,
+      scheduled: 2,
+      completed: 1,
+      cancelled: 0
+    };
+    const urgencyWeight: Record<ProtestUrgency, number> = {
+      critical: 4,
+      high: 3,
+      medium: 2,
+      low: 1
+    };
+
+    allPoints.sort((a, b) => {
+      const sA = statusWeight[a.status] || 0;
+      const sB = statusWeight[b.status] || 0;
+      if (sA !== sB) return sB - sA;
+
+      const uA = urgencyWeight[a.urgency] || 0;
+      const uB = urgencyWeight[b.urgency] || 0;
+      if (uA !== uB) return uB - uA;
+
+      return (b.current_crowd_total || 0) - (a.current_crowd_total || 0);
+    });
+
+    const ongoingCount = allPoints.filter((pt) => pt.status === "ongoing").length;
+    const monitoringCount = allPoints.filter((pt) => pt.status === "monitoring").length;
+    const scheduledCount = allPoints.filter((pt) => pt.status === "scheduled").length;
+    const completedCount = allPoints.filter((pt) => pt.status === "completed").length;
+    const totalActivePoints = ongoingCount + monitoringCount;
+
+    const totalEstimatedCrowd = allPoints.reduce((sum, pt) => sum + (pt.current_crowd_total || 0), 0);
+
+    return {
+      selected_date: dateStr,
+      total_events: protests.length,
+      total_points: allPoints.length,
+      total_active_points: totalActivePoints,
+      ongoing_points_count: ongoingCount,
+      monitoring_points_count: monitoringCount,
+      scheduled_points_count: scheduledCount,
+      completed_points_count: completedCount,
+      total_estimated_crowd: totalEstimatedCrowd,
+      total_identified_elements: totalIdentifiedElements,
+      affected_provinces_count: affectedProvincesSet.size,
+      affected_provinces: Array.from(affectedProvincesSet).sort(),
+      affected_regions_count: affectedRegionsSet.size,
+      affected_regions: Array.from(affectedRegionsSet).sort(),
+      linked_cctv_count: linkedCameraIdsSet.size,
+      points: allPoints
     };
   }
 

@@ -207,6 +207,25 @@ function createProtestPopupHtml(p: ProtestEvent): string {
     ? `${p.validated_lat.toFixed(5)}, ${p.validated_lng.toFixed(5)}`
     : "-";
 
+  const rawElements = p.organisasi_kelompok
+    ? p.organisasi_kelompok
+        .split(/[,;\/\n]+/)
+        .map((s) => s.trim())
+        .filter((s) => s.length > 1)
+        .slice(0, 3)
+    : [];
+
+  const elementsHtml = rawElements.length > 0
+    ? `
+      <div class="pt-1.5 border-t border-[#1E293B]/60">
+        <span class="text-[10px] text-[#98A4B8] font-bold block mb-1">ELEMEN MASSA TERIDENTIFIKASI:</span>
+        <div class="flex flex-wrap gap-1">
+          ${rawElements.map((el) => `<span class="px-1.5 py-0.5 rounded bg-white/5 text-[9px] text-[#CAD4E0] border border-white/5 truncate max-w-[130px]">${escapeHtml(el)}</span>`).join("")}
+        </div>
+      </div>
+    `
+    : "";
+
   return `
     <div class="p-3 text-left font-sans text-white" style="min-width: 270px; max-width: 320px;">
       <div class="flex items-center justify-between gap-1.5 pb-2 mb-2 border-b border-[#1E293B]">
@@ -246,6 +265,7 @@ function createProtestPopupHtml(p: ProtestEvent): string {
           <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0"></span>
           <span class="truncate">Koordinat Valid: ${coordsFormatted}</span>
         </div>
+        ${elementsHtml}
       </div>
 
       <button

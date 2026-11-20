@@ -129,6 +129,7 @@ export interface ProtestEvent {
   status_history?: ProtestStatusHistory[];
   camera_links?: ProtestCameraLink[];
   attachments?: ProtestAttachment[];
+  points?: ProtestPoint[];
 }
 
 /**
@@ -168,6 +169,7 @@ export interface ProtestStatusHistory {
 export interface ProtestCameraLink {
   id: string; // UUID
   protest_id: string;
+  point_id?: string | null; // Optional reference to specific point within the protest
   camera_id: string; // Reference to CCTV camera in 23,356 dataset
   camera_name: string;
   camera_stream_url?: string;
@@ -321,4 +323,91 @@ export interface ProtestStats {
   completed_today: number;
   total_camera_links: number;
   last_successful_sync: string | null;
+}
+
+
+// ============================================================================
+// Multi-Point UNRAS Situational Monitoring Types
+// ============================================================================
+
+export interface ProtestPoint {
+  id: string; // UUID
+  protest_id: string;
+  point_name: string; // Specific physical location e.g. "Pintu Utama Gerbang DPR/MPR RI"
+  location_address?: string | null;
+  provinsi?: string | null;
+  kota_kabupaten?: string | null;
+  regional?: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  status: ProtestStatus;
+  urgency: ProtestUrgency;
+  notes?: string | null;
+  created_at: string;
+  updated_at: string;
+
+  // Runtime aggregated fields
+  elements?: ProtestElement[];
+  current_crowd_total?: number;
+  crowd_trend?: "up" | "down" | "stable" | "none";
+  crowd_change_delta?: number;
+  last_observation_at?: string | null;
+  linked_camera_count?: number;
+  linked_cameras?: ProtestCameraLink[];
+  parent_title?: string;
+  parent_kode_unras?: string;
+  parent_id_kejadian?: string;
+  parent_tanggal?: string;
+}
+
+export interface ProtestElement {
+  id: string; // UUID
+  point_id: string;
+  protest_id: string;
+  name: string; // Name of organization, alliance, labor union, or student body
+  leader_name?: string | null; // Korlap / Pimpinan Aksi
+  demand_summary?: string | null;
+  status: "active" | "disbanded" | "merged";
+  created_at: string;
+  updated_at: string;
+
+  // Runtime observation stats
+  latest_crowd?: number;
+  previous_crowd?: number;
+  crowd_delta?: number;
+  verification_status?: "verified" | "unverified";
+  last_observed_at?: string | null;
+  observations?: ProtestCrowdObservation[];
+}
+
+export interface ProtestCrowdObservation {
+  id: string; // UUID
+  point_id: string;
+  element_id?: string | null;
+  element_name: string;
+  crowd_estimate: number;
+  observation_timestamp: string; // ISO 8601
+  observer_source?: string | null; // e.g. "CCTV Pantau", "Polres", "Petugas Lapangan"
+  verification_status: "verified" | "unverified";
+  notes?: string | null;
+  created_at: string;
+}
+
+export interface DailyUnrasSituationOverview {
+  selected_date: string; // YYYY-MM-DD (Asia/Jakarta)
+  total_events: number;
+  total_points: number;
+  total_active_points: number; // ongoing + monitoring
+  ongoing_points_count: number;
+  monitoring_points_count: number;
+  scheduled_points_count: number;
+  completed_points_count: number;
+  total_estimated_crowd: number;
+  total_identified_elements: number;
+  affected_provinces_count: number;
+  affected_provinces: string[];
+  affected_regions_count: number;
+  affected_regions: string[];
+  linked_cctv_count: number;
+  points: ProtestPoint[];
 }
