@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState, useMemo } from "react";
+import React, { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import "leaflet.markercluster";
@@ -15,7 +15,13 @@ import {
   Building2,
   Radar,
   ShieldAlert,
-  Crosshair
+  Crosshair,
+  Check,
+  ChevronDown,
+  Video,
+  Flame,
+  Eye,
+  EyeOff
 } from "lucide-react";
 import { Camera, CompactMarker, Province } from "@/lib/types";
 import { ProtestEvent } from "@/lib/types/protests";
@@ -25,6 +31,43 @@ import {
   TacticalGeoIntHud,
   calculateHaversineDistanceMeters
 } from "@/components/tactical-geoint-hud";
+
+export interface MapLayerVisibility {
+  cctv: boolean;
+  biOffice: boolean;
+  unras: boolean;
+}
+
+export const STORAGE_LAYER_VISIBILITY_KEY = "scc_map_layer_visibility";
+
+export const DEFAULT_LAYER_VISIBILITY: MapLayerVisibility = {
+  cctv: true,
+  biOffice: true,
+  unras: true
+};
+
+export function getStoredLayerVisibility(): MapLayerVisibility {
+  if (typeof window === "undefined") return { ...DEFAULT_LAYER_VISIBILITY };
+  try {
+    const raw = window.localStorage?.getItem(STORAGE_LAYER_VISIBILITY_KEY);
+    if (!raw) return { ...DEFAULT_LAYER_VISIBILITY };
+    const parsed = JSON.parse(raw);
+    return {
+      cctv: typeof parsed.cctv === "boolean" ? parsed.cctv : true,
+      biOffice: typeof parsed.biOffice === "boolean" ? parsed.biOffice : true,
+      unras: typeof parsed.unras === "boolean" ? parsed.unras : true
+    };
+  } catch {
+    return { ...DEFAULT_LAYER_VISIBILITY };
+  }
+}
+
+export function persistLayerVisibility(state: MapLayerVisibility): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage?.setItem(STORAGE_LAYER_VISIBILITY_KEY, JSON.stringify(state));
+  } catch {}
+}
 
 interface InteractiveMapProps {
   markers: CompactMarker[];
@@ -42,6 +85,10 @@ interface InteractiveMapProps {
   onProtestMarkerClick?: (protest: ProtestEvent) => void;
   biOffices?: BIOffice[];
   onSelectBIOffice?: (office: BIOffice) => void;
+  showCctvMarkers?: boolean;
+  showBiOfficeMarkers?: boolean;
+  showUnrasMarkers?: boolean;
+  onLayerVisibilityChange?: (layers: MapLayerVisibility) => void;
 }
 
 const OSM_TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
@@ -493,7 +540,11 @@ export default function InteractiveMap({
   focusProtestEvent,
   onProtestMarkerClick,
   biOffices: externalBIOffices,
-  onSelectBIOffice
+  onSelectBIOffice,
+  showCctvMarkers: propShowCctvMarkers,
+  showBiOfficeMarkers: propShowBiOfficeMarkers,
+  showUnrasMarkers: propShowUnrasMarkers,
+  onLayerVisibilityChange
 }: InteractiveMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -515,10 +566,93 @@ export default function InteractiveMap({
   const onSelectBIOfficeRef = useRef(onSelectBIOffice);
   onSelectBIOfficeRef.current = onSelectBIOffice;
 
+  const [initialVisibility] = useState<MapLayerVisibility>(() => getStoredLayerVisibility());
+  const [showCctvMarkers, setShowCctvMarkers] = useState<boolean>(
+    propShowCctvMarkers !== undefined ? propShowCctvMarkers : initialVisibility.cctv
+  );
+  const [showBIOfficeLayer, setShowBIOfficeLayer] = useState<boolean>(
+    propShowBiOfficeMarkers !== undefined ? propShowBiOfficeMarkers : initialVisibility.biOffice
+  );
+  const [showProtestLayer, setShowProtestLayer] = useState<boolean>(
+    propShowUnrasMarkers !== undefined ? propShowUnrasMarkers : initialVisibility.unras
+  );
+
+  const [isLayerMenuOpen, setIsLayerMenuOpen] = useState(false);
+  const layerMenuRef = useRef<HTMLDivElement>(null);
+
+  // Sync props when controlled from parent
+  useEffect(() => {
+    if (propShowCctvMarkers !== undefined) setShowCctvMarkers(propShowCctvMarkers);
+  }, [propShowCctvMarkers]);
+
+  useEffect(() => {
+    if (propShowBiOfficeMarkers !== undefined) setShowBIOfficeLayer(propShowBiOfficeMarkers);
+  }, [propShowBiOfficeMarkers]);
+
+  useEffect(() => {
+    if (propShowUnrasMarkers !== undefined) setShowProtestLayer(propShowUnrasMarkers);
+  }, [propShowUnrasMarkers]);
+
+  const handleUpdateVisibility = useCallback(
+    (nextCctv: boolean, nextBiOffice: boolean, nextUnras: boolean) => {
+      setShowCctvMarkers(nextCctv);
+      setShowBIOfficeLayer(nextBiOffice);
+      setShowProtestLayer(nextUnras);
+      const nextState: MapLayerVisibility = {
+        cctv: nextCctv,
+        biOffice: nextBiOffice,
+        unras: nextUnras
+      };
+      persistLayerVisibility(nextState);
+      onLayerVisibilityChange?.(nextState);
+    },
+    [onLayerVisibilityChange]
+  );
+
+  const toggleLayer = useCallback(
+    (layer: "cctv" | "biOffice" | "unras") => {
+      if (layer === "cctv") {
+        handleUpdateVisibility(!showCctvMarkers, showBIOfficeLayer, showProtestLayer);
+      } else if (layer === "biOffice") {
+        handleUpdateVisibility(showCctvMarkers, !showBIOfficeLayer, showProtestLayer);
+      } else {
+        handleUpdateVisibility(showCctvMarkers, showBIOfficeLayer, !showProtestLayer);
+      }
+    },
+    [showCctvMarkers, showBIOfficeLayer, showProtestLayer, handleUpdateVisibility]
+  );
+
+  const handleShowAllLayers = useCallback(() => {
+    handleUpdateVisibility(true, true, true);
+  }, [handleUpdateVisibility]);
+
+  const handleHideAllLayers = useCallback(() => {
+    handleUpdateVisibility(false, false, false);
+  }, [handleUpdateVisibility]);
+
+  // Click outside and Escape handler for layer visibility dropdown menu
+  useEffect(() => {
+    if (!isLayerMenuOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (layerMenuRef.current && !layerMenuRef.current.contains(e.target as Node)) {
+        setIsLayerMenuOpen(false);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setIsLayerMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isLayerMenuOpen]);
+
   const [darkFilter, setDarkFilter] = useState(true);
   const [clustering, setClustering] = useState(true);
-  const [showProtestLayer, setShowProtestLayer] = useState(true);
-  const [showBIOfficeLayer, setShowBIOfficeLayer] = useState(true);
   const [officeRadiusDistance, setOfficeRadiusDistance] = useState<number>(3000); // 0, 1000, 3000, 5000, 10000, -1
   const [unrasRadiusDistance, setUnrasRadiusDistance] = useState<number>(1000); // 0, 250, 500, 1000, 1500
   const [fetchedBIOffices, setFetchedBIOffices] = useState<BIOffice[]>([]);
@@ -618,11 +752,15 @@ export default function InteractiveMap({
     const biRadiusGroup = L.layerGroup();
     const unrasRadiusGroup = L.layerGroup();
 
-    map.addLayer(clusterGroup);
-    map.addLayer(biRadiusGroup);
-    map.addLayer(unrasRadiusGroup);
-    map.addLayer(protestGroup);
-    map.addLayer(biOfficeGroup);
+    if (initialVisibility.cctv) map.addLayer(clusterGroup);
+    if (initialVisibility.biOffice) {
+      map.addLayer(biRadiusGroup);
+      map.addLayer(biOfficeGroup);
+    }
+    if (initialVisibility.unras) {
+      map.addLayer(unrasRadiusGroup);
+      map.addLayer(protestGroup);
+    }
 
     mapRef.current = map;
     clusterGroupRef.current = clusterGroup;
@@ -698,13 +836,13 @@ export default function InteractiveMap({
 
     if (clustering) {
       if (map.hasLayer(plainGroup)) map.removeLayer(plainGroup);
-      if (!map.hasLayer(clusterGroup)) map.addLayer(clusterGroup);
+      if (showCctvMarkers && !map.hasLayer(clusterGroup)) map.addLayer(clusterGroup);
 
       const BATCH_SIZE = 4000;
       let offset = 0;
 
       const enqueueBatch = () => {
-        if (cancelled || mapRef.current !== map || !map.hasLayer(clusterGroup)) {
+        if (cancelled || mapRef.current !== map) {
           return;
         }
         const end = Math.min(offset + BATCH_SIZE, validMarkers.length);
@@ -736,7 +874,7 @@ export default function InteractiveMap({
       enqueueBatch();
     } else {
       if (map.hasLayer(clusterGroup)) map.removeLayer(clusterGroup);
-      if (!map.hasLayer(plainGroup)) map.addLayer(plainGroup);
+      if (showCctvMarkers && !map.hasLayer(plainGroup)) map.addLayer(plainGroup);
 
       // When unclustered, render circleMarkers on canvas for high performance
       const limit = Math.min(validMarkers.length, 3000);
@@ -769,6 +907,27 @@ export default function InteractiveMap({
       }
     };
   }, [validMarkers, clustering]);
+
+  // Detach or attach CCTV marker layer groups dynamically without rebuilding markers
+  useEffect(() => {
+    const map = mapRef.current;
+    const clusterGroup = clusterGroupRef.current;
+    const plainGroup = plainLayerGroupRef.current;
+    if (!map || !clusterGroup || !plainGroup) return;
+
+    if (!showCctvMarkers) {
+      if (map.hasLayer(clusterGroup)) map.removeLayer(clusterGroup);
+      if (map.hasLayer(plainGroup)) map.removeLayer(plainGroup);
+    } else {
+      if (clustering) {
+        if (map.hasLayer(plainGroup)) map.removeLayer(plainGroup);
+        if (!map.hasLayer(clusterGroup)) map.addLayer(clusterGroup);
+      } else {
+        if (map.hasLayer(clusterGroup)) map.removeLayer(clusterGroup);
+        if (!map.hasLayer(plainGroup)) map.addLayer(plainGroup);
+      }
+    }
+  }, [showCctvMarkers, clustering]);
 
   // Fly to selected province or city when filter changes
   useEffect(() => {
@@ -817,7 +976,11 @@ export default function InteractiveMap({
       return;
     }
 
-    setShowProtestLayer(true);
+    if (!showProtestLayer) {
+      handleUpdateVisibility(showCctvMarkers, showBIOfficeLayer, true);
+    } else {
+      setShowProtestLayer(true);
+    }
     map.flyTo([focusProtestEvent.validated_lat, focusProtestEvent.validated_lng], 16, {
       duration: 1.0
     });
@@ -1188,18 +1351,196 @@ export default function InteractiveMap({
           >
             <span
               className={`w-2 h-2 rounded-full shrink-0 ${
-                loadingMarkers
+                !showCctvMarkers
+                  ? "bg-slate-500"
+                  : loadingMarkers
                   ? "bg-[#F59E0B] animate-ping"
                   : "bg-[#10B981] animate-pulse"
               }`}
             />
-            <span className="font-semibold text-[#F3F6FB] font-mono tabular-nums">
+            <span
+              className={`font-semibold font-mono tabular-nums ${
+                showCctvMarkers ? "text-[#F3F6FB]" : "text-[#98A4B8] line-through decoration-slate-500"
+              }`}
+            >
               {validMarkers.length.toLocaleString("id-ID")}
             </span>
-            <span className="text-[#98A4B8]">kamera</span>
+            <span className="text-[#98A4B8]">
+              {showCctvMarkers ? "kamera" : "kamera (sembunyi)"}
+            </span>
             <span className="hidden sm:inline text-[11px] text-[#10B981] font-mono tabular-nums border-l border-[var(--border-subtle)] pl-2">
               {onlineValidCount.toLocaleString("id-ID")} Online
             </span>
+          </div>
+
+          {/* Dedicated Independent Layer Visibility Controls */}
+          <div className="relative" ref={layerMenuRef}>
+            <button
+              type="button"
+              data-testid="layer-visibility-dropdown-btn"
+              onClick={() => setIsLayerMenuOpen((o) => !o)}
+              title="Filter Visibilitas Layer Peta (CCTV, Kantor BI, UNRAS)"
+              className={`px-2.5 sm:px-3 py-1.5 rounded-xl text-[11px] sm:text-xs font-semibold border backdrop-blur-md transition-all shadow-lg flex items-center gap-1.5 cursor-pointer ${
+                (showCctvMarkers ? 1 : 0) + (showBIOfficeLayer ? 1 : 0) + (showProtestLayer ? 1 : 0) === 3
+                  ? "bg-[#090C12]/92 border-[var(--border-default)] text-[#F3F6FB] hover:border-[#3B82F6]/50"
+                  : (showCctvMarkers ? 1 : 0) + (showBIOfficeLayer ? 1 : 0) + (showProtestLayer ? 1 : 0) > 0
+                  ? "bg-[#3B82F6]/20 border-[#3B82F6]/45 text-blue-300"
+                  : "bg-red-500/15 border-red-500/35 text-red-300"
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5 text-blue-400" />
+              <span>Visibilitas Layer</span>
+              <span className="font-mono text-[10px] px-1.5 py-0.5 rounded-full bg-white/10 text-white tabular-nums border border-white/10">
+                {(showCctvMarkers ? 1 : 0) + (showBIOfficeLayer ? 1 : 0) + (showProtestLayer ? 1 : 0)}/3
+              </span>
+              <ChevronDown
+                className={`w-3 h-3 text-[#98A4B8] transition-transform duration-200 ${
+                  isLayerMenuOpen ? "rotate-180" : ""
+                }`}
+              />
+            </button>
+
+            {isLayerMenuOpen && (
+              <div
+                data-testid="layer-visibility-menu"
+                className="absolute top-full left-0 mt-1.5 w-64 bg-[#090C12]/98 backdrop-blur-xl border border-[var(--border-default)] rounded-xl shadow-2xl p-2.5 z-[60] space-y-2 text-xs"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between pb-1.5 border-b border-[var(--border-subtle)]">
+                  <span className="font-semibold text-white text-[11px] uppercase tracking-wider">
+                    Visibilitas Layer
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      data-testid="layer-show-all-btn"
+                      onClick={handleShowAllLayers}
+                      className="text-[10px] text-blue-400 hover:text-blue-300 px-1.5 py-0.5 rounded hover:bg-white/5 transition-colors cursor-pointer"
+                    >
+                      Tampilkan Semua
+                    </button>
+                    <span className="text-[10px] text-slate-600">•</span>
+                    <button
+                      type="button"
+                      data-testid="layer-hide-all-btn"
+                      onClick={handleHideAllLayers}
+                      className="text-[10px] text-slate-400 hover:text-slate-300 px-1.5 py-0.5 rounded hover:bg-white/5 transition-colors cursor-pointer"
+                    >
+                      Sembunyikan Semua
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  {/* CCTV Marker Toggle */}
+                  <button
+                    type="button"
+                    data-testid="toggle-cctv-layer"
+                    onClick={() => toggleLayer("cctv")}
+                    className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-left transition-colors cursor-pointer ${
+                      showCctvMarkers
+                        ? "bg-[#3B82F6]/15 text-white"
+                        : "text-slate-400 hover:bg-white/5"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-[#3B82F6] shadow-[0_0_6px_rgba(59,130,246,0.8)]" />
+                      <div className="flex flex-col">
+                        <span className="font-medium text-white text-[11px]">
+                          Titik Kamera CCTV
+                        </span>
+                        <span className="text-[10px] text-slate-400">
+                          {validMarkers.length.toLocaleString("id-ID")} kamera ({onlineValidCount} online)
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      {showCctvMarkers ? (
+                        <span className="w-4 h-4 rounded bg-[#3B82F6]/30 text-blue-400 flex items-center justify-center text-[10px] font-bold">
+                          ✓
+                        </span>
+                      ) : (
+                        <EyeOff className="w-3.5 h-3.5 text-slate-500" />
+                      )}
+                    </div>
+                  </button>
+
+                  {/* BI Office Marker Toggle */}
+                  <button
+                    type="button"
+                    data-testid="toggle-bioffice-layer"
+                    onClick={() => toggleLayer("biOffice")}
+                    className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-left transition-colors cursor-pointer ${
+                      showBIOfficeLayer
+                        ? "bg-emerald-500/15 text-white"
+                        : "text-slate-400 hover:bg-white/5"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]" />
+                      <div className="flex flex-col">
+                        <span className="font-medium text-white text-[11px]">
+                          Kantor BI KP/KPw
+                        </span>
+                        <span className="text-[10px] text-slate-400">
+                          {allBIOffices.filter((o) => o.validation_status === "verified").length} kantor terverifikasi
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      {showBIOfficeLayer ? (
+                        <span className="w-4 h-4 rounded bg-emerald-500/30 text-emerald-400 flex items-center justify-center text-[10px] font-bold">
+                          ✓
+                        </span>
+                      ) : (
+                        <EyeOff className="w-3.5 h-3.5 text-slate-500" />
+                      )}
+                    </div>
+                  </button>
+
+                  {/* UNRAS Marker Toggle */}
+                  <button
+                    type="button"
+                    data-testid="toggle-unras-layer"
+                    onClick={() => toggleLayer("unras")}
+                    className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-left transition-colors cursor-pointer ${
+                      showProtestLayer
+                        ? "bg-red-500/15 text-white"
+                        : "text-slate-400 hover:bg-white/5"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.8)]" />
+                      <div className="flex flex-col">
+                        <span className="font-medium text-white text-[11px]">
+                          Titik UNRAS
+                        </span>
+                        <span className="text-[10px] text-slate-400">
+                          {protestEvents
+                            ? protestEvents.filter(
+                                (p) =>
+                                  p.validated_lat !== null &&
+                                  p.validated_lng !== null &&
+                                  isValidLatLng(p.validated_lat, p.validated_lng)
+                              ).length
+                            : 0}{" "}
+                          titik terpeta
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      {showProtestLayer ? (
+                        <span className="w-4 h-4 rounded bg-red-500/30 text-red-400 flex items-center justify-center text-[10px] font-bold">
+                          ✓
+                        </span>
+                      ) : (
+                        <EyeOff className="w-3.5 h-3.5 text-slate-500" />
+                      )}
+                    </div>
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           <button
@@ -1218,7 +1559,7 @@ export default function InteractiveMap({
           <div className="flex items-center gap-1">
             <button
               type="button"
-              onClick={() => setShowProtestLayer((l) => !l)}
+              onClick={() => toggleLayer("unras")}
               title="Aktifkan / Nonaktifkan Layer Peta Aksi Unjuk Rasa"
               className={`px-2.5 sm:px-3 py-1.5 rounded-xl text-[11px] sm:text-xs font-semibold border backdrop-blur-md transition-all shadow-lg flex items-center gap-1.5 cursor-pointer ${
                 showProtestLayer
@@ -1263,7 +1604,7 @@ export default function InteractiveMap({
           <div className="flex items-center gap-1">
             <button
               type="button"
-              onClick={() => setShowBIOfficeLayer((l) => !l)}
+              onClick={() => toggleLayer("biOffice")}
               title="Aktifkan / Nonaktifkan Layer Kantor Bank Indonesia (47 Kantor)"
               className={`px-2.5 sm:px-3 py-1.5 rounded-xl text-[11px] sm:text-xs font-semibold border backdrop-blur-md transition-all shadow-lg flex items-center gap-1.5 cursor-pointer ${
                 showBIOfficeLayer
