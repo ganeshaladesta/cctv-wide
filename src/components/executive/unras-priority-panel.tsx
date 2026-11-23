@@ -54,6 +54,7 @@ export interface UnrasPriorityPanelProps {
   onPageChange?: (newPage: number) => void;
   loadingCameras: boolean;
   operationalDate?: string;
+  currentOperationalDate?: string;
   onOperationalDateChange?: (date: string) => void;
 }
 
@@ -73,6 +74,7 @@ export function UnrasPriorityPanel({
   onPageChange,
   loadingCameras,
   operationalDate,
+  currentOperationalDate,
   onOperationalDateChange
 }: UnrasPriorityPanelProps) {
   // Sidebar tab: 'unras' (default) or 'cameras'
@@ -80,14 +82,15 @@ export function UnrasPriorityPanel({
   const [unrasStatusFilter, setUnrasStatusFilter] = useState<string>("all_active");
   const [unrasSearchQuery, setUnrasSearchQuery] = useState<string>("");
 
-  // Today in Asia/Jakarta (WIB)
+  // Today in Asia/Jakarta (WIB) - synced with server/parent current operational date if provided
   const todayWib = useMemo(() => {
+    if (currentOperationalDate) return currentOperationalDate;
     try {
       return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta" }).format(new Date());
     } catch {
       return new Date().toISOString().slice(0, 10);
     }
-  }, []);
+  }, [currentOperationalDate]);
 
   const [selectedDate, setSelectedDate] = useState<string>(operationalDate || todayWib);
   const [dailyOverview, setDailyOverview] = useState<DailyUnrasSituationOverview | null>(null);

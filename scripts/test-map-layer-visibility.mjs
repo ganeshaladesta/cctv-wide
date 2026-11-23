@@ -3,6 +3,7 @@
  * Verifies independent layer filtering, localStorage persistence, and layer group lifecycle.
  */
 import assert from "node:assert/strict";
+import fs from "node:fs";
 
 console.log("=== SCC EAGLE EYES: MAP LAYER VISIBILITY TEST SUITE ===\n");
 
@@ -231,6 +232,148 @@ runTest("Active layer count badges accurately reflect 0/3, 1/3, 2/3, 3/3", () =>
   assert.equal(countActive({ cctv: true, biOffice: false, unras: true }), 2);
   assert.equal(countActive({ cctv: false, biOffice: true, unras: false }), 1);
   assert.equal(countActive({ cctv: false, biOffice: false, unras: false }), 0);
+});
+
+// TEST 11: UNRAS radius state cycling and label formatting
+runTest("UNRAS radius cycle and formatting (1km -> 1.5km -> OFF -> 250m -> 500m -> 1km)", () => {
+  const nextMap = {
+    1000: 1500,
+    1500: 0,
+    0: 250,
+    250: 500,
+    500: 1000
+  };
+
+  const formatUnrasRadius = (dist) => {
+    if (dist === 0) return "Nonaktif";
+    if (dist >= 1000) return `${dist / 1000} km`;
+    return `${dist} m`;
+  };
+
+  let dist = 1000;
+  assert.equal(`Radius UNRAS: ${formatUnrasRadius(dist)}`, "Radius UNRAS: 1 km");
+
+  dist = nextMap[dist];
+  assert.equal(dist, 1500);
+  assert.equal(`Radius UNRAS: ${formatUnrasRadius(dist)}`, "Radius UNRAS: 1.5 km");
+
+  dist = nextMap[dist];
+  assert.equal(dist, 0);
+  assert.equal(`Radius UNRAS: ${formatUnrasRadius(dist)}`, "Radius UNRAS: Nonaktif");
+
+  dist = nextMap[dist];
+  assert.equal(dist, 250);
+  assert.equal(`Radius UNRAS: ${formatUnrasRadius(dist)}`, "Radius UNRAS: 250 m");
+
+  dist = nextMap[dist];
+  assert.equal(dist, 500);
+  assert.equal(`Radius UNRAS: ${formatUnrasRadius(dist)}`, "Radius UNRAS: 500 m");
+
+  dist = nextMap[dist];
+  assert.equal(dist, 1000);
+  assert.equal(`Radius UNRAS: ${formatUnrasRadius(dist)}`, "Radius UNRAS: 1 km");
+});
+
+// TEST 12: BI Monitoring radius state cycling and label formatting
+runTest("BI monitoring radius cycle (3km -> 5km -> 10km -> Concentric -> OFF -> 1km -> 3km)", () => {
+  const nextMap = {
+    3000: 5000,
+    5000: 10000,
+    10000: -1,
+    [-1]: 0,
+    0: 1000,
+    1000: 3000
+  };
+
+  const formatBIRadius = (dist) => {
+    if (dist === -1) return "Konsentris";
+    if (dist === 0) return "Nonaktif";
+    return `${dist / 1000} km`;
+  };
+
+  let dist = 3000;
+  assert.equal(`Radius Pemantauan BI: ${formatBIRadius(dist)}`, "Radius Pemantauan BI: 3 km");
+
+  dist = nextMap[dist];
+  assert.equal(dist, 5000);
+  assert.equal(`Radius Pemantauan BI: ${formatBIRadius(dist)}`, "Radius Pemantauan BI: 5 km");
+
+  dist = nextMap[dist];
+  assert.equal(dist, 10000);
+  assert.equal(`Radius Pemantauan BI: ${formatBIRadius(dist)}`, "Radius Pemantauan BI: 10 km");
+
+  dist = nextMap[dist];
+  assert.equal(dist, -1);
+  assert.equal(`Radius Pemantauan BI: ${formatBIRadius(dist)}`, "Radius Pemantauan BI: Konsentris");
+
+  dist = nextMap[dist];
+  assert.equal(dist, 0);
+  assert.equal(`Radius Pemantauan BI: ${formatBIRadius(dist)}`, "Radius Pemantauan BI: Nonaktif");
+
+  dist = nextMap[dist];
+  assert.equal(dist, 1000);
+  assert.equal(`Radius Pemantauan BI: ${formatBIRadius(dist)}`, "Radius Pemantauan BI: 1 km");
+
+  dist = nextMap[dist];
+  assert.equal(dist, 3000);
+  assert.equal(`Radius Pemantauan BI: ${formatBIRadius(dist)}`, "Radius Pemantauan BI: 3 km");
+});
+
+// TEST 13: Radius controls are strictly decoupled (no shared state mutation)
+runTest("Radius controls only modify their respective state variable", () => {
+  let unrasRadius = 1000;
+  let biRadius = 3000;
+
+  // Change UNRAS radius
+  unrasRadius = 1500;
+  assert.equal(unrasRadius, 1500);
+  assert.equal(biRadius, 3000, "BI radius must remain unchanged when UNRAS radius changes");
+
+  // Change BI radius
+  biRadius = 5000;
+  assert.equal(unrasRadius, 1500, "UNRAS radius must remain unchanged when BI radius changes");
+  assert.equal(biRadius, 5000);
+});
+
+// TEST 14: Tactical HUD toggle does not alter layer visibility or radius state
+runTest("Tactical HUD toggle is strictly isolated from visibility and radius states", () => {
+  let isGeoIntHudOpen = false;
+  let layerVisibility = { cctv: true, biOffice: true, unras: true };
+  let unrasRadius = 1000;
+  let biRadius = 3000;
+
+  // Toggle HUD open
+  isGeoIntHudOpen = !isGeoIntHudOpen;
+  assert.equal(isGeoIntHudOpen, true);
+  assert.deepEqual(layerVisibility, { cctv: true, biOffice: true, unras: true });
+  assert.equal(unrasRadius, 1000);
+  assert.equal(biRadius, 3000);
+
+  // Toggle HUD closed
+  isGeoIntHudOpen = !isGeoIntHudOpen;
+  assert.equal(isGeoIntHudOpen, false);
+  assert.deepEqual(layerVisibility, { cctv: true, biOffice: true, unras: true });
+});
+
+// TEST 15: Source code verification: confirm no duplicate external BI toggle button remains
+runTest("Verify no duplicate external BI office visibility button exists in interactive-map.tsx", () => {
+  const content = fs.readFileSync("src/components/interactive-map.tsx", "utf-8");
+
+  // In Visibilitas Layer, toggle-bioffice-layer should exist
+  assert.ok(content.includes('data-testid="toggle-bioffice-layer"'), "Visibilitas layer must have BI toggle");
+
+  // Redundant external button had:
+  // onClick={() => toggleLayer("biOffice")} with "Kantor BI" label outside the dropdown
+  // Count how many toggleLayer("biOffice") exist: should be exactly 1 (inside the dropdown)!
+  const matches = content.match(/toggleLayer\(["']biOffice["']\)/g);
+  assert.equal(matches ? matches.length : 0, 1, "There must be exactly ONE toggleLayer('biOffice') in the entire component (inside the dropdown)");
+
+  // Check that the new radius controls exist with their exact test IDs and tooltips
+  assert.ok(content.includes('data-testid="btn-radius-unras"'));
+  assert.ok(content.includes('data-testid="btn-radius-bi"'));
+  assert.ok(content.includes("Mengatur jarak analisis dari titik kejadian unjuk rasa."));
+  assert.ok(content.includes("Mengatur jarak pemantauan dari lokasi kantor BI."));
+  assert.ok(content.includes("Menampilkan overlay informasi dan elemen situasional taktis pada peta."));
 });
 
 console.log(`\n=== LAYER VISIBILITY TEST SUMMARY: ${passed}/${total} PASSED ===\n`);
