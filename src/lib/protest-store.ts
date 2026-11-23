@@ -1931,6 +1931,7 @@ class ProtestDataStore {
     skipped: number;
     failed?: number;
     error?: string | null;
+    insertedByDate?: Record<string, number>;
   }> {
     if (isSupabaseConfigured()) {
       try {
@@ -1980,10 +1981,12 @@ class ProtestDataStore {
     created: number;
     updated: number;
     skipped: number;
+    insertedByDate: Record<string, number>;
   } {
     let created = 0;
     let updated = 0;
     let skipped = 0;
+    const insertedByDate: Record<string, number> = {};
     const now = new Date().toISOString();
 
     for (const rec of records) {
@@ -2108,6 +2111,8 @@ class ProtestDataStore {
             (rec as any).dampak ?? null
           );
           created++;
+          const tgl = rec.tanggal || (rec.event_datetime ? rec.event_datetime.slice(0, 10) : "unknown");
+          insertedByDate[tgl] = (insertedByDate[tgl] || 0) + 1;
         } catch (insertErr: any) {
           const msg = String(insertErr?.message || "");
           if (msg.includes("UNIQUE constraint failed") || msg.includes("duplicate") || msg.includes("conflict")) {
@@ -2119,6 +2124,8 @@ class ProtestDataStore {
       } else {
         this.memoryEvents.set(newEvent.id, newEvent);
         created++;
+        const tgl = rec.tanggal || (rec.event_datetime ? rec.event_datetime.slice(0, 10) : "unknown");
+        insertedByDate[tgl] = (insertedByDate[tgl] || 0) + 1;
       }
     }
 
@@ -2126,7 +2133,8 @@ class ProtestDataStore {
       processed: records.length,
       created,
       updated: 0,
-      skipped
+      skipped,
+      insertedByDate
     };
   }
 

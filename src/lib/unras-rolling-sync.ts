@@ -275,6 +275,127 @@ export function parseSourceEventDatetime(
 }
 
 /**
+ * Validates whether an incoming event identifier is well-formed and unique.
+ * Rejects:
+ * - null, undefined, non-string
+ * - empty or whitespace-only strings
+ * - strings ending with '-' (e.g. malformed fallback "KEJ-20261123-")
+ * - strings containing double dash '--'
+ * - prefix-only strings missing unique suffix (e.g. "KEJ-", "KEJ-20261123", "KEJ-20261123-")
+ * - strings shorter than 5 characters
+ */
+export function isValidIdKejadian(id: unknown): id is string {
+  if (typeof id !== "string") return false;
+  const trimmed = id.trim();
+  if (trimmed === "") return false;
+  if (trimmed.includes("--")) return false;
+  if (trimmed.endsWith("-")) return false;
+  if (trimmed.length < 5) return false;
+
+  // Prefix-only patterns like "KEJ-", "KEJ-20261123", "KEJ-20261123-"
+  if (/^KEJ(-\d{8})?-?$/i.test(trimmed)) return false;
+
+  // If pattern is KEJ-YYYYMMDD-{suffix}, ensure suffix is meaningful
+  const match = trimmed.match(/^KEJ-(\d{8})-(.+)$/i);
+  if (match) {
+    const suffix = match[2].trim();
+    if (!suffix || suffix === "-" || suffix.length === 0) return false;
+  }
+
+  return true;
+}
+
+/**
+ * Validates whether an incoming kode_unras is non-empty and well-formed.
+ */
+export function isValidKodeUnras(kode: unknown): kode is string {
+  if (typeof kode !== "string") return false;
+  const trimmed = kode.trim();
+  if (trimmed === "" || trimmed === "-" || trimmed === "--") return false;
+  return true;
+}
+
+/**
+ * Normalizes text for deterministic hashing (trimmed, lowercased, collapsed spaces).
+ */
+export function normalizeContentString(val: unknown): string {
+  if (val === undefined || val === null) return "";
+  return String(val)
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+/**
+ * Checks if a value is empty or matches generic placeholder text.
+ */
+function isGenericOrEmpty(val: unknown, genericDefaults: string[] = []): boolean {
+  if (val === undefined || val === null) return true;
+  const norm = normalizeContentString(val);
+  if (!norm || norm === "-" || norm === "--") return true;
+  for (const def of genericDefaults) {
+    if (norm === def.toLowerCase()) return true;
+  }
+  return false;
+}
+
+/**
+ * Generates a stable deterministic fallback ID when both ID KEJADIAN and ID UNRAS are missing.
+ * Structure: KEJ-YYYYMMDD-XXXXXXXXXXXXXXXX (16 uppercase hexadecimal chars from SHA-256)
+ *
+ * Requirements:
+ * - Uses actual event date in WIB, NOT sync execution date.
+ * - Normalized whitespace and casing.
+ * - If essential fields (both location and issue) are missing or generic placeholders, returns null
+ *   so the record can be skipped explicitly rather than generating a generic shared ID.
+ */
+export function generateDeterministicFallbackId(
+  eventDateWib: string,
+  lokasiRaw: unknown,
+  aliansiRaw: unknown,
+  isuRaw: unknown
+): string | null {
+  if (!eventDateWib || !/^\d{4}-\d{2}-\d{2}$/.test(eventDateWib)) {
+    return null;
+  }
+
+  const isLokasiGeneric = isGenericOrEmpty(lokasiRaw, [
+    "lokasi belum ditentukan",
+    "tidak diketahui",
+    "belum ditentukan",
+    "tbd"
+  ]);
+  const isIsuGeneric = isGenericOrEmpty(isuRaw, [
+    "aksi unjuk rasa",
+    "tidak diketahui",
+    "belum ditentukan",
+    "tbd",
+    "unjuk rasa"
+  ]);
+
+  // Essential field check: If both location and issue are generic or empty, do not generate shared ID
+  if (isLokasiGeneric && isIsuGeneric) {
+    return null;
+  }
+
+  const normDate = eventDateWib.trim();
+  const normLokasi = normalizeContentString(lokasiRaw);
+  const normAliansi = normalizeContentString(aliansiRaw);
+  const normIsu = normalizeContentString(isuRaw);
+
+  const hashInput = [normDate, normLokasi, normAliansi, normIsu].join("|");
+  const hash = crypto
+    .createHash("sha256")
+    .update(hashInput, "utf8")
+    .digest("hex")
+    .slice(0, 16)
+    .toUpperCase();
+
+  const cleanDateCompact = normDate.replace(/-/g, "");
+  return `KEJ-${cleanDateCompact}-${hash}`;
+}
+
+/**
  * Timing-safe comparison of bearer token with secret
  */
 export function verifyIntegrationToken(
@@ -509,6 +630,14 @@ async function processSyncCore(
           skipped: payload.events?.length || 0,
           failed: 0
         },
+        oldest_event_date: null,
+        newest_event_date: null,
+        inserted_by_event_date: {},
+        diagnostics: {
+          oldest_event_date: null,
+          newest_event_date: null,
+          inserted_by_event_date: {}
+        },
         errors: ["Proses sinkronisasi lain sedang berjalan. Permintaan dilewati untuk mencegah data collision."],
         duration_ms: 0
       };
@@ -539,6 +668,14 @@ async function processSyncCore(
         updated: 0,
         skipped: 0,
         failed: payload.events?.length || 0
+      },
+      oldest_event_date: null,
+      newest_event_date: null,
+      inserted_by_event_date: {},
+      diagnostics: {
+        oldest_event_date: null,
+        newest_event_date: null,
+        inserted_by_event_date: {}
       },
       errors: [validation.error || "Validasi gagal"],
       duration_ms: Date.now() - startTime
@@ -585,6 +722,10 @@ async function processSyncCore(
   let failed = 0;
   const seenPayloadIds = new Set<string>();
 
+  let oldestEventDate: string | null = null;
+  let newestEventDate: string | null = null;
+  let insertedByDate: Record<string, number> = {};
+
   const validBatchForStore: Array<{
     id_kejadian: string;
     kode_unras: string;
@@ -610,10 +751,6 @@ async function processSyncCore(
   }> = [];
 
   try {
-    const periodDateWib = payload.period_start
-      ? new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta" }).format(new Date(startMs))
-      : new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta" }).format(new Date());
-
     // 4. Validate and Normalize Each Row in Batch
     for (let i = 0; i < payload.events.length; i++) {
       const row = payload.events[i] as Record<string, any>;
@@ -625,37 +762,75 @@ async function processSyncCore(
         continue;
       }
 
-      // 1. Resolve Identifiers (supports Excel Header format AND snake_case format)
+      // Step 1: Event Timestamp Extraction & Boundary Check
+      const rawTimeISO = getField(row, "WAKTU DAN TGL KEJADIAN ISO", "tanggal_kejadian", "event_datetime");
+      const rawDate = getField(row, "TANGGAL", "tanggal", "tanggal_kejadian", "WAKTU DAN TGL KEJADIAN ISO", "event_date");
+
+      const timeParsed = parseSourceEventDatetime(rawTimeISO, rawDate);
+
+      if (!timeParsed.iso || timeParsed.epochMs === null) {
+        skipped++;
+        errors.push(`[Baris ${rowIndex}] Dilewati: ${timeParsed.error || "Timestamp kejadian tidak valid"}.`);
+        continue;
+      }
+
+      // Rolling window boundary check: event_datetime >= period_start && event_datetime < period_end
+      // Half-open interval [startMs, endMs)
+      if (timeParsed.epochMs < startMs) {
+        skipped++;
+        errors.push(`[Baris ${rowIndex}] Dilewati: Waktu kejadian (${timeParsed.iso}) lebih lampau dari batas awal jendela (${payload.period_start}).`);
+        continue;
+      }
+
+      if (timeParsed.epochMs >= endMs) {
+        skipped++;
+        errors.push(`[Baris ${rowIndex}] Dilewati: Waktu kejadian (${timeParsed.iso}) di luar atau melebihi batas akhir jendela (${payload.period_end}).`);
+        continue;
+      }
+
+      // Derive event date in Asia/Jakarta (WIB)
+      const eventDateWib = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Jakarta",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit"
+      }).format(new Date(timeParsed.epochMs));
+
+      if (!oldestEventDate || eventDateWib < oldestEventDate) oldestEventDate = eventDateWib;
+      if (!newestEventDate || eventDateWib > newestEventDate) newestEventDate = eventDateWib;
+
+      const cleanDateCompact = eventDateWib.replace(/-/g, "");
+
+      // Step 2: Resolve Identifiers
       const rawIdKejadian = getField(row, "ID KEJADIAN", "id_kejadian", "ID_KEJADIAN", "idKejadian");
       const rawKodeUnras = getField(row, "ID UNRAS", "KODE_UNRAS", "id_unras", "kode_unras", "KODE UNRAS", "kodeUnras");
-
-      // Extract raw date for deterministic key derivation
-      const rawDate = getField(row, "TANGGAL", "tanggal", "tanggal_kejadian", "WAKTU DAN TGL KEJADIAN ISO", "event_date");
-      let dateStr = periodDateWib;
-      if (rawDate) {
-        const match = String(rawDate).match(/(\d{4})[-/](\d{2})[-/](\d{2})/);
-        if (match) {
-          dateStr = `${match[1]}-${match[2]}-${match[3]}`;
-        }
-      }
-      const cleanDateCompact = dateStr.replace(/-/g, "");
 
       let idKejadian = "";
       let kodeUnras = "";
 
-      if (rawIdKejadian && String(rawIdKejadian).trim() !== "") {
-        idKejadian = String(rawIdKejadian).trim();
-        kodeUnras = rawKodeUnras ? String(rawKodeUnras).trim() : idKejadian;
-      } else if (rawKodeUnras && String(rawKodeUnras).trim() !== "") {
+      if (isValidIdKejadian(rawIdKejadian)) {
+        idKejadian = rawIdKejadian.trim();
+        kodeUnras = isValidKodeUnras(rawKodeUnras) ? rawKodeUnras.trim() : idKejadian;
+      } else if (isValidKodeUnras(rawKodeUnras)) {
         // Safe deterministic identifier strategy when ID KEJADIAN is empty in Excel:
         // KEJ-YYYYMMDD-{ID_UNRAS} (e.g. KEJ-20261120-U1473)
-        kodeUnras = String(rawKodeUnras).trim();
+        kodeUnras = rawKodeUnras.trim();
         idKejadian = `KEJ-${cleanDateCompact}-${kodeUnras}`;
       } else {
-        // Neither identifier is provided: Return validation error rather than silently creating duplicates
-        skipped++;
-        errors.push(`[Baris ${rowIndex}] Dilewati: 'ID KEJADIAN' dan 'ID UNRAS'/'KODE_UNRAS' keduanya kosong. Rekor tidak dapat diidentifikasi secara unik.`);
-        continue;
+        // Both ID KEJADIAN and ID UNRAS / KODE_UNRAS are missing or invalid (e.g. malformed "KEJ-20261123-").
+        // Generate deterministic fallback identifier using SHA-256 hash.
+        const lokasiRaw = getField(row, "LOKASI", "lokasi");
+        const aliansiRaw = getField(row, "ORGANISASI", "aliansi", "organisasi_kelompok", "organisasi");
+        const isuRaw = getField(row, "ISU", "tuntutan", "isu_tuntutan", "isu");
+
+        const fallbackId = generateDeterministicFallbackId(eventDateWib, lokasiRaw, aliansiRaw, isuRaw);
+        if (!fallbackId) {
+          skipped++;
+          errors.push(`[Baris ${rowIndex}] Dilewati: 'ID KEJADIAN' dan 'ID UNRAS'/'KODE_UNRAS' keduanya kosong dan field esensial (lokasi/isu) tidak mencukupi untuk membuat ID fallback deterministik.`);
+          continue;
+        }
+        idKejadian = fallbackId;
+        kodeUnras = fallbackId;
       }
 
       // In-payload duplicate check: process first occurrence, skip subsequent occurrences
@@ -666,36 +841,12 @@ async function processSyncCore(
       }
       seenPayloadIds.add(idKejadian);
 
-      // 2. Event Timestamp Extraction & Boundary Check
-      const rawTimeISO = getField(row, "WAKTU DAN TGL KEJADIAN ISO", "tanggal_kejadian", "event_datetime");
-      const timeParsed = parseSourceEventDatetime(rawTimeISO, dateStr);
-
-      if (!timeParsed.iso || timeParsed.epochMs === null) {
-        skipped++;
-        errors.push(`[ID: ${idKejadian}] Dilewati: ${timeParsed.error || "Timestamp kejadian tidak valid"}.`);
-        continue;
-      }
-
-      // Rolling 7-day boundary check: event_datetime >= period_start && event_datetime < period_end
-      // Half-open interval [startMs, endMs)
-      if (timeParsed.epochMs < startMs) {
-        skipped++;
-        errors.push(`[ID: ${idKejadian}] Dilewati: Waktu kejadian (${timeParsed.iso}) lebih lampau dari batas awal jendela 7 hari (${payload.period_start}).`);
-        continue;
-      }
-
-      if (timeParsed.epochMs >= endMs) {
-        skipped++;
-        errors.push(`[ID: ${idKejadian}] Dilewati: Waktu kejadian (${timeParsed.iso}) di luar atau melebihi batas akhir jendela 7 hari (${payload.period_end}).`);
-        continue;
-      }
-
-      // 3. Extract core fields with flexible field normalization
+      // Step 3: Extract core fields with flexible field normalization
       const lokasi = String(getField(row, "LOKASI", "lokasi") || "Lokasi Belum Ditentukan").trim();
       const titikKumpul = getField(row, "TITIK KUMPUL", "titik_kumpul") ? String(getField(row, "TITIK KUMPUL", "titik_kumpul")).trim() : null;
       const sasaranAksi = getField(row, "SASARAN", "sasaran", "sasaran_aksi") ? String(getField(row, "SASARAN", "sasaran", "sasaran_aksi")).trim() : null;
       const isu = String(getField(row, "ISU", "tuntutan", "isu_tuntutan", "isu") || "Aksi Unjuk Rasa").trim();
-      const tanggal = dateStr;
+      const tanggal = eventDateWib;
 
       // Time normalization
       const rawWaktu = getField(row, "WAKTU", "waktu", "waktu_mulai");
@@ -795,6 +946,9 @@ async function processSyncCore(
       // updated is guaranteed to be 0: sync skips existing events, never updates
       skipped += upsertStats.skipped;
       failed += (validBatchForStore.length - (inserted + upsertStats.skipped));
+      if (upsertStats.insertedByDate) {
+        insertedByDate = upsertStats.insertedByDate;
+      }
       if ((upsertStats as any).error) {
         errors.push(`[Database Error]: ${(upsertStats as any).error}`);
       }
@@ -841,6 +995,14 @@ async function processSyncCore(
         skipped,
         failed
       },
+      oldest_event_date: oldestEventDate,
+      newest_event_date: newestEventDate,
+      inserted_by_event_date: insertedByDate,
+      diagnostics: {
+        oldest_event_date: oldestEventDate,
+        newest_event_date: newestEventDate,
+        inserted_by_event_date: insertedByDate
+      },
       errors: errors.length > 0 ? errors : undefined,
       duration_ms: durationMs
     };
@@ -874,6 +1036,14 @@ async function processSyncCore(
         updated: 0,
         skipped,
         failed: payload.events.length - inserted
+      },
+      oldest_event_date: oldestEventDate,
+      newest_event_date: newestEventDate,
+      inserted_by_event_date: insertedByDate,
+      diagnostics: {
+        oldest_event_date: oldestEventDate,
+        newest_event_date: newestEventDate,
+        inserted_by_event_date: insertedByDate
       },
       errors,
       duration_ms: durationMs

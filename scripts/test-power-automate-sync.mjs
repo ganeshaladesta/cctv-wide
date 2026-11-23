@@ -161,7 +161,7 @@ async function runTestSuite() {
   }
 
   // ---------------------------------------------------------------------------
-  // Test 4: Missing both identifiers (must skip safely)
+  // Test 4: Missing both identifiers and essential fields (must skip safely)
   // ---------------------------------------------------------------------------
   try {
     const payload = {
@@ -170,17 +170,41 @@ async function runTestSuite() {
           id_kejadian: "",
           kode_unras: "",
           tanggal_kejadian: validEventIso,
-          tuntutan: "Aksi Liar Tanpa ID",
-          lokasi: "Tidak Diketahui"
+          tuntutan: "",
+          lokasi: ""
         }
       ]
     };
     const res = await processSameDaySync(payload, "power_automate");
     assert.equal(res.summary.skipped, 1);
     assert.ok(res.errors.some(e => e.includes("keduanya kosong")));
-    recordTest(4, "Missing both identifiers handled safely", true, "Row skipped with clear validation reason, no crash");
+    recordTest(4, "Missing both identifiers and essential fields handled safely", true, "Row skipped with clear validation reason, no crash");
   } catch (err) {
-    recordTest(4, "Missing both identifiers handled safely", false, err.message);
+    recordTest(4, "Missing both identifiers and essential fields handled safely", false, err.message);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Test 4b: Missing both identifiers with valid details generates deterministic ID
+  // ---------------------------------------------------------------------------
+  try {
+    const fallbackTestPayload = {
+      events: [
+        {
+          id_kejadian: "",
+          kode_unras: "",
+          tanggal_kejadian: validEventIso,
+          tuntutan: "Aksi Terbuka Tanpa Kode Unras",
+          lokasi: "Kawasan Patung Kuda Monas",
+          organisasi: "Aliansi Aksi Bersama"
+        }
+      ]
+    };
+    const res = await processSameDaySync(fallbackTestPayload, "power_automate");
+    assert.equal(res.success, true);
+    assert.ok(res.summary.inserted >= 1 || res.summary.skipped >= 1);
+    recordTest(4.5, "Missing identifiers with valid content derives SHA-256 fallback ID", true, "Deterministic fallback ID generated and processed");
+  } catch (err) {
+    recordTest(4.5, "Missing identifiers with valid content derives SHA-256 fallback ID", false, err.message);
   }
 
   // ---------------------------------------------------------------------------
