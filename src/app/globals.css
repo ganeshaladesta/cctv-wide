@@ -303,13 +303,11 @@
 
 .leaflet-popup-content {
   margin: 0 !important;
-  width: min(360px, calc(100vw - 40px)) !important;
-  max-width: 360px !important;
   box-sizing: border-box !important;
   overflow: hidden !important;
 }
 
-/* Leaflet UNRAS Protest Marker Popup Constraints */
+/* Leaflet UNRAS Protest Marker Popup Constraints (Wide / 360px) */
 .scc-leaflet-protest-popup {
   width: min(360px, calc(100vw - 40px)) !important;
   max-width: 360px !important;
@@ -354,6 +352,55 @@
   text-align: center !important;
 }
 
+/* Leaflet BI Office / KP / KPw Marker Popup Constraints (Compact & Proportional / 300px) */
+.scc-leaflet-bi-popup {
+  width: min(300px, calc(100vw - 32px)) !important;
+  max-width: 300px !important;
+}
+
+.scc-leaflet-bi-popup .leaflet-popup-content-wrapper {
+  box-sizing: border-box !important;
+  width: 100% !important;
+  max-width: 300px !important;
+  overflow: hidden !important;
+}
+
+.scc-leaflet-bi-popup .leaflet-popup-content {
+  width: 100% !important;
+  max-width: 300px !important;
+  box-sizing: border-box !important;
+  overflow: hidden !important;
+  margin: 0 !important;
+}
+
+.scc-leaflet-bi-popup .scc-bi-popup-root,
+.scc-leaflet-bi-popup .scc-bi-popup-root * {
+  box-sizing: border-box !important;
+}
+
+/* Close button positioning and styling */
+.leaflet-container a.leaflet-popup-close-button {
+  top: 8px !important;
+  right: 8px !important;
+  color: #94a3b8 !important;
+  font-size: 16px !important;
+  font-family: ui-sans-serif, system-ui, sans-serif !important;
+  padding: 0 !important;
+  width: 20px !important;
+  height: 20px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border-radius: 6px !important;
+  transition: all 0.15s ease !important;
+  z-index: 30 !important;
+}
+
+.leaflet-container a.leaflet-popup-close-button:hover {
+  color: #ffffff !important;
+  background: rgba(255, 255, 255, 0.12) !important;
+}
+
 /* Mobile responsive constraints with safe 16px margins */
 @media (max-width: 640px) {
   .scc-leaflet-protest-popup {
@@ -367,6 +414,21 @@
     max-width: calc(100vw - 32px) !important;
   }
   .scc-leaflet-protest-popup .scc-protest-popup-root {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  .scc-leaflet-bi-popup {
+    width: calc(100vw - 32px) !important;
+    max-width: calc(100vw - 32px) !important;
+  }
+  .scc-leaflet-bi-popup .leaflet-popup-content-wrapper {
+    max-width: calc(100vw - 32px) !important;
+  }
+  .scc-leaflet-bi-popup .leaflet-popup-content {
+    max-width: calc(100vw - 32px) !important;
+  }
+  .scc-leaflet-bi-popup .scc-bi-popup-root {
     width: 100% !important;
     max-width: 100% !important;
   }

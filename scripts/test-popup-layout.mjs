@@ -138,6 +138,66 @@ runTest("Both buttons share identical padding, font size, and rounded corners", 
   );
 });
 
+// TEST 8: BI Office popup root container sizing and box-sizing
+runTest("BI Office popup root container has width: min(300px, calc(100vw - 32px)), max-width 300px, and box-sizing", () => {
+  assert.ok(
+    mapSource.includes("scc-bi-popup-root"),
+    "BI popup root must have class scc-bi-popup-root"
+  );
+  assert.ok(
+    mapSource.includes('width: min(300px, calc(100vw - 32px))'),
+    "BI popup root inline style must enforce width: min(300px, calc(100vw - 32px))"
+  );
+  assert.ok(
+    mapSource.includes('max-width: 300px'),
+    "BI popup root must enforce max-width: 300px"
+  );
+});
+
+// TEST 9: BI Office header has right padding for close button
+runTest("BI Office header has pr-6 to prevent badge/identifier overlap with Leaflet close button", () => {
+  assert.ok(
+    mapSource.includes("flex items-center justify-between gap-2 pb-2 mb-2 border-b border-[#1E293B] pr-6"),
+    "Header must include pr-6 for Leaflet close button spacing"
+  );
+});
+
+// TEST 10: BI Office nearest UNRAS proximity card uses line-clamp-2
+runTest("BI Office nearest UNRAS proximity card applies two-line clamp and break-words", () => {
+  assert.ok(
+    mapSource.includes("line-clamp-2 break-words text-white/90 text-[10px] leading-snug m-0"),
+    "Proximity card must use line-clamp-2 break-words to prevent horizontal expansion"
+  );
+});
+
+// TEST 11: BI Office action button and click listener
+runTest("BI Office action button preserves ID, SVG icon, and Analisis GeoINT label", () => {
+  assert.ok(
+    mapSource.includes('id="btn-bi-office-hud-${office.id}"'),
+    "Action button must preserve ID btn-bi-office-hud-${office.id}"
+  );
+  assert.ok(
+    mapSource.includes("Analisis GeoINT &amp; Perimeter"),
+    "Action button must display 'Analisis GeoINT & Perimeter'"
+  );
+  assert.ok(
+    mapSource.includes("setIsGeoIntHudOpen(true)"),
+    "Action button click handler must open GeoINT HUD"
+  );
+});
+
+// TEST 12: globals.css contains .scc-leaflet-bi-popup and close button rules
+runTest("globals.css defines .scc-leaflet-bi-popup constraints and close button styling", () => {
+  assert.ok(
+    cssSource.includes(".scc-leaflet-bi-popup"),
+    "globals.css must define .scc-leaflet-bi-popup"
+  );
+  assert.ok(
+    cssSource.includes("leaflet-container a.leaflet-popup-close-button"),
+    "globals.css must style Leaflet close button"
+  );
+});
+
 console.log(`\n=== POPUP LAYOUT TEST SUMMARY: ${passed}/${total} PASSED ===\n`);
 if (passed !== total) {
   process.exit(1);
