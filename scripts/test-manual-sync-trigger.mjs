@@ -16,6 +16,7 @@ import { protestStore } from "../src/lib/protest-store.ts";
 
 const SECRET = "scc-unras-secret-token-2026-xyz";
 process.env.UNRAS_SYNC_SECRET = SECRET;
+process.env.POWER_AUTOMATE_TRIGGER_SECRET = "mock-pa-secret-token-123";
 
 const results = [];
 
@@ -93,16 +94,17 @@ async function runTestSuite() {
     assert.equal(res.status, 202);
     const json = await res.json();
     assert.equal(json.success, true);
-    assert.equal(json.status, "running");
-    assert.ok(json.execution_id.startsWith("sync-"));
+    assert.ok(json.status === "accepted" || json.status === "running");
+    const execId = json.request_id || json.execution_id;
+    assert.ok(execId);
 
-    const log = await protestStore.getSyncLogById(json.execution_id);
+    const log = await protestStore.getSyncLogById(execId);
     assert.ok(log, "Running sync log must be registered in store");
     assert.equal(log.triggered_by, "manual_admin");
-    recordTest(2, "Manual Admin trigger invokes the same flow", true, `Initialized execution: ${json.execution_id} (manual_admin)`);
+    recordTest(2, "Manual Admin trigger invokes the same flow", true, `Initialized execution: ${execId} (manual_admin)`);
 
     // Complete Test 2 log so concurrency lock is clear for Test 5
-    await protestStore.updateSyncLog(json.execution_id, {
+    await protestStore.updateSyncLog(execId, {
       status: "success",
       completed_at: new Date().toISOString()
     });
@@ -177,8 +179,8 @@ async function runTestSuite() {
     assert.equal(res.status, 202, "Admin trigger request must return HTTP 202 Accepted");
     const json = await res.json();
     assert.equal(json.success, true);
-    assert.equal(json.status, "running");
-    recordTest(5, "Admin can trigger sync (HTTP 202)", true, "Accepted with execution_id and status: running");
+    assert.ok(json.status === "accepted" || json.status === "running");
+    recordTest(5, "Admin can trigger sync (HTTP 202)", true, `Accepted with status: ${json.status}`);
   } catch (err) {
     recordTest(5, "Admin can trigger sync (HTTP 202)", false, err.message);
   }

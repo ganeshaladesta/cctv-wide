@@ -80,7 +80,7 @@ export function ProtestDashboard({
     type: "info" | "success" | "warning" | "error";
     message: string;
   } | null>(null);
-  const [syncButtonText, setSyncButtonText] = useState("Sync Sekarang (Admin)");
+  const [syncButtonText, setSyncButtonText] = useState("Sinkronisasi Manual");
 
   // Fetch KPI Stats (never flash fake 0)
   const fetchStats = async () => {
@@ -115,14 +115,14 @@ export function ProtestDashboard({
     if (syncLoading) return;
 
     setSyncLoading(true);
-    setSyncButtonText("Mengirim permintaan sinkronisasi...");
+    setSyncButtonText("Mengirim permintaan...");
     setSyncFeedback({
       type: "info",
       message: "Menghubungi server untuk memicu alur sinkronisasi Power Automate..."
     });
 
     try {
-      const res = await fetch("/api/protests/sync", {
+      const res = await fetch("/api/integrations/unras/manual-trigger", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -135,11 +135,11 @@ export function ProtestDashboard({
         throw new Error(json.error || "Gagal memulai sinkronisasi data unjuk rasa.");
       }
 
-      const executionId = json.execution_id;
-      setSyncButtonText("Sinkronisasi dimulai...");
+      const executionId = json.request_id || json.execution_id;
+      setSyncButtonText("Sinkronisasi Diterima...");
       setSyncFeedback({
         type: "info",
-        message: "Sinkronisasi dimulai. Menunggu eksekusi Power Automate & pelaporan data..."
+        message: "Permintaan sinkronisasi diterima. Menunggu proses Power Automate."
       });
 
       // Poll execution status until backend confirms completion
@@ -207,7 +207,7 @@ export function ProtestDashboard({
       });
     } finally {
       setSyncLoading(false);
-      setSyncButtonText("Sync Sekarang (Admin)");
+      setSyncButtonText("Sinkronisasi Manual");
     }
   };
 
