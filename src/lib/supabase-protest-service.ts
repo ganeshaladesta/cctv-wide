@@ -29,8 +29,15 @@ import {
   ProtestPoint,
   ProtestStatus,
   ProtestUrgency,
-  SourceStatusCategory
+  SourceStatusCategory,
+  IdentityRegistryEntry
 } from "./types/protests";
+import {
+  generateExactFingerprint,
+  generateSemanticFingerprint,
+  generateSourceKey,
+  ExistingProtestComparisonItem
+} from "./unras-identity-registry";
 
 export { isSupabaseConfigured };
 
@@ -807,7 +814,11 @@ export async function fetchStatsFromSupabase(): Promise<ProtestStats> {
     pendingValRes,
     verifiedLocRes,
     lastSyncRes,
-    cameraLinksRes
+    cameraLinksRes,
+    sourceSchedRes,
+    sourceOngoingRes,
+    sourceCompRes,
+    sourceNullRes
   ] = await Promise.all([
     supabase.from("protests").select("*", { count: "exact", head: true }).is("deleted_at", null),
     supabase.from("protests").select("*", { count: "exact", head: true }).is("deleted_at", null).eq("status", "scheduled").eq("is_archived", false),
@@ -820,7 +831,11 @@ export async function fetchStatsFromSupabase(): Promise<ProtestStats> {
     supabase.from("protests").select("*", { count: "exact", head: true }).is("deleted_at", null).eq("location_validation_status", "pending_validation").eq("is_archived", false),
     supabase.from("protests").select("*", { count: "exact", head: true }).is("deleted_at", null).eq("location_validation_status", "verified"),
     supabase.from("protest_sync_logs").select("completed_at").eq("status", "success").order("completed_at", { ascending: false }).limit(1).maybeSingle(),
-    supabase.from("protest_camera_links").select("*", { count: "exact", head: true })
+    supabase.from("protest_camera_links").select("*", { count: "exact", head: true }),
+    supabase.from("protests").select("*", { count: "exact", head: true }).is("deleted_at", null).eq("status_sumber", "Belum Berlangsung"),
+    supabase.from("protests").select("*", { count: "exact", head: true }).is("deleted_at", null).eq("status_sumber", "Sedang Berlangsung"),
+    supabase.from("protests").select("*", { count: "exact", head: true }).is("deleted_at", null).eq("status_sumber", "Selesai"),
+    supabase.from("protests").select("*", { count: "exact", head: true }).is("deleted_at", null).is("status_sumber", null)
   ]);
 
   const todayWib = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta" }).format(new Date());
@@ -857,7 +872,11 @@ export async function fetchStatsFromSupabase(): Promise<ProtestStats> {
     today_events: todayRes.count || 0,
     completed_today: completedTodayRes.count || 0,
     total_camera_links: cameraLinksRes?.count || 0,
-    last_successful_sync: lastSyncRes.data?.completed_at || null
+    last_successful_sync: lastSyncRes.data?.completed_at || null,
+    source_status_scheduled: sourceSchedRes?.count || 0,
+    source_status_ongoing: sourceOngoingRes?.count || 0,
+    source_status_completed: sourceCompRes?.count || 0,
+    source_status_unspecified: sourceNullRes?.count || 0
   };
 }
 
@@ -1294,6 +1313,66 @@ export async function upsertExcelBatchInSupabase(
         }
       } else {
         inserted++;
+
+        // Persist identity registry entries to Supabase so future sync runs can match even when Excel IDs are missing
+        try {
+          const tgl = rec.tanggal || (rec.event_datetime ? rec.event_datetime.slice(0, 10) : now.slice(0, 10));
+          const fpExact = generateExactFingerprint(tgl, rec.lokasi, rec.organisasi_kelompok, rec.isu_tuntutan);
+          const fpSem = generateSemanticFingerprint(tgl, rec.organisasi_kelompok, rec.isu_tuntutan);
+          const srcKey = generateSourceKey(rec.kode_unras, rec.lokasi);
+
+          const idEntries: Array<{
+            canonical_id: string;
+            identity_type: string;
+            identity_key: string;
+            event_date: string;
+            confidence: string;
+            metadata: Record<string, unknown>;
+          }> = [
+            {
+              canonical_id: rec.id_kejadian,
+              identity_type: "alias",
+              identity_key: `ID:${rec.id_kejadian}`,
+              event_date: tgl,
+              confidence: "confirmed",
+              metadata: {}
+            },
+            {
+              canonical_id: rec.id_kejadian,
+              identity_type: "fingerprint_exact",
+              identity_key: fpExact,
+              event_date: tgl,
+              confidence: "confirmed",
+              metadata: {}
+            }
+          ];
+
+          if (fpSem) {
+            idEntries.push({
+              canonical_id: rec.id_kejadian,
+              identity_type: "fingerprint_semantic",
+              identity_key: fpSem,
+              event_date: tgl,
+              confidence: "confirmed",
+              metadata: {}
+            });
+          }
+
+          if (srcKey) {
+            idEntries.push({
+              canonical_id: rec.id_kejadian,
+              identity_type: "source_id",
+              identity_key: srcKey,
+              event_date: tgl,
+              confidence: "confirmed",
+              metadata: {}
+            });
+          }
+
+          await supabase.from("unras_identity_registry").upsert(idEntries, { onConflict: "identity_key" });
+        } catch (regErr) {
+          console.warn(`[Supabase identity registry upsert warning ${rec.id_kejadian}]:`, regErr);
+        }
       }
     } catch (err: any) {
       lastError = err?.message || String(err);
@@ -1304,4 +1383,77 @@ export async function upsertExcelBatchInSupabase(
 
   return { inserted, updated: 0, skipped, failed, error: lastError };
 }
+
+/**
+ * Fetches all persistent identity mapping keys from Supabase unras_identity_registry
+ */
+export async function fetchIdentityKeysFromSupabase(): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  const supabase = getSupabaseAdminClient();
+  if (!supabase) return map;
+
+  try {
+    const { data, error } = await supabase
+      .from("unras_identity_registry")
+      .select("identity_key, canonical_id");
+
+    if (!error && Array.isArray(data)) {
+      for (const r of data) {
+        if (r.identity_key && r.canonical_id) {
+          map.set(r.identity_key, r.canonical_id);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("[Supabase] fetchIdentityKeysFromSupabase error:", err);
+  }
+  return map;
+}
+
+/**
+ * Fetches active (non-deleted) protests for a specific date from Supabase
+ */
+export async function fetchProtestsByDateFromSupabase(dateStr: string): Promise<ExistingProtestComparisonItem[]> {
+  const supabase = getSupabaseAdminClient();
+  if (!supabase) return [];
+
+  try {
+    const { data, error } = await supabase
+      .from("protests")
+      .select("id, id_kejadian, kode_unras, tanggal, lokasi, organisasi_kelompok, isu_tuntutan, created_at")
+      .eq("tanggal", dateStr)
+      .is("deleted_at", null);
+
+    if (!error && Array.isArray(data)) {
+      return data as ExistingProtestComparisonItem[];
+    }
+  } catch (err) {
+    console.warn("[Supabase] fetchProtestsByDateFromSupabase error:", err);
+  }
+  return [];
+}
+
+/**
+ * Persists an array of IdentityRegistryEntry items into Supabase unras_identity_registry
+ */
+export async function registerIdentityEntriesInSupabase(entries: IdentityRegistryEntry[]): Promise<void> {
+  const supabase = getSupabaseAdminClient();
+  if (!supabase || entries.length === 0) return;
+
+  try {
+    const payload = entries.map((e) => ({
+      canonical_id: e.canonical_id,
+      identity_type: e.identity_type,
+      identity_key: e.identity_key,
+      event_date: e.event_date,
+      confidence: e.confidence,
+      metadata: e.metadata || {}
+    }));
+
+    await supabase.from("unras_identity_registry").upsert(payload, { onConflict: "identity_key" });
+  } catch (err) {
+    console.warn("[Supabase] registerIdentityEntriesInSupabase error:", err);
+  }
+}
+
 

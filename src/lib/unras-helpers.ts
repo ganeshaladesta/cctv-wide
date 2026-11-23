@@ -343,7 +343,6 @@ export function mapSourceStatus(raw?: unknown): SourceStatusCategory | null {
     s === "rampung" ||
     s === "bubar" ||
     s === "terkendali" ||
-    s === "monitoring" ||
     s.startsWith("selesai")
   ) {
     return "Selesai";
