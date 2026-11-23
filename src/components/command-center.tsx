@@ -300,7 +300,7 @@ export default function CommandCenter({
   const fetchProtestEvents = useCallback(async (targetDate?: string) => {
     const activeDate = targetDate || operationalDateWib;
     try {
-      const res = await fetch(`/api/protests?operational_date=${encodeURIComponent(activeDate)}&is_archived=false&limit=250&sort_by=tanggal&sort_order=desc`);
+      const res = await fetch(`/api/protests?operational_date=${encodeURIComponent(activeDate)}&is_archived=false&limit=500&sort_by=tanggal&sort_order=desc`);
       const j = await res.json();
       if (j.success && Array.isArray(j.data)) {
         setProtestEvents(j.data);
@@ -323,6 +323,16 @@ export default function CommandCenter({
       console.warn("[CommandCenter] Gagal memuat daily situation overview:", err);
     }
   }, [operationalDateWib]);
+
+  // Synchronized operational date handler across National Map, Priority Panel, and KPI strip
+  const handleOperationalDateChange = useCallback(
+    (newDate: string) => {
+      setOperationalDateWib(newDate);
+      fetchProtestEvents(newDate);
+      fetchDailyOverview(newDate);
+    },
+    [fetchProtestEvents, fetchDailyOverview]
+  );
 
   // Listen to global unjuk rasa update events for immediate reactive map layer & KPI refresh
   useEffect(() => {
@@ -1053,6 +1063,7 @@ export default function CommandCenter({
                 <UnrasPriorityPanel
                   protestEvents={protestEvents}
                   operationalDate={operationalDateWib}
+                  onOperationalDateChange={handleOperationalDateChange}
                   onSelectEventDetail={handleProtestMarkerClick}
                   onFocusEventOnMap={(event) => {
                     if (event.validated_lat !== null && event.validated_lng !== null) {

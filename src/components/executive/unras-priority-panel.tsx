@@ -32,6 +32,7 @@ import {
   DailyUnrasSituationOverview,
   ProtestPoint
 } from "@/lib/types/protests";
+import { normalizeProtestStatus } from "@/lib/unras-helpers";
 import { Camera } from "@/lib/types";
 import { FavoritesButton } from "@/components/motion-ui";
 
@@ -53,6 +54,7 @@ export interface UnrasPriorityPanelProps {
   onPageChange?: (newPage: number) => void;
   loadingCameras: boolean;
   operationalDate?: string;
+  onOperationalDateChange?: (date: string) => void;
 }
 
 export function UnrasPriorityPanel({
@@ -70,7 +72,8 @@ export function UnrasPriorityPanel({
   totalPages,
   onPageChange,
   loadingCameras,
-  operationalDate
+  operationalDate,
+  onOperationalDateChange
 }: UnrasPriorityPanelProps) {
   // Sidebar tab: 'unras' (default) or 'cameras'
   const [activeSidebarTab, setActiveSidebarTab] = useState<"unras" | "cameras">("unras");
@@ -89,6 +92,8 @@ export function UnrasPriorityPanel({
   const [selectedDate, setSelectedDate] = useState<string>(operationalDate || todayWib);
   const [dailyOverview, setDailyOverview] = useState<DailyUnrasSituationOverview | null>(null);
   const [loadingDailyOverview, setLoadingDailyOverview] = useState<boolean>(false);
+  const [panelEvents, setPanelEvents] = useState<ProtestEvent[]>([]);
+  const [loadingPanelEvents, setLoadingPanelEvents] = useState<boolean>(false);
 
   useEffect(() => {
     if (operationalDate && operationalDate !== selectedDate) {
@@ -99,7 +104,7 @@ export function UnrasPriorityPanel({
   const fetchDailyOverview = useCallback(async (dateStr: string) => {
     setLoadingDailyOverview(true);
     try {
-      const res = await fetch(`/api/protests/daily-situation?date=${dateStr}`);
+      const res = await fetch(`/api/protests/daily-situation?date=${encodeURIComponent(dateStr)}`);
       const json = await res.json();
       if (res.ok && json.success) {
         setDailyOverview(json.data);
@@ -111,41 +116,137 @@ export function UnrasPriorityPanel({
     }
   }, []);
 
+  const fetchPanelEvents = useCallback(async (dateStr: string) => {
+    setLoadingPanelEvents(true);
+    try {
+      const res = await fetch(`/api/protests?operational_date=${encodeURIComponent(dateStr)}&is_archived=false&limit=250&sort_by=tanggal&sort_order=desc`);
+      const json = await res.json();
+      if (res.ok && json.success && Array.isArray(json.data)) {
+        setPanelEvents(json.data);
+      }
+    } catch (err) {
+      console.error("[UnrasPriorityPanel] Failed to fetch events for date:", err);
+    } finally {
+      setLoadingPanelEvents(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetchDailyOverview(selectedDate);
-  }, [selectedDate, fetchDailyOverview]);
+    fetchPanelEvents(selectedDate);
+  }, [selectedDate, fetchDailyOverview, fetchPanelEvents]);
+
+  const handleDateChange = useCallback((newDate: string) => {
+    setSelectedDate(newDate);
+    onOperationalDateChange?.(newDate);
+  }, [onOperationalDateChange]);
 
   const handlePrevDay = () => {
     const d = new Date(selectedDate + "T12:00:00Z");
     d.setUTCDate(d.getUTCDate() - 1);
-    setSelectedDate(d.toISOString().slice(0, 10));
+    handleDateChange(d.toISOString().slice(0, 10));
   };
 
   const handleNextDay = () => {
     const d = new Date(selectedDate + "T12:00:00Z");
     d.setUTCDate(d.getUTCDate() + 1);
-    setSelectedDate(d.toISOString().slice(0, 10));
+    handleDateChange(d.toISOString().slice(0, 10));
   };
 
   const handleToday = () => {
-    setSelectedDate(todayWib);
+    handleDateChange(todayWib);
   };
+
+  // Resolve effective active events for the selected date:
+  // 1. Panel's direct fetched events for selectedDate (most fresh)
+  // 2. Parent's protestEvents matching selectedDate
+  // 3. Fallback: synthesized events from dailyOverview.points
+  // 4. Fallback to protestEvents prop
+  const effectiveEvents = useMemo<ProtestEvent[]>(() => {
+    if (panelEvents.length > 0) {
+      return panelEvents;
+    }
+
+    const matchedFromProps = protestEvents.filter(
+      (p) => !p.deleted_at && ((p.tanggal && p.tanggal.slice(0, 10) === selectedDate) || (p.event_datetime && p.event_datetime.slice(0, 10) === selectedDate))
+    );
+    if (matchedFromProps.length > 0) {
+      return matchedFromProps;
+    }
+
+    if (dailyOverview?.points && dailyOverview.points.length > 0) {
+      return dailyOverview.points.map((pt) => ({
+        id: pt.protest_id || pt.id,
+        id_kejadian: pt.parent_kode_unras || pt.id,
+        kode_unras: pt.parent_kode_unras || undefined,
+        tanggal: selectedDate,
+        lokasi: pt.point_name || pt.location_address || "Titik Pantau UNRAS",
+        isu_tuntutan: pt.parent_title || pt.notes || "Aksi Unjuk Rasa",
+        estimasi_massa_source: pt.current_crowd_total || 0,
+        actual_crowd_size: pt.current_crowd_total || 0,
+        organisasi_kelompok: pt.elements?.map((e) => e.name || (e as any).element_name).filter(Boolean).join(", ") || "",
+        provinsi: pt.provinsi || undefined,
+        kota_kabupaten: pt.kota_kabupaten || undefined,
+        regional: pt.regional || undefined,
+        status: normalizeProtestStatus(pt.status),
+        urgency: pt.urgency || "medium",
+        validated_lat: pt.latitude,
+        validated_lng: pt.longitude,
+        has_coordinates: pt.latitude !== null && pt.longitude !== null,
+        is_archived: false,
+        created_at: pt.created_at || new Date().toISOString(),
+        updated_at: pt.updated_at || new Date().toISOString(),
+        camera_links: pt.linked_cameras || []
+      } as ProtestEvent));
+    }
+
+    return protestEvents;
+  }, [panelEvents, protestEvents, selectedDate, dailyOverview]);
+
+  // Tab counters strictly synchronized with dailyOverview and effective events for selectedDate
+  const todayCount = useMemo(() => {
+    if (dailyOverview?.total_points !== undefined && dailyOverview.total_points > 0) {
+      return dailyOverview.total_points;
+    }
+    return effectiveEvents.filter((p) => !p.deleted_at && ((p.tanggal && p.tanggal.slice(0, 10) === selectedDate) || !p.tanggal)).length;
+  }, [dailyOverview, effectiveEvents, selectedDate]);
+
+  const ongoingCount = useMemo(() => {
+    if (dailyOverview?.ongoing_points_count !== undefined && dailyOverview.ongoing_points_count > 0) {
+      return dailyOverview.ongoing_points_count;
+    }
+    return effectiveEvents.filter((p) => !p.deleted_at && normalizeProtestStatus(p.status) === "ongoing").length;
+  }, [dailyOverview, effectiveEvents]);
+
+  const monitoringCount = useMemo(() => {
+    if (dailyOverview?.monitoring_points_count !== undefined && dailyOverview.monitoring_points_count > 0) {
+      return dailyOverview.monitoring_points_count;
+    }
+    return effectiveEvents.filter((p) => !p.deleted_at && normalizeProtestStatus(p.status) === "monitoring").length;
+  }, [dailyOverview, effectiveEvents]);
+
+  const scheduledCount = useMemo(() => {
+    if (dailyOverview?.scheduled_points_count !== undefined && dailyOverview.scheduled_points_count > 0) {
+      return dailyOverview.scheduled_points_count;
+    }
+    return effectiveEvents.filter((p) => !p.deleted_at && normalizeProtestStatus(p.status) === "scheduled").length;
+  }, [dailyOverview, effectiveEvents]);
 
   // Filter & Prioritize UNRAS events
   const prioritizedEvents = useMemo(() => {
-    let list = protestEvents.filter((p) => !p.deleted_at);
+    let list = effectiveEvents.filter((p) => !p.deleted_at);
 
     // Filter by status tab
     if (unrasStatusFilter === "all_active") {
-      list = list.filter((p) => ["ongoing", "monitoring", "scheduled"].includes(p.status));
+      list = list.filter((p) => ["ongoing", "monitoring", "scheduled"].includes(normalizeProtestStatus(p.status)));
     } else if (unrasStatusFilter === "today") {
-      list = list.filter((p) => p.tanggal === selectedDate);
+      list = list.filter((p) => (p.tanggal && p.tanggal.slice(0, 10) === selectedDate) || (p.event_datetime && p.event_datetime.slice(0, 10) === selectedDate) || !p.tanggal);
     } else if (unrasStatusFilter === "ongoing") {
-      list = list.filter((p) => p.status === "ongoing");
+      list = list.filter((p) => normalizeProtestStatus(p.status) === "ongoing");
     } else if (unrasStatusFilter === "monitoring") {
-      list = list.filter((p) => p.status === "monitoring");
+      list = list.filter((p) => normalizeProtestStatus(p.status) === "monitoring");
     } else if (unrasStatusFilter === "scheduled") {
-      list = list.filter((p) => p.status === "scheduled");
+      list = list.filter((p) => normalizeProtestStatus(p.status) === "scheduled");
     }
 
     // Filter by search query
@@ -185,8 +286,8 @@ export function UnrasPriorityPanel({
     };
 
     return list.sort((a, b) => {
-      const sA = statusWeight[a.status] || 0;
-      const sB = statusWeight[b.status] || 0;
+      const sA = statusWeight[normalizeProtestStatus(a.status)] || 0;
+      const sB = statusWeight[normalizeProtestStatus(b.status)] || 0;
       if (sA !== sB) return sB - sA;
 
       const uA = urgencyWeight[a.urgency] || 0;
@@ -196,12 +297,7 @@ export function UnrasPriorityPanel({
       // Recency
       return (b.tanggal || "").localeCompare(a.tanggal || "");
     });
-  }, [protestEvents, unrasStatusFilter, unrasSearchQuery, todayWib]);
-
-  const ongoingCount = useMemo(() => protestEvents.filter((p) => p.status === "ongoing").length, [protestEvents]);
-  const monitoringCount = useMemo(() => protestEvents.filter((p) => p.status === "monitoring").length, [protestEvents]);
-  const scheduledCount = useMemo(() => protestEvents.filter((p) => p.status === "scheduled").length, [protestEvents]);
-  const todayCount = useMemo(() => protestEvents.filter((p) => p.tanggal === todayWib).length, [protestEvents, todayWib]);
+  }, [effectiveEvents, unrasStatusFilter, unrasSearchQuery, selectedDate]);
 
   // Helper to split elements from string
   const getMassElements = (raw: string | null | undefined): string[] => {
@@ -293,7 +389,7 @@ export function UnrasPriorityPanel({
                 <input
                   type="date"
                   value={selectedDate}
-                  onChange={(e) => e.target.value && setSelectedDate(e.target.value)}
+                  onChange={(e) => e.target.value && handleDateChange(e.target.value)}
                   className="bg-transparent border border-white/10 rounded px-1.5 py-0.5 text-[11px] text-[#E2E8F0] font-mono cursor-pointer focus:outline-none focus:border-blue-500"
                 />
                 <button
@@ -306,11 +402,15 @@ export function UnrasPriorityPanel({
                 </button>
                 <button
                   type="button"
-                  onClick={() => fetchDailyOverview(selectedDate)}
+                  onClick={() => {
+                    fetchDailyOverview(selectedDate);
+                    fetchPanelEvents(selectedDate);
+                    onOperationalDateChange?.(selectedDate);
+                  }}
                   className="p-1 rounded-lg text-[#98A4B8] hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
                   title="Muat Ulang Situasi"
                 >
-                  <RefreshCw className={`w-3.5 h-3.5 ${loadingDailyOverview ? "animate-spin text-blue-400" : ""}`} />
+                  <RefreshCw className={`w-3.5 h-3.5 ${loadingDailyOverview || loadingPanelEvents ? "animate-spin text-blue-400" : ""}`} />
                 </button>
               </div>
             </div>

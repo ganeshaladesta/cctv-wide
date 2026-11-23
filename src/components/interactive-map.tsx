@@ -1042,13 +1042,14 @@ export default function InteractiveMap({
         continue;
       }
 
+      const isHeadquarters = off.office_type === "Kantor Pusat";
       if (officeRadiusDistance === -1) {
         // Concentric rings: 1km, 3km, 5km, 10km
         const concentric = [
-          { r: 1000, color: "#38BDF8", weight: 2, dash: "3, 3", opacity: 0.12, fill: "#0284C7" },
-          { r: 3000, color: "#0284C7", weight: 1.5, dash: "4, 4", opacity: 0.08, fill: "#0369A1" },
-          { r: 5000, color: "#0369A1", weight: 1, dash: "5, 5", opacity: 0.04, fill: "#1E3A8A" },
-          { r: 10000, color: "#1E3A8A", weight: 1, dash: "6, 6", opacity: 0.02, fill: "#0F172A" }
+          { r: 1000, color: isHeadquarters ? "#F59E0B" : isSelected ? "#38BDF8" : "#38BDF8", weight: 2, dash: "3, 3", opacity: isHeadquarters ? 0.16 : 0.12, fill: isHeadquarters ? "#D97706" : "#0284C7" },
+          { r: 3000, color: isHeadquarters ? "#D97706" : isSelected ? "#38BDF8" : "#0284C7", weight: 1.5, dash: "4, 4", opacity: isHeadquarters ? 0.11 : 0.08, fill: isHeadquarters ? "#B45309" : "#0369A1" },
+          { r: 5000, color: isHeadquarters ? "#B45309" : isSelected ? "#38BDF8" : "#0369A1", weight: 1, dash: "5, 5", opacity: isHeadquarters ? 0.06 : 0.04, fill: isHeadquarters ? "#92400E" : "#1E3A8A" },
+          { r: 10000, color: isHeadquarters ? "#92400E" : isSelected ? "#38BDF8" : "#1E3A8A", weight: 1, dash: "6, 6", opacity: isHeadquarters ? 0.03 : 0.02, fill: isHeadquarters ? "#78350F" : "#0F172A" }
         ];
 
         for (const ring of concentric) {
@@ -1067,11 +1068,11 @@ export default function InteractiveMap({
         // Single radius
         const circle = L.circle([off.latitude, off.longitude], {
           radius: officeRadiusDistance,
-          color: isSelected ? "#38BDF8" : "#0284C7",
-          weight: isSelected ? 2.5 : 1.5,
+          color: isHeadquarters ? "#F59E0B" : isSelected ? "#38BDF8" : "#0284C7",
+          weight: isSelected || isHeadquarters ? 2.5 : 1.5,
           dashArray: "4, 4",
-          fillColor: "#0284C7",
-          fillOpacity: isSelected ? 0.15 : 0.08,
+          fillColor: isHeadquarters ? "#D97706" : "#0284C7",
+          fillOpacity: isSelected ? 0.18 : isHeadquarters ? 0.12 : 0.08,
           interactive: false
         });
         group.addLayer(circle);
