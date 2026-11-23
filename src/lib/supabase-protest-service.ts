@@ -199,7 +199,7 @@ export async function queryProtestsFromSupabase(filters: ProtestFilterParams = {
     const startUtcIso = startWib.toISOString();
     const endUtcIso = endWib.toISOString();
 
-    query = query.or(`tanggal.eq.${dateWib},and(tanggal.is.null,event_datetime.gte.${startUtcIso},event_datetime.lt.${endUtcIso})`);
+    query = query.or(`tanggal.eq.${dateWib},tanggal.like.${dateWib}%,and(tanggal.is.null,event_datetime.gte.${startUtcIso},event_datetime.lt.${endUtcIso})`);
   }
 
   // Full-text search
@@ -825,7 +825,7 @@ export async function fetchDailySituationOverviewFromSupabase(dateStr: string): 
     .from("protests")
     .select("*")
     .is("deleted_at", null)
-    .or(`tanggal.eq.${cleanDate},and(tanggal.is.null,event_datetime.gte.${startUtcIso},event_datetime.lt.${endUtcIso})`);
+    .or(`tanggal.eq.${cleanDate},tanggal.like.${cleanDate}%,and(tanggal.is.null,event_datetime.gte.${startUtcIso},event_datetime.lt.${endUtcIso})`);
 
   if (error) {
     throw new Error(`Gagal memuat daily situation dari Supabase: ${error.message}`);

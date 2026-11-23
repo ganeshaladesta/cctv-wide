@@ -727,6 +727,7 @@ class ProtestDataStore {
 
         whereClauses.push(`(
           tanggal = ?
+          OR tanggal LIKE ?
           OR (
             (tanggal IS NULL OR trim(tanggal) = '')
             AND (
@@ -735,7 +736,7 @@ class ProtestDataStore {
             )
           )
         )`);
-        params.push(dateWib, startWibIso, endWibIso, startUtcIso, endUtcIso);
+        params.push(dateWib, `${dateWib}%`, startWibIso, endWibIso, startUtcIso, endUtcIso);
       } else {
         if (filters.date_from) {
           whereClauses.push("tanggal >= ?");
@@ -811,8 +812,8 @@ class ProtestDataStore {
       const endWibMs = startWibMs + 86400000;
 
       items = items.filter((e) => {
-        if (e.tanggal === dateWib) return true;
-        if (!e.tanggal && e.event_datetime) {
+        if (e.tanggal && (e.tanggal === dateWib || e.tanggal.slice(0, 10) === dateWib)) return true;
+        if (e.event_datetime) {
           const ms = new Date(e.event_datetime).getTime();
           return ms >= startWibMs && ms < endWibMs;
         }

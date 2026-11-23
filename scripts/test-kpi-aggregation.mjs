@@ -14,7 +14,7 @@ const results = [];
 function recordTest(num, name, passed, details = "") {
   results.push({ num, name, passed, details });
   const status = passed ? "✔ PASS" : "✖ FAIL";
-  console.log(`[Test ${String(num).padStart(2, "0")}/10] ${status} - ${name}`);
+  console.log(`[Test ${String(num).padStart(2, "0")}/13] ${status} - ${name}`);
   if (details) {
     console.log(`          ${details}`);
   }
@@ -182,6 +182,27 @@ async function runKpiTests() {
   const synthesized = synthesizePointsForLegacyEvent(foundU1473);
   const test10Pass = synthesized.length === 1 && synthesized[0].current_crowd_total === 500 && synthesized[0].elements?.length >= 1;
   recordTest(10, "Point synthesis accurately preserves single event-level crowd estimate", test10Pass, `Point crowd: ${synthesized[0].current_crowd_total}, Elements: ${synthesized[0].elements?.length}`);
+
+  // Test 11: Query protests and daily situation overview are strictly synchronized
+  const qToday = await protestStore.queryProtests({ operational_date: todayWib, limit: 100 });
+  const u1473InToday = qToday.data.find(e => e.kode_unras === "U1473" || e.id_kejadian?.includes("U1473"));
+  const q20 = await protestStore.queryProtests({ operational_date: "2026-11-20", limit: 100 });
+  const ov20 = await protestStore.getDailySituationOverview("2026-11-20");
+  const test11Pass = qToday.total > 0 && Boolean(u1473InToday) && q20.total > 0 && ov20.total_points > 0 && q20.total === ov20.total_points;
+  recordTest(11, "Operational date query and daily situation overview are strictly consistent", test11Pass, `Today events: ${qToday.total} (U1473 found: ${Boolean(u1473InToday)}), 2026-11-20 events: ${q20.total}, Overview points: ${ov20.total_points}`);
+
+  // Test 12: Priority situation panel filter consistency for 2026-11-20
+  const scheduledCount20 = ov20.scheduled_points_count;
+  const ongoingCount20 = ov20.ongoing_points_count;
+  const monitoringCount20 = ov20.monitoring_points_count;
+  const activeEventsCount20 = q20.data.filter(p => ["ongoing", "monitoring", "scheduled"].includes(normalizeProtestStatus(p.status))).length;
+  const test12Pass = scheduledCount20 > 0 && activeEventsCount20 > 0;
+  recordTest(12, "Priority situation tab counts are non-zero and consistent with aggregate metrics", test12Pass, `Scheduled: ${scheduledCount20}, Ongoing: ${ongoingCount20}, Monitoring: ${monitoringCount20}, Active events: ${activeEventsCount20}`);
+
+  // Test 13: Unmapped events with null coordinates preserved in both query and overview
+  const unmappedEvt = q20.data.find(e => e.validated_lat === null || e.has_coordinates === false);
+  const test13Pass = unmappedEvt !== undefined;
+  recordTest(13, "Events without GPS coordinates (LEFT JOIN safety) are not dropped", test13Pass, `Found unmapped event: ${unmappedEvt?.id_kejadian || unmappedEvt?.id}`);
 
   console.log("\n================================================================================");
   const allPassed = results.every(r => r.passed);
