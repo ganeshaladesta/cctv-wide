@@ -303,28 +303,31 @@
 
 .leaflet-popup-content {
   margin: 0 !important;
-  width: 320px !important;
-  max-width: calc(100vw - 32px) !important;
+  width: min(360px, calc(100vw - 40px)) !important;
+  max-width: 360px !important;
   box-sizing: border-box !important;
   overflow: hidden !important;
 }
 
 /* Leaflet UNRAS Protest Marker Popup Constraints */
 .scc-leaflet-protest-popup {
-  max-width: 320px !important;
+  width: min(360px, calc(100vw - 40px)) !important;
+  max-width: 360px !important;
 }
 
 .scc-leaflet-protest-popup .leaflet-popup-content-wrapper {
   box-sizing: border-box !important;
-  max-width: 320px !important;
+  width: 100% !important;
+  max-width: 360px !important;
   overflow: hidden !important;
 }
 
 .scc-leaflet-protest-popup .leaflet-popup-content {
   width: 100% !important;
-  max-width: 320px !important;
+  max-width: 360px !important;
   box-sizing: border-box !important;
   overflow: hidden !important;
+  margin: 0 !important;
 }
 
 .scc-leaflet-protest-popup .scc-protest-popup-root,
@@ -349,6 +352,24 @@
   white-space: normal !important;
   overflow-wrap: anywhere !important;
   text-align: center !important;
+}
+
+/* Mobile responsive constraints with safe 16px margins */
+@media (max-width: 640px) {
+  .scc-leaflet-protest-popup {
+    width: calc(100vw - 32px) !important;
+    max-width: calc(100vw - 32px) !important;
+  }
+  .scc-leaflet-protest-popup .leaflet-popup-content-wrapper {
+    max-width: calc(100vw - 32px) !important;
+  }
+  .scc-leaflet-protest-popup .leaflet-popup-content {
+    max-width: calc(100vw - 32px) !important;
+  }
+  .scc-leaflet-protest-popup .scc-protest-popup-root {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
 }
 
 .leaflet-popup-tip {

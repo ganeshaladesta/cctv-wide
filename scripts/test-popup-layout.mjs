@@ -26,14 +26,18 @@ const mapSource = fs.readFileSync("src/components/interactive-map.tsx", "utf-8")
 const cssSource = fs.readFileSync("src/app/globals.css", "utf-8");
 
 // TEST 1: Popup root container sizing and box-sizing
-runTest("Popup root container has width 100%, max-width 320px, and box-sizing", () => {
+runTest("Popup root container has width: min(360px, calc(100vw - 40px)), max-width 360px, and box-sizing", () => {
   assert.ok(
     mapSource.includes("scc-protest-popup-root"),
     "Popup root must have class scc-protest-popup-root"
   );
   assert.ok(
-    mapSource.includes('style="width: 100%; max-width: 320px; box-sizing: border-box;"'),
-    "Popup root inline style must enforce width: 100%, max-width: 320px, and box-sizing"
+    mapSource.includes('width: min(360px, calc(100vw - 40px))'),
+    "Popup root inline style must enforce width: min(360px, calc(100vw - 40px))"
+  );
+  assert.ok(
+    mapSource.includes('max-width: 360px'),
+    "Popup root must enforce max-width: 360px"
   );
   assert.ok(
     mapSource.includes("overflow-hidden"),
@@ -125,12 +129,12 @@ runTest("src/app/globals.css includes .scc-leaflet-protest-popup constraint rule
 // TEST 7: Both buttons share consistent height, padding, and alignment
 runTest("Both buttons share identical padding, font size, and rounded corners", () => {
   assert.ok(
-    mapSource.includes("popup-btn-geoint w-full min-w-0 max-w-full py-2 px-2 rounded-xl"),
-    "GeoINT button has py-2 px-2 rounded-xl"
+    mapSource.includes("popup-btn-geoint w-full min-w-0 max-w-full py-2 px-2.5 rounded-xl"),
+    "GeoINT button has py-2 px-2.5 rounded-xl"
   );
   assert.ok(
-    mapSource.includes("popup-btn-pantau w-full min-w-0 max-w-full py-2 px-2 rounded-xl"),
-    "Pantau button has py-2 px-2 rounded-xl"
+    mapSource.includes("popup-btn-pantau w-full min-w-0 max-w-full py-2 px-2.5 rounded-xl"),
+    "Pantau button has py-2 px-2.5 rounded-xl"
   );
 });
 
