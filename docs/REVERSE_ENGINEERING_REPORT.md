@@ -1,6 +1,6 @@
 # Reverse Engineering Report: `atcsindonesia.com` ("Matadewa")
 
-**Project:** PANTAU NUSANTARA — Indonesia Public CCTV Aggregator  
+**Project:** SCC EAGLE EYES — Indonesia Public CCTV Aggregator  
 **Author:** Developed by Ganesha Ladesta  
 **Phase:** Phase 1 — Black-Box Reverse Engineering & Technical Ecosystem Investigation  
 **Target Reference:** `https://atcsindonesia.com/`  
@@ -17,7 +17,7 @@ Key findings:
 2. **Dataset Scale**: `GET /api/cctv` publicly serves a **15.35 MB JSON payload** containing **24,472 camera records** (`21,970` live, `2,485` offline, `17` undefined) across **614 distinct source identifiers** and **421 regional slugs**, covering all **38 Indonesian provinces** (plus 898 non-Indonesian test/international feeds such as `london-tfl` and `singapore-lta` filtered out on the frontend).
 3. **Hybrid Seed + Live API Delivery**: To reduce initial load latency, the client fetches an AES-CBC encrypted seed manifest (`/api/cctv/seed/manifest`) and 5 progressive shards (`/api/cctv/seed/shard/0..4`), decrypts them in the browser using a public key embedded in `worker-entry-CxX8Iqee.js`, caches per-provider camera arrays in `localStorage` (`cctv_cache_<provider>`), and refreshes from `/api/cctv?limit=all` in the background.
 4. **Crowdsourced Health Monitoring**: In addition to server-side multi-round cron audits (documented inside each camera's `auditComment` field), the browser video player actively reports stream failures (after a 30-second playback timeout) and recoveries via `POST /api/cctv/[id]/status`.
-5. **Artificial Paywalls & Adware on Reference Site**: `atcsindonesia.com` restricts free users to **3 simultaneous cameras** in Multi-View, enforces a **30-minute daily watch limit** via `localStorage` (`matadewa_watch_time_minutes_YYYY-MM-DD`), hides 1,188 Jakarta BaliTower cameras behind an admin/secret key (`balitower`), and injects aggressive popunder ad scripts (`omg10.com`, `n6wxm.com/vignette.min.js`) alongside a Rp 30,000/month Midtrans paywall. **PANTAU NUSANTARA** will eliminate all paywalls, watch-time limits, and adware while remaining 100% free and zero-cost to host.
+5. **Artificial Paywalls & Adware on Reference Site**: `atcsindonesia.com` restricts free users to **3 simultaneous cameras** in Multi-View, enforces a **30-minute daily watch limit** via `localStorage` (`matadewa_watch_time_minutes_YYYY-MM-DD`), hides 1,188 Jakarta BaliTower cameras behind an admin/secret key (`balitower`), and injects aggressive popunder ad scripts (`omg10.com`, `n6wxm.com/vignette.min.js`) alongside a Rp 30,000/month Midtrans paywall. **SCC EAGLE EYES** will eliminate all paywalls, watch-time limits, and adware while remaining 100% free and zero-cost to host.
 
 ---
 
@@ -204,9 +204,9 @@ In accordance with strict black-box reverse engineering methodology, findings ar
 
 ---
 
-## 5. How PANTAU NUSANTARA Improves Upon the Reference Platform
+## 5. How SCC EAGLE EYES Improves Upon the Reference Platform
 
-| Feature / Aspect | `atcsindonesia.com` (Reference) | **PANTAU NUSANTARA** (Target) |
+| Feature / Aspect | `atcsindonesia.com` (Reference) | **SCC EAGLE EYES** (Target) |
 |---|---|---|
 | **Cost to Users** | Freemium paywall (Rp 30,000/mo Pro tier) | **100% Free Forever** (No login or paywall) |
 | **Daily Watch Time Limit** | 30 minutes/day limit for free users | **Unlimited watch time** |
