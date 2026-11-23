@@ -5,6 +5,8 @@
 
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
+import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { NextRequest } from "next/server";
 import { POST } from "../src/app/api/integrations/unras/sync/route.ts";
 import {
@@ -43,6 +45,17 @@ async function findRecordByIdKejadian(idKejadian) {
 }
 
 async function runTestSuite() {
+  const dbPath = path.join(process.cwd(), "data", "pantau-nusantara.sqlite");
+  try {
+    const testDb = new DatabaseSync(dbPath);
+    testDb.exec("DELETE FROM protests WHERE id_kejadian LIKE 'KEJ-TEST-%' OR id_kejadian LIKE 'KEJ-BATCH-DEDUP-%' OR id_kejadian LIKE 'KEJ-FALLBACK-%' OR id_kejadian LIKE 'TEST-%'");
+    testDb.exec("DELETE FROM unras_identity_registry WHERE canonical_id LIKE 'KEJ-TEST-%' OR canonical_id LIKE 'KEJ-BATCH-DEDUP-%' OR canonical_id LIKE 'KEJ-FALLBACK-%' OR canonical_id LIKE 'TEST-%'");
+    testDb.exec("DELETE FROM unras_review_queue WHERE matched_canonical_id LIKE 'KEJ-TEST-%' OR matched_canonical_id LIKE 'KEJ-BATCH-DEDUP-%' OR matched_canonical_id LIKE 'TEST-%'");
+    testDb.close();
+  } catch (err) {
+    console.warn("Cleanup warning:", err);
+  }
+
   console.log("================================================================================");
   console.log("=== SCC - EAGLE EYES: POWER AUTOMATE INTEGRATION TEST SUITE (18 CASES)      ===");
   console.log("================================================================================\n");
@@ -211,23 +224,24 @@ async function runTestSuite() {
   // Test 5: Duplicate source records in batch (must deduplicate)
   // ---------------------------------------------------------------------------
   try {
-    const dedupId = `KEJ-BATCH-DEDUP-${Date.now()}`;
+    const runTag = Date.now();
+    const dedupId = `KEJ-BATCH-DEDUP-${runTag}`;
     const payload = {
       events: [
         {
           id_kejadian: dedupId,
-          kode_unras: "U1005",
+          kode_unras: `U1005-${runTag}`,
           tanggal_kejadian: validEventIso,
-          tuntutan: "Versi Aksi Pertama",
-          lokasi: "Monas",
+          tuntutan: `Isu Khusus Batch Dedup Pertama ${runTag}`,
+          lokasi: `Kawasan Khusus Pengujian A ${runTag}`,
           waktu: "08:00"
         },
         {
           id_kejadian: dedupId,
-          kode_unras: "U1005",
+          kode_unras: `U1005-${runTag}`,
           tanggal_kejadian: validEventIso,
-          tuntutan: "Versi Aksi Terkini (Revisi)",
-          lokasi: "Monas Pintu Barat",
+          tuntutan: `Isu Khusus Batch Dedup Kedua ${runTag}`,
+          lokasi: `Kawasan Khusus Pengujian B ${runTag}`,
           waktu: "09:00"
         }
       ]
@@ -237,7 +251,7 @@ async function runTestSuite() {
     assert.equal(res.summary.skipped, 1);
     const record = await findRecordByIdKejadian(dedupId);
     assert.ok(record);
-    assert.equal(record.isu_tuntutan, "Versi Aksi Pertama");
+    assert.equal(record.isu_tuntutan, `Isu Khusus Batch Dedup Pertama ${runTag}`);
     recordTest(5, "Duplicate source records in batch deduplicated", true, "First occurrence preserved, subsequent duplicate skipped");
   } catch (err) {
     recordTest(5, "Duplicate source records in batch deduplicated", false, err.message);
@@ -496,8 +510,8 @@ async function runTestSuite() {
     assert.equal(finalRecord.validated_lng, 107.6186, "Operator longitude must be preserved");
     assert.equal(finalRecord.actual_crowd_size, 1500, "Operator crowd estimate must be preserved");
     assert.equal(finalRecord.situation_summary, "Laporan Operator Lapangan: Massa menduduki jalur utama");
-    // Source field is updated
-    assert.equal(finalRecord.isu_tuntutan, "Aksi Demo Buruh (Update Jam 11)");
+    // Strict INSERT-ONLY / SKIP policy: existing records are NEVER updated or overwritten
+    assert.equal(finalRecord.isu_tuntutan, "Aksi Demo Buruh", "Strict INSERT-ONLY: existing record must never be overwritten");
     recordTest(15, "Existing operator-managed fields preserved on update", true, "Operator status, coordinates, and notes 100% preserved");
   } catch (err) {
     recordTest(15, "Existing operator-managed fields preserved on update", false, err.message);
@@ -586,10 +600,10 @@ async function runTestSuite() {
 
   console.log("\n================================================================================");
   const passedCount = results.filter(r => r.passed).length;
-  console.log(`=== HASIL AKHIR: ${passedCount}/18 PENGUJIAN BERHASIL (PASS)                         ===`);
+  console.log(`=== HASIL AKHIR: ${passedCount}/${results.length} PENGUJIAN BERHASIL (PASS)                         ===`);
   console.log("================================================================================");
 
-  if (passedCount !== 18) {
+  if (passedCount !== results.length) {
     process.exit(1);
   }
 }

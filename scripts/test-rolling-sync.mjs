@@ -19,6 +19,8 @@
  */
 
 import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
+import path from "node:path";
 import {
   calculateRolling7DayWindow,
   calculateSameDayWindow,
@@ -40,6 +42,17 @@ console.log("=== SCC - EAGLE EYES: Rolling 7-Day Sync Engine Test Suite         
 console.log("================================================================================\n");
 
 async function runTests() {
+  const dbPath = path.join(process.cwd(), "data", "pantau-nusantara.sqlite");
+  try {
+    const testDb = new DatabaseSync(dbPath);
+    testDb.exec("DELETE FROM protests WHERE id_kejadian LIKE 'TEST-%' OR id_kejadian LIKE 'KEJ-MULTI-POINT-%' OR lokasi LIKE 'Lokasi Unik%' OR lokasi LIKE '%Kantor ESDM Sektor%' OR lokasi LIKE '%Gedung DPR Parlemen%'");
+    testDb.exec("DELETE FROM unras_identity_registry WHERE canonical_id LIKE 'TEST-%' OR canonical_id LIKE 'KEJ-MULTI-POINT-%' OR canonical_id LIKE 'KEJ-20261120-%'");
+    testDb.exec("DELETE FROM unras_review_queue WHERE matched_canonical_id LIKE 'TEST-%' OR matched_canonical_id LIKE 'KEJ-MULTI-POINT-%'");
+    testDb.close();
+  } catch (err) {
+    console.warn("Cleanup warning:", err);
+  }
+
   const runId = Date.now();
   // Reference date: 23 November 2026 12:00 WIB (05:00 UTC)
   const refDate = new Date("2026-11-23T05:00:00.000Z");
@@ -98,8 +111,8 @@ async function runTests() {
         "KODE_UNRAS": `RW-${runId}`,
         "WAKTU DAN TGL KEJADIAN ISO": eventMidISO,
         "TANGGAL": "2026-11-20",
-        "LOKASI": "Kawasan Bundaran HI",
-        "ISU": "Aksi Damai 20 November",
+        "LOKASI": `Titik Bundaran Uji ${runId}`,
+        "ISU": `Tuntutan Damai Khusus Uji ${runId}`,
         "STATUS": "scheduled"
       }
     ]
@@ -127,8 +140,8 @@ async function runTests() {
         "KODE_UNRAS": `TB-${runId}`,
         "WAKTU DAN TGL KEJADIAN ISO": exactStartISO,
         "TANGGAL": "2026-11-17",
-        "LOKASI": "Titik Batas Awal Tengah Malam 17 Nov",
-        "ISU": "Uji batas awal tepat 17 Nov 00:00 WIB",
+        "LOKASI": `Titik Batas Awal Tengah Malam 17 Nov ${runId}`,
+        "ISU": `Uji batas awal tepat 17 Nov 00:00 WIB ${runId}`,
         "STATUS": "scheduled"
       }
     ]
@@ -155,8 +168,8 @@ async function runTests() {
         "KODE_UNRAS": `TB-END-${runId}`,
         "WAKTU DAN TGL KEJADIAN ISO": exactEndISO,
         "TANGGAL": "2026-11-24",
-        "LOKASI": "Titik Batas Akhir Besok",
-        "ISU": "Uji eksklusi batas akhir tepat 24 Nov 00:00 WIB",
+        "LOKASI": `Titik Batas Akhir Besok ${runId}`,
+        "ISU": `Uji eksklusi batas akhir tepat 24 Nov 00:00 WIB ${runId}`,
         "STATUS": "scheduled"
       }
     ]
@@ -193,7 +206,7 @@ async function runTests() {
   assert.equal(resSkipExisting.summary.skipped, 1, "Existing record MUST be counted as skipped");
 
   const storedEvent = await protestStore.getProtestById(withinId);
-  assert.equal(storedEvent.lokasi, "Kawasan Bundaran HI", "Existing record must not be modified");
+  assert.equal(storedEvent.lokasi, `Titik Bundaran Uji ${runId}`, "Existing record must not be modified");
   console.log("  ✔ Rekor yang sudah ada berhasil dilewati (SKIPPED) tanpa update.");
 
   // ---------------------------------------------------------------------------
@@ -212,8 +225,8 @@ async function runTests() {
         "KODE_UNRAS": `NEW-${runId}`,
         "WAKTU DAN TGL KEJADIAN ISO": "2026-11-21T09:00:00+07:00",
         "TANGGAL": "2026-11-21",
-        "LOKASI": "Depan Gedung DPR RI",
-        "ISU": "Aksi Advokasi Rakyat 21 Nov"
+        "LOKASI": `Depan Gedung DPR RI ${runId}`,
+        "ISU": `Aksi Advokasi Rakyat 21 Nov ${runId}`
       }
     ]
   };
@@ -224,7 +237,7 @@ async function runTests() {
 
   const storedNew = await protestStore.getProtestById(newId);
   assert.ok(storedNew, "New record must exist in store");
-  assert.equal(storedNew.lokasi, "Depan Gedung DPR RI");
+  assert.equal(storedNew.lokasi, `Depan Gedung DPR RI ${runId}`);
   console.log("  ✔ ID kejadian baru BERHASIL disimpan ke database.");
 
   // ---------------------------------------------------------------------------
@@ -243,16 +256,16 @@ async function runTests() {
         "KODE_UNRAS": `DUP-BATCH-${runId}`,
         "WAKTU DAN TGL KEJADIAN ISO": "2026-11-22T08:00:00+07:00",
         "TANGGAL": "2026-11-22",
-        "LOKASI": "Lokasi Baris Pertama",
-        "ISU": "Isu Baris Pertama"
+        "LOKASI": `Lokasi Baris Pertama ${runId}`,
+        "ISU": `Isu Baris Pertama ${runId}`
       },
       {
         "ID KEJADIAN": dupBatchId,
         "KODE_UNRAS": `DUP-BATCH-${runId}`,
         "WAKTU DAN TGL KEJADIAN ISO": "2026-11-22T08:30:00+07:00",
         "TANGGAL": "2026-11-22",
-        "LOKASI": "Lokasi Baris Kedua Duplikat",
-        "ISU": "Isu Baris Kedua Duplikat"
+        "LOKASI": `Lokasi Baris Kedua Duplikat ${runId}`,
+        "ISU": `Isu Baris Kedua Duplikat ${runId}`
       }
     ]
   };
@@ -263,7 +276,7 @@ async function runTests() {
   assert.equal(resInBatchDup.summary.skipped, 1, "Second occurrence must be skipped");
 
   const storedDup = await protestStore.getProtestById(dupBatchId);
-  assert.equal(storedDup.lokasi, "Lokasi Baris Pertama", "First occurrence data must be preserved");
+  assert.equal(storedDup.lokasi, `Lokasi Baris Pertama ${runId}`, "First occurrence data must be preserved");
   console.log("  ✔ Baris pertama diproses, baris kedua duplikat di dalam batch berhasil dilewati.");
 
   // ---------------------------------------------------------------------------
@@ -306,16 +319,16 @@ async function runTests() {
         "KODE_UNRAS": sharedKode,
         "WAKTU DAN TGL KEJADIAN ISO": "2026-11-21T10:00:00+07:00",
         "TANGGAL": "2026-11-21",
-        "LOKASI": "Titik Kumpul Monas",
-        "ISU": "Aksi Multi Titik - Titik A"
+        "LOKASI": `Titik Kumpul Monas ${runId}`,
+        "ISU": `Aksi Multi Titik - Titik A ${runId}`
       },
       {
         "ID KEJADIAN": sharedIdB,
         "KODE_UNRAS": sharedKode,
         "WAKTU DAN TGL KEJADIAN ISO": "2026-11-21T11:00:00+07:00",
         "TANGGAL": "2026-11-21",
-        "LOKASI": "Sasaran Aksi Gedung BI",
-        "ISU": "Aksi Multi Titik - Titik B"
+        "LOKASI": `Sasaran Aksi Gedung BI ${runId}`,
+        "ISU": `Aksi Multi Titik - Titik B ${runId}`
       }
     ]
   };
@@ -347,8 +360,8 @@ async function runTests() {
         "KODE_UNRAS": `OP-${runId}`,
         "WAKTU DAN TGL KEJADIAN ISO": "2026-11-22T13:00:00+07:00",
         "TANGGAL": "2026-11-22",
-        "LOKASI": "Patung Arjuna Wijaya",
-        "ISU": "Isu Awal Sumber Excel",
+        "LOKASI": `Patung Arjuna Wijaya ${runId}`,
+        "ISU": `Isu Awal Sumber Excel ${runId}`,
         "JUMLAH MASSA": 150
       }
     ]
@@ -383,8 +396,8 @@ async function runTests() {
         "KODE_UNRAS": `OP-${runId}`,
         "WAKTU DAN TGL KEJADIAN ISO": "2026-11-22T13:00:00+07:00",
         "TANGGAL": "2026-11-22",
-        "LOKASI": "Nama Lokasi Excel Yang Mau Menimpa",
-        "ISU": "Isu Excel Yang Mau Menimpa",
+        "LOKASI": `Nama Lokasi Excel Yang Mau Menimpa ${runId}`,
+        "ISU": `Isu Excel Yang Mau Menimpa ${runId}`,
         "JUMLAH MASSA": 9999
       }
     ]
@@ -405,8 +418,8 @@ async function runTests() {
   assert.equal(postSyncRecord.editorial_final, "FINAL_REDAKSI_OPERATOR");
   assert.equal(postSyncRecord.validated_lat, -6.1754);
   assert.equal(postSyncRecord.validated_lng, 106.8272);
-  assert.equal(postSyncRecord.lokasi, "Patung Arjuna Wijaya", "Original location must not be overwritten");
-  assert.equal(postSyncRecord.isu_tuntutan, "Isu Awal Sumber Excel", "Original issue must not be overwritten");
+  assert.equal(postSyncRecord.lokasi, `Patung Arjuna Wijaya ${runId}`, "Original location must not be overwritten");
+  assert.equal(postSyncRecord.isu_tuntutan, `Isu Awal Sumber Excel ${runId}`, "Original issue must not be overwritten");
   console.log("  ✔ CRITICAL PASS: Rekor yang sudah ada 100% byte-for-byte identik dan tidak tersentuh sinkronisasi.");
 
   // ---------------------------------------------------------------------------
@@ -422,11 +435,11 @@ async function runTests() {
     events: [
       {
         "ID KEJADIAN": concurrentId,
-        "KODE_UNRAS": "CONC-010",
+        "KODE_UNRAS": `CONC-${runId}`,
         "WAKTU DAN TGL KEJADIAN ISO": "2026-11-22T14:00:00+07:00",
         "TANGGAL": "2026-11-22",
-        "LOKASI": "Lokasi Uji Konkurensi",
-        "ISU": "Isu Uji Konkurensi"
+        "LOKASI": `Lokasi Uji Konkurensi ${runId}`,
+        "ISU": `Isu Uji Konkurensi ${runId}`
       }
     ]
   };
@@ -469,15 +482,15 @@ async function runTests() {
         "ID KEJADIAN": pastOutsideId,
         "WAKTU DAN TGL KEJADIAN ISO": pastOutsideISO,
         "TANGGAL": "2026-11-15",
-        "LOKASI": "Lokasi 8 Hari Lalu",
-        "ISU": "Aksi 8 Hari Lalu"
+        "LOKASI": `Lokasi 8 Hari Lalu ${runId}`,
+        "ISU": `Aksi 8 Hari Lalu ${runId}`
       },
       {
         "ID KEJADIAN": futureOutsideId,
         "WAKTU DAN TGL KEJADIAN ISO": futureOutsideISO,
         "TANGGAL": "2026-11-25",
-        "LOKASI": "Lokasi Masa Depan 25 Nov",
-        "ISU": "Aksi Masa Depan 25 Nov"
+        "LOKASI": `Lokasi Masa Depan 25 Nov ${runId}`,
+        "ISU": `Aksi Masa Depan 25 Nov ${runId}`
       }
     ]
   };
@@ -646,18 +659,18 @@ async function runTests() {
         "ID UNRAS": "", // Empty in Excel
         "WAKTU DAN TGL KEJADIAN ISO": malformedTestIso,
         "TANGGAL": "2026-11-20",
-        "LOKASI": `Lokasi Unik ESDM ${runId}`,
-        "ISU": `Tuntutan Tambang Sektor A ${runId}`,
-        "ORGANISASI": "Aliansi Peduli Tambang"
+        "LOKASI": `Kantor ESDM Sektor ${runId}`,
+        "ISU": `Penolakan Izin Tambang ${runId}`,
+        "ORGANISASI": `Aliansi Peduli Tambang ${runId}`
       },
       {
         "ID KEJADIAN": "KEJ-20261123-", // Same malformed ID from Power Automate on different row
         "ID UNRAS": "", // Empty in Excel
         "WAKTU DAN TGL KEJADIAN ISO": malformedTestIso,
         "TANGGAL": "2026-11-20",
-        "LOKASI": `Lokasi Unik DPR ${runId}`,
-        "ISU": `Tuntutan Reformasi Hukum ${runId}`,
-        "ORGANISASI": "Front Aksi Bersama"
+        "LOKASI": `Gedung DPR Parlemen ${runId}`,
+        "ISU": `Aspirasi Reformasi Hukum ${runId}`,
+        "ORGANISASI": `Front Aksi Bersama ${runId}`
       }
     ]
   };
@@ -669,8 +682,8 @@ async function runTests() {
   assert.equal(resMalformed.summary.updated, 0);
 
   // Check generated records in database
-  const expectedId1 = generateDeterministicFallbackId("2026-11-20", `Lokasi Unik ESDM ${runId}`, "Aliansi Peduli Tambang", `Tuntutan Tambang Sektor A ${runId}`);
-  const expectedId2 = generateDeterministicFallbackId("2026-11-20", `Lokasi Unik DPR ${runId}`, "Front Aksi Bersama", `Tuntutan Reformasi Hukum ${runId}`);
+  const expectedId1 = generateDeterministicFallbackId("2026-11-20", `Kantor ESDM Sektor ${runId}`, `Aliansi Peduli Tambang ${runId}`, `Penolakan Izin Tambang ${runId}`);
+  const expectedId2 = generateDeterministicFallbackId("2026-11-20", `Gedung DPR Parlemen ${runId}`, `Front Aksi Bersama ${runId}`, `Aspirasi Reformasi Hukum ${runId}`);
 
   assert.ok(expectedId1 && expectedId2);
   const rec1 = await protestStore.getProtestById(expectedId1);

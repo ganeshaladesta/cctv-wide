@@ -32,8 +32,16 @@ import {
   ProtestPoint,
   ProtestElement,
   ProtestCrowdObservation,
-  DailyUnrasSituationOverview
+  DailyUnrasSituationOverview,
+  IdentityRegistryEntry,
+  ReviewQueueItem
 } from "@/lib/types/protests";
+import {
+  generateExactFingerprint,
+  generateSemanticFingerprint,
+  generateSourceKey,
+  ExistingProtestComparisonItem
+} from "./unras-identity-registry";
 import { getDataStore } from "@/lib/data-store";
 import { Camera } from "@/lib/types";
 import {
@@ -296,6 +304,8 @@ class ProtestDataStore {
   private memoryElements = new Map<string, ProtestElement>();
   private memoryObservations = new Map<string, ProtestCrowdObservation>();
   private memorySyncLogs: ProtestSyncLog[] = [];
+  private memoryIdentityRegistry = new Map<string, IdentityRegistryEntry>();
+  private memoryReviewQueue = new Map<string, ReviewQueueItem>();
 
   constructor() {
     this.init();
@@ -474,6 +484,47 @@ class ProtestDataStore {
         }
       } catch (errMigration008) {
         console.warn("[ProtestDataStore] Migration 008 init notice:", errMigration008);
+      }
+
+      // Migration 010 persistent identity registry & review queue self-healing
+      try {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS unras_identity_registry (
+            id TEXT PRIMARY KEY,
+            canonical_id TEXT NOT NULL,
+            identity_type TEXT NOT NULL,
+            identity_key TEXT NOT NULL UNIQUE,
+            event_date TEXT NOT NULL,
+            confidence TEXT NOT NULL DEFAULT 'confirmed',
+            metadata TEXT DEFAULT '{}',
+            created_at TEXT NOT NULL
+          );
+          CREATE UNIQUE INDEX IF NOT EXISTS idx_unras_identity_key ON unras_identity_registry(identity_key);
+          CREATE INDEX IF NOT EXISTS idx_unras_identity_canonical ON unras_identity_registry(canonical_id);
+          CREATE INDEX IF NOT EXISTS idx_unras_identity_date ON unras_identity_registry(event_date);
+
+          CREATE TABLE IF NOT EXISTS unras_review_queue (
+            id TEXT PRIMARY KEY,
+            source_row_hash TEXT NOT NULL,
+            tanggal TEXT NOT NULL,
+            waktu TEXT,
+            lokasi TEXT NOT NULL,
+            organisasi_kelompok TEXT,
+            isu_tuntutan TEXT NOT NULL,
+            raw_payload TEXT DEFAULT '{}',
+            ambiguity_reason TEXT NOT NULL,
+            matched_canonical_id TEXT,
+            similarity_score REAL,
+            status TEXT NOT NULL DEFAULT 'pending_review',
+            created_at TEXT NOT NULL,
+            reviewed_at TEXT,
+            reviewed_by TEXT
+          );
+          CREATE INDEX IF NOT EXISTS idx_unras_review_queue_date ON unras_review_queue(tanggal);
+          CREATE INDEX IF NOT EXISTS idx_unras_review_queue_status ON unras_review_queue(status);
+        `);
+      } catch (errMigration010) {
+        console.warn("[ProtestDataStore] Migration 010 init notice:", errMigration010);
       }
 
       // Only seed dummy data if explicitly enabled via SEED_DUMMY_DATA=true
@@ -2113,6 +2164,61 @@ class ProtestDataStore {
           created++;
           const tgl = rec.tanggal || (rec.event_datetime ? rec.event_datetime.slice(0, 10) : "unknown");
           insertedByDate[tgl] = (insertedByDate[tgl] || 0) + 1;
+
+          // Register canonical identity and fingerprints in registry
+          const fpExact = generateExactFingerprint(tgl, rec.lokasi, rec.organisasi_kelompok, rec.isu_tuntutan);
+          const fpSem = generateSemanticFingerprint(tgl, rec.organisasi_kelompok, rec.isu_tuntutan);
+          const srcKey = generateSourceKey(rec.kode_unras, rec.lokasi);
+
+          const idEntries: IdentityRegistryEntry[] = [
+            {
+              id: crypto.randomUUID(),
+              canonical_id: rec.id_kejadian,
+              identity_type: "alias",
+              identity_key: `ID:${rec.id_kejadian}`,
+              event_date: tgl,
+              confidence: "confirmed"
+            },
+            {
+              id: crypto.randomUUID(),
+              canonical_id: rec.id_kejadian,
+              identity_type: "fingerprint_exact",
+              identity_key: fpExact,
+              event_date: tgl,
+              confidence: "confirmed"
+            }
+          ];
+          if (fpSem) {
+            idEntries.push({
+              id: crypto.randomUUID(),
+              canonical_id: rec.id_kejadian,
+              identity_type: "fingerprint_semantic",
+              identity_key: fpSem,
+              event_date: tgl,
+              confidence: "confirmed"
+            });
+          }
+          if (srcKey) {
+            idEntries.push({
+              id: crypto.randomUUID(),
+              canonical_id: rec.id_kejadian,
+              identity_type: "source_id",
+              identity_key: srcKey,
+              event_date: tgl,
+              confidence: "confirmed"
+            });
+          }
+
+          const idStmt = this.db.prepare(`
+            INSERT OR IGNORE INTO unras_identity_registry
+            (id, canonical_id, identity_type, identity_key, event_date, confidence, metadata, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          `);
+          for (const ie of idEntries) {
+            try {
+              idStmt.run(ie.id, ie.canonical_id, ie.identity_type, ie.identity_key, ie.event_date, ie.confidence, "{}", now);
+            } catch {}
+          }
         } catch (insertErr: any) {
           const msg = String(insertErr?.message || "");
           if (msg.includes("UNIQUE constraint failed") || msg.includes("duplicate") || msg.includes("conflict")) {
@@ -2126,6 +2232,47 @@ class ProtestDataStore {
         created++;
         const tgl = rec.tanggal || (rec.event_datetime ? rec.event_datetime.slice(0, 10) : "unknown");
         insertedByDate[tgl] = (insertedByDate[tgl] || 0) + 1;
+
+        const fpExact = generateExactFingerprint(tgl, rec.lokasi, rec.organisasi_kelompok, rec.isu_tuntutan);
+        const fpSem = generateSemanticFingerprint(tgl, rec.organisasi_kelompok, rec.isu_tuntutan);
+        const srcKey = generateSourceKey(rec.kode_unras, rec.lokasi);
+
+        this.memoryIdentityRegistry.set(`ID:${rec.id_kejadian}`, {
+          id: crypto.randomUUID(),
+          canonical_id: rec.id_kejadian,
+          identity_type: "alias",
+          identity_key: `ID:${rec.id_kejadian}`,
+          event_date: tgl,
+          confidence: "confirmed"
+        });
+        this.memoryIdentityRegistry.set(fpExact, {
+          id: crypto.randomUUID(),
+          canonical_id: rec.id_kejadian,
+          identity_type: "fingerprint_exact",
+          identity_key: fpExact,
+          event_date: tgl,
+          confidence: "confirmed"
+        });
+        if (fpSem) {
+          this.memoryIdentityRegistry.set(fpSem, {
+            id: crypto.randomUUID(),
+            canonical_id: rec.id_kejadian,
+            identity_type: "fingerprint_semantic",
+            identity_key: fpSem,
+            event_date: tgl,
+            confidence: "confirmed"
+          });
+        }
+        if (srcKey) {
+          this.memoryIdentityRegistry.set(srcKey, {
+            id: crypto.randomUUID(),
+            canonical_id: rec.id_kejadian,
+            identity_type: "source_id",
+            identity_key: srcKey,
+            event_date: tgl,
+            confidence: "confirmed"
+          });
+        }
       }
     }
 
@@ -2136,6 +2283,157 @@ class ProtestDataStore {
       skipped,
       insertedByDate
     };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Identity Registry & Review Queue
+  // ---------------------------------------------------------------------------
+
+  async getAllIdentityKeys(): Promise<Map<string, string>> {
+    const map = new Map<string, string>();
+    if (this.db) {
+      try {
+        const rows = this.db.prepare("SELECT identity_key, canonical_id FROM unras_identity_registry").all() as Array<{ identity_key: string; canonical_id: string }>;
+        for (const r of rows) {
+          map.set(r.identity_key, r.canonical_id);
+        }
+      } catch (err) {
+        console.warn("[ProtestDataStore] getAllIdentityKeys error:", err);
+      }
+    } else {
+      for (const [key, entry] of this.memoryIdentityRegistry.entries()) {
+        map.set(key, entry.canonical_id);
+      }
+    }
+    return map;
+  }
+
+  async getProtestsByDate(dateStr: string): Promise<ExistingProtestComparisonItem[]> {
+    if (this.db) {
+      try {
+        const rows = this.db.prepare(`
+          SELECT id, id_kejadian, kode_unras, tanggal, lokasi, organisasi_kelompok, isu_tuntutan, created_at
+          FROM protests
+          WHERE tanggal = ? AND deleted_at IS NULL
+        `).all(dateStr) as unknown as ExistingProtestComparisonItem[];
+        return rows;
+      } catch (err) {
+        console.warn("[ProtestDataStore] getProtestsByDate error:", err);
+        return [];
+      }
+    } else {
+      const items: ExistingProtestComparisonItem[] = [];
+      for (const p of this.memoryEvents.values()) {
+        if (p.tanggal === dateStr && !p.deleted_at) {
+          items.push({
+            id: p.id,
+            id_kejadian: p.id_kejadian,
+            kode_unras: p.kode_unras,
+            tanggal: p.tanggal,
+            lokasi: p.lokasi,
+            organisasi_kelompok: p.organisasi_kelompok,
+            isu_tuntutan: p.isu_tuntutan,
+            created_at: p.created_at
+          });
+        }
+      }
+      return items;
+    }
+  }
+
+  async registerIdentityEntries(entries: IdentityRegistryEntry[]): Promise<void> {
+    const now = new Date().toISOString();
+    if (this.db) {
+      try {
+        const stmt = this.db.prepare(`
+          INSERT OR IGNORE INTO unras_identity_registry
+          (id, canonical_id, identity_type, identity_key, event_date, confidence, metadata, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        for (const entry of entries) {
+          stmt.run(
+            entry.id || crypto.randomUUID(),
+            entry.canonical_id,
+            entry.identity_type,
+            entry.identity_key,
+            entry.event_date,
+            entry.confidence || "confirmed",
+            JSON.stringify(entry.metadata || {}),
+            entry.created_at || now
+          );
+        }
+      } catch (err) {
+        console.warn("[ProtestDataStore] registerIdentityEntries error:", err);
+      }
+    } else {
+      for (const entry of entries) {
+        if (!this.memoryIdentityRegistry.has(entry.identity_key)) {
+          this.memoryIdentityRegistry.set(entry.identity_key, {
+            ...entry,
+            id: entry.id || crypto.randomUUID(),
+            created_at: entry.created_at || now
+          });
+        }
+      }
+    }
+  }
+
+  async addToReviewQueue(item: ReviewQueueItem): Promise<void> {
+    if (this.db) {
+      try {
+        this.db.prepare(`
+          INSERT INTO unras_review_queue
+          (id, source_row_hash, tanggal, waktu, lokasi, organisasi_kelompok, isu_tuntutan, raw_payload, ambiguity_reason, matched_canonical_id, similarity_score, status, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          item.id,
+          item.source_row_hash,
+          item.tanggal,
+          item.waktu || null,
+          item.lokasi,
+          item.organisasi_kelompok || null,
+          item.isu_tuntutan,
+          JSON.stringify(item.raw_payload || {}),
+          item.ambiguity_reason,
+          item.matched_canonical_id || null,
+          item.similarity_score ?? null,
+          item.status || "pending_review",
+          item.created_at
+        );
+      } catch (err) {
+        console.warn("[ProtestDataStore] addToReviewQueue error:", err);
+      }
+    } else {
+      this.memoryReviewQueue.set(item.id, item);
+    }
+  }
+
+  async getReviewQueue(filter?: { status?: string }): Promise<ReviewQueueItem[]> {
+    if (this.db) {
+      try {
+        let query = "SELECT * FROM unras_review_queue";
+        const params: any[] = [];
+        if (filter?.status) {
+          query += " WHERE status = ?";
+          params.push(filter.status);
+        }
+        query += " ORDER BY created_at DESC";
+        const rows = this.db.prepare(query).all(...params) as any[];
+        return rows.map((r) => ({
+          ...r,
+          raw_payload: typeof r.raw_payload === "string" ? JSON.parse(r.raw_payload) : (r.raw_payload || {})
+        }));
+      } catch (err) {
+        console.warn("[ProtestDataStore] getReviewQueue error:", err);
+        return [];
+      }
+    } else {
+      let items = Array.from(this.memoryReviewQueue.values());
+      if (filter?.status) {
+        items = items.filter((i) => i.status === filter.status);
+      }
+      return items.sort((a, b) => b.created_at.localeCompare(a.created_at));
+    }
   }
 
   // ---------------------------------------------------------------------------

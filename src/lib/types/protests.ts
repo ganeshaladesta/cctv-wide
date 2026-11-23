@@ -461,3 +461,38 @@ export interface DailyUnrasSituationOverview {
   linked_cctv_count: number;
   points: ProtestPoint[];
 }
+
+/**
+ * Identity Architecture & Review Queue Types
+ */
+export type IdentityType = "source_id" | "fingerprint_exact" | "fingerprint_semantic" | "alias";
+export type IdentityConfidence = "confirmed" | "probable" | "ambiguous" | "distinct";
+
+export interface IdentityRegistryEntry {
+  id: string;
+  canonical_id: string;
+  identity_type: IdentityType;
+  identity_key: string;
+  event_date: string;
+  confidence: "confirmed" | "probable" | "ambiguous";
+  metadata?: Record<string, unknown>;
+  created_at?: string;
+}
+
+export interface ReviewQueueItem {
+  id: string;
+  source_row_hash: string;
+  tanggal: string;
+  waktu?: string | null;
+  lokasi: string;
+  organisasi_kelompok?: string | null;
+  isu_tuntutan: string;
+  raw_payload?: Record<string, unknown>;
+  ambiguity_reason: string;
+  matched_canonical_id?: string | null;
+  similarity_score?: number | null;
+  status: "pending_review" | "approved" | "rejected" | "merged";
+  created_at: string;
+  reviewed_at?: string | null;
+  reviewed_by?: string | null;
+}
