@@ -34,7 +34,8 @@ import {
   ProtestCrowdObservation,
   DailyUnrasSituationOverview,
   IdentityRegistryEntry,
-  ReviewQueueItem
+  ReviewQueueItem,
+  SourceStatusCategory
 } from "@/lib/types/protests";
 import {
   generateExactFingerprint,
@@ -63,14 +64,16 @@ import {
   fetchSyncLogByIdFromSupabase,
   createSyncLogInSupabase,
   updateSyncLogInSupabase,
-  upsertExcelBatchInSupabase
+  upsertExcelBatchInSupabase,
+  updateProtestSourceStatusInSupabase
 } from "./supabase-protest-service";
 import {
   deriveTahunBulan,
   deriveEventTimestamps,
   generateIdKejadian,
   generateKodeUnras,
-  normalizeProtestStatus
+  normalizeProtestStatus,
+  mapSourceStatusToProtestStatus
 } from "./unras-helpers";
 
 // Haversine distance in meters
@@ -416,13 +419,15 @@ class ProtestDataStore {
         { name: "info_awal", def: "TEXT" },
         { name: "tindak_lanjut", def: "TEXT" },
         { name: "progres_asistensi", def: "TEXT" },
-        { name: "realisasi", def: "TEXT" }
+        { name: "realisasi", def: "TEXT" },
+        { name: "status_sumber", def: "TEXT" }
       ];
       for (const col of cAcFields) {
         if (!protestCols.includes(col.name)) {
           this.db.exec(`ALTER TABLE protests ADD COLUMN ${col.name} ${col.def};`);
         }
       }
+      this.db.exec("CREATE INDEX IF NOT EXISTS idx_protests_status_sumber ON protests(status_sumber);");
 
       // Migration 008 multi-point tables & columns self-healing
       try {
@@ -1454,6 +1459,95 @@ class ProtestDataStore {
     return false;
   }
 
+  /**
+   * Updates ONLY the source-owned status field (status_sumber) for an existing incident.
+   * Operator-managed fields (status, urgency, validated_lat, situation_summary, etc.) are 100% preserved.
+   * Records an audit log in protest_status_history.
+   * Idempotent: returns updated: false if the status has not changed.
+   */
+  async updateProtestSourceStatus(
+    idOrIdKejadian: string,
+    newStatusSumber: SourceStatusCategory,
+    rawSourceStatus?: string | null,
+    actorName: string = "Power Automate Sync"
+  ): Promise<{ updated: boolean; previousStatus: string | null; currentStatus: SourceStatusCategory }> {
+    const existing = await this.getProtestById(idOrIdKejadian);
+    if (!existing) {
+      return { updated: false, previousStatus: null, currentStatus: newStatusSumber };
+    }
+
+    const previous = existing.status_sumber || null;
+    if (previous === newStatusSumber) {
+      return { updated: false, previousStatus: previous, currentStatus: newStatusSumber };
+    }
+
+    const now = new Date().toISOString();
+    const toProtestStatus = mapSourceStatusToProtestStatus(newStatusSumber);
+    const fromProtestStatus = previous ? mapSourceStatusToProtestStatus(previous) : existing.status;
+
+    if (isSupabaseConfigured()) {
+      try {
+        await updateProtestSourceStatusInSupabase(
+          existing.id,
+          newStatusSumber,
+          rawSourceStatus,
+          actorName
+        );
+      } catch (err) {
+        console.error("[ProtestDataStore] Supabase updateProtestSourceStatus failed:", err);
+      }
+    }
+
+    if (this.db) {
+      try {
+        this.db.prepare(`
+          UPDATE protests
+          SET status_sumber = ?, updated_at = ?
+          WHERE id = ?
+        `).run(newStatusSumber, now, existing.id);
+
+        const historyId = crypto.randomUUID();
+        this.db.prepare(`
+          INSERT INTO protest_status_history
+          (id, protest_id, from_status, to_status, reason, changed_by_id, changed_by_name, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          historyId,
+          existing.id,
+          fromProtestStatus,
+          toProtestStatus,
+          `Sinkronisasi status sumber Excel: '${rawSourceStatus || newStatusSumber}'`,
+          "power_automate",
+          actorName,
+          now
+        );
+      } catch (err) {
+        console.warn("[ProtestDataStore] updateProtestSourceStatus SQLite error:", err);
+      }
+    }
+
+    // In-memory update
+    const memEvent = this.memoryEvents.get(existing.id);
+    if (memEvent) {
+      memEvent.status_sumber = newStatusSumber;
+      memEvent.updated_at = now;
+    }
+    const memHistList = this.memoryHistory.get(existing.id) || [];
+    memHistList.push({
+      id: crypto.randomUUID(),
+      protest_id: existing.id,
+      from_status: fromProtestStatus,
+      to_status: toProtestStatus,
+      reason: `Sinkronisasi status sumber Excel: '${rawSourceStatus || newStatusSumber}'`,
+      changed_by_id: "power_automate",
+      changed_by_name: actorName,
+      created_at: now
+    });
+    this.memoryHistory.set(existing.id, memHistList);
+
+    return { updated: true, previousStatus: previous, currentStatus: newStatusSumber };
+  }
+
   // ---------------------------------------------------------------------------
   // Reports, CCTV Links & Status History
   // ---------------------------------------------------------------------------
@@ -2076,7 +2170,8 @@ class ProtestDataStore {
         kota_kabupaten: rec.kota_kabupaten || null,
         keterangan_source: rec.keterangan_source || null,
         raw_source_payload: rec.raw_source_payload || {},
-        status: "scheduled",
+        status: (rec as any).status || "scheduled",
+        status_sumber: (rec as any).status_sumber || null,
         urgency: (rec.estimasi_massa_source && rec.estimasi_massa_source >= 1000) ? "high" : "medium",
         category_id: null,
         category_name: null,
@@ -2108,7 +2203,7 @@ class ProtestDataStore {
               validated_lat, validated_lng, has_coordinates, actual_crowd_size, situation_summary,
               editorial_draft, editorial_final, is_archived, completed_at, completed_by_id,
               completed_by_name, created_at, updated_at, deleted_at, last_synced_at,
-              regional, kategori_isu, dampak
+              regional, kategori_isu, dampak, status_sumber
             ) VALUES (
               ?, ?, ?, ?, ?, ?, ?,
               ?, ?, ?, ?, ?,
@@ -2117,7 +2212,7 @@ class ProtestDataStore {
               ?, ?, ?, ?, ?,
               ?, ?, ?, ?, ?,
               ?, ?, ?, ?, ?,
-              ?, ?, ?
+              ?, ?, ?, ?
             )
           `).run(
             newEvent.id,
@@ -2159,7 +2254,8 @@ class ProtestDataStore {
             newEvent.last_synced_at,
             (rec as any).regional ?? null,
             (rec as any).kategori_isu ?? null,
-            (rec as any).dampak ?? null
+            (rec as any).dampak ?? null,
+            newEvent.status_sumber ?? null
           );
           created++;
           const tgl = rec.tanggal || (rec.event_datetime ? rec.event_datetime.slice(0, 10) : "unknown");
@@ -3507,7 +3603,8 @@ class ProtestDataStore {
       info_awal: r.info_awal ? String(r.info_awal) : null,
       tindak_lanjut: r.tindak_lanjut ? String(r.tindak_lanjut) : null,
       progres_asistensi: r.progres_asistensi ? String(r.progres_asistensi) : null,
-      realisasi: r.realisasi ? String(r.realisasi) : null
+      realisasi: r.realisasi ? String(r.realisasi) : null,
+      status_sumber: (r.status_sumber as SourceStatusCategory) || null
     };
   }
 }

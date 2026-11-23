@@ -12,6 +12,8 @@ export type ProtestStatus =
   | "completed" // Selesai / Terkendali
   | "cancelled"; // Batal / Tidak Jadi
 
+export type SourceStatusCategory = "Belum Berlangsung" | "Sedang Berlangsung" | "Selesai";
+
 export type ProtestUrgency = "low" | "medium" | "high" | "critical";
 
 export type ReportType =
@@ -65,6 +67,7 @@ export interface ProtestEvent {
   kota_kabupaten: string | null; // Nama Kota/Kabupaten
   keterangan_source: string | null; // Catatan asli dari sumber Excel
   raw_source_payload?: Record<string, unknown>; // JSON dump dari row asli Excel
+  status_sumber?: SourceStatusCategory | null; // Status kejadian dari sumber Excel (Belum Berlangsung, Sedang Berlangsung, Selesai)
 
   // Excel C:AC Source Attributes
   urutan_bulan?: number | null; // Col B: Urutan Bulan
@@ -208,9 +211,11 @@ export interface ExcelProtestRow {
   'LATITUDE'?: number;
   'LONGITUDE'?: number;
   'STATUS'?: string;
+  'Status Kejadian'?: string;
   'KETERANGAN'?: string;
 
   // Flexible snake_case aliases (Power Automate & JSON integrations)
+  status_sumber?: string;
   id_kejadian?: string;
   kode_unras?: string;
   id_unras?: string;
@@ -301,6 +306,7 @@ export interface ProtestSyncResult {
     updated: number;
     skipped: number;
     failed: number;
+    status_updated?: number;
   };
   oldest_event_date?: string | null;
   newest_event_date?: string | null;
