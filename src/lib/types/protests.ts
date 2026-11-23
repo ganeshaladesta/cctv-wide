@@ -302,6 +302,14 @@ export interface ProtestSyncResult {
     skipped: number;
     failed: number;
   };
+  oldest_event_date?: string | null;
+  newest_event_date?: string | null;
+  inserted_by_event_date?: Record<string, number>;
+  diagnostics?: {
+    oldest_event_date: string | null;
+    newest_event_date: string | null;
+    inserted_by_event_date: Record<string, number>;
+  };
   errors?: string[];
   duration_ms: number;
 }

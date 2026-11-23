@@ -28,7 +28,10 @@ import {
   validateSameDaySyncRequest,
   validateSyncRequest,
   processRolling7DaySync,
-  processSameDaySync
+  processSameDaySync,
+  isValidIdKejadian,
+  isValidKodeUnras,
+  generateDeterministicFallbackId
 } from "../src/lib/unras-rolling-sync.ts";
 import { protestStore } from "../src/lib/protest-store.ts";
 
@@ -580,8 +583,174 @@ async function runTests() {
   assert.equal(totalSkipped, 1, "The duplicate insert must be skipped");
   console.log("  ✔ Database-level uniqueness terjamin: 1 dibuat (created), 1 dilewati (skipped), 0 duplikasi.");
 
+  // ---------------------------------------------------------------------------
+  // Test 16: Unit validation of identifier resolution functions
+  // ---------------------------------------------------------------------------
+  console.log("\n[Test 16/20] Validasi Format Identifier (isValidIdKejadian & isValidKodeUnras)...");
+  // Malformed ID checks
+  assert.equal(isValidIdKejadian("KEJ-20261123-"), false, "Trailing dash must be rejected");
+  assert.equal(isValidIdKejadian("KEJ-"), false, "Prefix-only must be rejected");
+  assert.equal(isValidIdKejadian("KEJ-20261123"), false, "Date-only prefix without unique suffix must be rejected");
+  assert.equal(isValidIdKejadian(""), false, "Empty string must be rejected");
+  assert.equal(isValidIdKejadian("   "), false, "Whitespace-only must be rejected");
+  assert.equal(isValidIdKejadian("KEJ--1"), false, "Double dash must be rejected");
+  assert.equal(isValidIdKejadian(null), false, "Null must be rejected");
+  assert.equal(isValidIdKejadian(undefined), false, "Undefined must be rejected");
+
+  // Valid ID checks
+  assert.equal(isValidIdKejadian("KEJ-20261120-U1473"), true, "Valid KEJ with ID UNRAS must be accepted");
+  assert.equal(isValidIdKejadian("KEJ-20261120-A1B2C3D4E5F60789"), true, "Valid 16-hex fallback ID must be accepted");
+  assert.equal(isValidIdKejadian("KEJ-TEST-001"), true, "Valid custom ID must be accepted");
+
+  // kode_unras checks
+  assert.equal(isValidKodeUnras(""), false);
+  assert.equal(isValidKodeUnras("  "), false);
+  assert.equal(isValidKodeUnras("-"), false);
+  assert.equal(isValidKodeUnras("--"), false);
+  assert.equal(isValidKodeUnras("U1473"), true);
+  console.log("  ✔ Fungsi validasi format identifier berhasil membedakan ID valid vs malformed.");
+
+  // ---------------------------------------------------------------------------
+  // Test 17: Fallback SHA-256 identifier determinism & collision avoidance
+  // ---------------------------------------------------------------------------
+  console.log("\n[Test 17/20] Determinisme & Pencegahan Tabrakan Fallback SHA-256...");
+  const dateWib = "2026-11-20";
+  const idGen1 = generateDeterministicFallbackId(dateWib, "Depan Kantor ESDM", "Aliansi Mahasiswa", "Tolak Tambang");
+  const idGen2 = generateDeterministicFallbackId(dateWib, "Depan Kantor ESDM", "Aliansi Mahasiswa", "Tolak Tambang");
+  const idGenDiff = generateDeterministicFallbackId(dateWib, "Depan Kantor ESDM", "Aliansi Buruh", "Tolak Upah Rendah");
+
+  assert.ok(idGen1 && idGen2 && idGenDiff);
+  assert.equal(idGen1, idGen2, "Identical inputs MUST generate identical fallback ID");
+  assert.notEqual(idGen1, idGenDiff, "Different inputs MUST generate different fallback IDs");
+  assert.match(idGen1, /^KEJ-20261120-[0-9A-F]{16}$/, "Fallback ID must follow KEJ-YYYYMMDD-HEX16 pattern");
+
+  // Whitespace & casing invariance
+  const idGenCasing = generateDeterministicFallbackId(dateWib, "  depan kantor ESDM  ", "ALIANSI MAHASISWA", "tolak tambang   ");
+  assert.equal(idGen1, idGenCasing, "Whitespace and casing normalization must be invariant");
+
+  console.log(`  ✔ Hash deterministik berhasil: ${idGen1} (identik across runs, konsisten 16-hex).`);
+
+  // ---------------------------------------------------------------------------
+  // Test 18: Malformed "KEJ-20261123-" replaced by deterministic fallback & inserted
+  // ---------------------------------------------------------------------------
+  console.log("\n[Test 18/20] Penanganan Rekor dengan ID Malformed 'KEJ-20261123-'...");
+  const malformedTestIso = "2026-11-20T11:00:00+07:00";
+  const payloadMalformed = {
+    sync_type: "rolling_7d",
+    timezone: "Asia/Jakarta",
+    period_start: window.period_start,
+    period_end: window.period_end,
+    events: [
+      {
+        "ID KEJADIAN": "KEJ-20261123-", // Malformed from Power Automate
+        "ID UNRAS": "", // Empty in Excel
+        "WAKTU DAN TGL KEJADIAN ISO": malformedTestIso,
+        "TANGGAL": "2026-11-20",
+        "LOKASI": `Lokasi Unik ESDM ${runId}`,
+        "ISU": `Tuntutan Tambang Sektor A ${runId}`,
+        "ORGANISASI": "Aliansi Peduli Tambang"
+      },
+      {
+        "ID KEJADIAN": "KEJ-20261123-", // Same malformed ID from Power Automate on different row
+        "ID UNRAS": "", // Empty in Excel
+        "WAKTU DAN TGL KEJADIAN ISO": malformedTestIso,
+        "TANGGAL": "2026-11-20",
+        "LOKASI": `Lokasi Unik DPR ${runId}`,
+        "ISU": `Tuntutan Reformasi Hukum ${runId}`,
+        "ORGANISASI": "Front Aksi Bersama"
+      }
+    ]
+  };
+
+  const resMalformed = await processRolling7DaySync(payloadMalformed, "power_automate", "Test Runner");
+  assert.equal(resMalformed.summary.received, 2, "Received count must be 2");
+  assert.equal(resMalformed.summary.inserted, 2, "Both rows MUST be inserted with distinct deterministic IDs");
+  assert.equal(resMalformed.summary.skipped, 0, "Neither row should be skipped due to false duplicate collision");
+  assert.equal(resMalformed.summary.updated, 0);
+
+  // Check generated records in database
+  const expectedId1 = generateDeterministicFallbackId("2026-11-20", `Lokasi Unik ESDM ${runId}`, "Aliansi Peduli Tambang", `Tuntutan Tambang Sektor A ${runId}`);
+  const expectedId2 = generateDeterministicFallbackId("2026-11-20", `Lokasi Unik DPR ${runId}`, "Front Aksi Bersama", `Tuntutan Reformasi Hukum ${runId}`);
+
+  assert.ok(expectedId1 && expectedId2);
+  const rec1 = await protestStore.getProtestById(expectedId1);
+  const rec2 = await protestStore.getProtestById(expectedId2);
+  assert.ok(rec1, `Record 1 must exist with generated ID: ${expectedId1}`);
+  assert.ok(rec2, `Record 2 must exist with generated ID: ${expectedId2}`);
+  assert.notEqual(rec1.id_kejadian, rec2.id_kejadian, "Both records must have distinct IDs");
+  console.log(`  ✔ Dua rekor dengan input malformed 'KEJ-20261123-' berhasil diproses menjadi:`);
+  console.log(`      1: ${rec1.id_kejadian}`);
+  console.log(`      2: ${rec2.id_kejadian}`);
+
+  // ---------------------------------------------------------------------------
+  // Test 19: Missing essential fields rejection (safe skip without generic ID)
+  // ---------------------------------------------------------------------------
+  console.log("\n[Test 19/20] Penolakan Rekor Kosong Tanpa Data Esensial (Lokasi & Isu Kosong)...");
+  const payloadMissingEssential = {
+    sync_type: "rolling_7d",
+    timezone: "Asia/Jakarta",
+    period_start: window.period_start,
+    period_end: window.period_end,
+    events: [
+      {
+        "ID KEJADIAN": "",
+        "ID UNRAS": "",
+        "WAKTU DAN TGL KEJADIAN ISO": "2026-11-20T12:00:00+07:00",
+        "TANGGAL": "2026-11-20",
+        "LOKASI": "", // Missing location
+        "ISU": ""     // Missing issue
+      }
+    ]
+  };
+
+  const resMissing = await processRolling7DaySync(payloadMissingEssential, "power_automate", "Test Runner");
+  assert.equal(resMissing.summary.inserted, 0, "Record without essential fields must not be inserted");
+  assert.equal(resMissing.summary.skipped, 1, "Record without essential fields must be skipped");
+  assert.ok(resMissing.errors?.some(e => e.includes("field esensial")), "Error must explicitly explain missing essential fields");
+  console.log("  ✔ Rekor tanpa data esensial berhasil ditolak & dilewati dengan aman.");
+
+  // ---------------------------------------------------------------------------
+  // Test 20: Event date range metadata & diagnostics in sync result
+  // ---------------------------------------------------------------------------
+  console.log("\n[Test 20/20] Verifikasi Metadata Rentang Tanggal Kejadian & Diagnostik...");
+  const payloadMeta = {
+    sync_type: "rolling_7d",
+    timezone: "Asia/Jakarta",
+    period_start: window.period_start,
+    period_end: window.period_end,
+    events: [
+      {
+        "ID KEJADIAN": `TEST-META-18-${runId}`,
+        "WAKTU DAN TGL KEJADIAN ISO": "2026-11-18T10:00:00+07:00",
+        "TANGGAL": "2026-11-18",
+        "LOKASI": "Lokasi Meta 18 Nov",
+        "ISU": "Isu 18 Nov"
+      },
+      {
+        "ID KEJADIAN": `TEST-META-22-${runId}`,
+        "WAKTU DAN TGL KEJADIAN ISO": "2026-11-22T15:00:00+07:00",
+        "TANGGAL": "2026-11-22",
+        "LOKASI": "Lokasi Meta 22 Nov",
+        "ISU": "Isu 22 Nov"
+      }
+    ]
+  };
+
+  const resMeta = await processRolling7DaySync(payloadMeta, "power_automate", "Test Runner");
+  assert.equal(resMeta.summary.inserted, 2);
+  assert.equal(resMeta.oldest_event_date, "2026-11-18", "Oldest event date must be 2026-11-18");
+  assert.equal(resMeta.newest_event_date, "2026-11-22", "Newest event date must be 2026-11-22");
+  assert.ok(resMeta.inserted_by_event_date, "inserted_by_event_date must exist");
+  assert.equal(resMeta.inserted_by_event_date["2026-11-18"], 1);
+  assert.equal(resMeta.inserted_by_event_date["2026-11-22"], 1);
+  assert.deepEqual(resMeta.diagnostics?.inserted_by_event_date, resMeta.inserted_by_event_date);
+  console.log(`  ✔ Diagnostik tanggal kejadian terverifikasi:`);
+  console.log(`      oldest_event_date: ${resMeta.oldest_event_date}`);
+  console.log(`      newest_event_date: ${resMeta.newest_event_date}`);
+  console.log(`      inserted_by_event_date:`, resMeta.inserted_by_event_date);
+
   console.log("\n================================================================================");
-  console.log("=== SEMUA 15 PENGUJIAN SINKRONISASI UNRAS BERHASIL DENGAN SEMPURNA!          ===");
+  console.log("=== SEMUA 20 PENGUJIAN SINKRONISASI UNRAS BERHASIL DENGAN SEMPURNA!          ===");
   console.log("================================================================================\n");
 }
 
