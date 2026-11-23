@@ -339,49 +339,49 @@ function createBIOfficePopupHtml(
         : `${nearestProtest.distanceMeters} m`;
 
     unrasAlertHtml = `
-      <div class="p-2 rounded-lg border ${alertBg} text-[10px] space-y-1 mb-2">
-        <div class="flex items-center justify-between font-bold">
-          <span>⚠️ PROKSIMITAS UNRAS TERDEKAT</span>
-          <span class="font-mono">${distText}</span>
+      <div class="p-2 rounded-lg border ${alertBg} text-[10px] space-y-1 mb-2.5 box-border">
+        <div class="flex items-center justify-between font-bold gap-2">
+          <span class="flex items-center gap-1 shrink-0">⚠️ PROKSIMITAS UNRAS</span>
+          <span class="font-mono text-white bg-black/30 px-1.5 py-0.5 rounded shrink-0">${distText}</span>
         </div>
-        <p class="truncate text-white font-medium">${escapeHtml(nearestProtest.event.isu_tuntutan)}</p>
+        <p class="line-clamp-2 break-words text-white/90 text-[10px] leading-snug m-0">${escapeHtml(nearestProtest.event.isu_tuntutan)}</p>
       </div>
     `;
   } else {
     unrasAlertHtml = `
-      <div class="p-2 rounded-lg border border-emerald-500/30 bg-emerald-950/20 text-emerald-300 text-[10px] flex items-center gap-1.5 mb-2">
-        <span>✓</span>
-        <span>Perimeter Aman (Tidak ada unras aktif &lt; 5km)</span>
+      <div class="p-2 rounded-lg border border-emerald-500/30 bg-emerald-950/20 text-emerald-300 text-[10px] flex items-center gap-1.5 mb-2.5 box-border">
+        <span class="font-bold shrink-0">✓</span>
+        <span class="leading-tight">Perimeter Aman (Tidak ada unras aktif &lt; 5km)</span>
       </div>
     `;
   }
 
   return `
-    <div class="p-3 text-left font-sans text-white" style="min-width: 280px; max-width: 320px;">
-      <div class="flex items-center justify-between gap-1.5 pb-2 mb-2 border-b border-[#1E293B]">
-        <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${typeBadgeClass}">
+    <div class="scc-bi-popup-root p-3 text-left font-sans text-white w-full box-border overflow-hidden" style="width: min(300px, calc(100vw - 32px)); max-width: 300px; box-sizing: border-box;">
+      <div class="flex items-center justify-between gap-2 pb-2 mb-2 border-b border-[#1E293B] pr-6">
+        <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border shrink-0 ${typeBadgeClass}">
           ${office.office_type}
         </span>
-        <span class="font-mono text-[10px] text-blue-400 font-bold">
-          ${office.office_id || office.id}
+        <span class="font-mono text-[10px] text-blue-400 font-bold truncate max-w-[120px]" title="${escapeHtml(office.office_id || office.id)}">
+          ${escapeHtml(office.office_id || office.id)}
         </span>
       </div>
 
-      <h4 class="text-xs font-bold text-white leading-snug mb-1">
+      <h4 class="text-xs sm:text-[13px] font-bold text-white leading-snug mb-1 break-words">
         ${safeName}
       </h4>
-      <p class="text-[10px] text-slate-400 mb-2 leading-relaxed">
+      <p class="text-[10px] text-slate-400 mb-2 leading-relaxed break-words">
         ${safeAddress}
       </p>
 
-      <div class="space-y-1 text-[11px] text-slate-300 mb-2.5 pb-2 border-b border-[#1E293B]/60">
-        <div class="flex items-center justify-between text-[10px]">
-          <span class="text-slate-400">Regional / Wilayah:</span>
-          <span class="text-white font-medium">${office.regional} (${office.island_group})</span>
+      <div class="space-y-1 text-[11px] text-slate-300 mb-2.5 py-2 border-y border-[#1E293B]/60">
+        <div class="flex items-center justify-between gap-2 text-[10px]">
+          <span class="text-slate-400 shrink-0">Regional / Wilayah:</span>
+          <span class="text-white font-medium text-right truncate">${office.regional}${office.island_group ? ` (${office.island_group})` : ""}</span>
         </div>
-        <div class="flex items-center justify-between text-[10px]">
-          <span class="text-slate-400">Koordinat Valid:</span>
-          <span class="font-mono text-emerald-400">${coordsFormatted}</span>
+        <div class="flex items-center justify-between gap-2 text-[10px]">
+          <span class="text-slate-400 shrink-0">Koordinat Valid:</span>
+          <span class="font-mono text-emerald-400 text-right">${coordsFormatted}</span>
         </div>
       </div>
 
@@ -390,10 +390,16 @@ function createBIOfficePopupHtml(
       <button
         type="button"
         id="btn-bi-office-hud-${office.id}"
-        class="w-full py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center justify-center gap-1.5 shadow-lg shadow-blue-500/20 transition-all cursor-pointer"
+        class="w-full py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-semibold flex items-center justify-center gap-1.5 shadow-lg shadow-blue-500/20 transition-all cursor-pointer box-border text-center"
+        style="width: 100%; box-sizing: border-box;"
       >
-        <span>Analisis GeoINT & Perimeter</span>
-        <span>→</span>
+        <svg class="w-3.5 h-3.5 text-blue-200 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 12m-9 0a9 9 0 1 0 18 0a9 9 0 1 0 -18 0" />
+          <path d="M12 12m-5 0a5 5 0 1 0 10 0a5 5 0 1 0 -10 0" />
+          <line x1="12" y1="3" x2="12" y2="12" />
+        </svg>
+        <span class="truncate">Analisis GeoINT &amp; Perimeter</span>
+        <span class="shrink-0">→</span>
       </button>
     </div>
   `;
@@ -1152,8 +1158,10 @@ export default function InteractiveMap({
 
       marker.bindPopup(createBIOfficePopupHtml(off, nearestProtest), {
         className: "scc-leaflet-bi-popup",
-        maxWidth: 320,
-        autoPanPadding: [24, 24]
+        maxWidth: 300,
+        minWidth: 260,
+        autoPan: true,
+        autoPanPadding: [16, 16]
       });
 
       marker.on("click", () => {
