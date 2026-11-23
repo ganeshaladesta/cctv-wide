@@ -423,3 +423,40 @@ CREATE INDEX IF NOT EXISTS idx_bi_offices_type ON bi_offices(office_type);
 CREATE INDEX IF NOT EXISTS idx_bi_offices_regional ON bi_offices(regional);
 CREATE INDEX IF NOT EXISTS idx_bi_offices_coords ON bi_offices(latitude, longitude);
 CREATE INDEX IF NOT EXISTS idx_bi_offices_validation ON bi_offices(validation_status);
+
+-- Migration 010: Persistent Incident Identity Registry & Ambiguous Review Queue
+CREATE TABLE IF NOT EXISTS unras_identity_registry (
+    id TEXT PRIMARY KEY,
+    canonical_id TEXT NOT NULL,
+    identity_type TEXT NOT NULL,
+    identity_key TEXT NOT NULL UNIQUE,
+    event_date TEXT NOT NULL,
+    confidence TEXT NOT NULL DEFAULT 'confirmed',
+    metadata TEXT DEFAULT '{}',
+    created_at TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_unras_identity_key ON unras_identity_registry(identity_key);
+CREATE INDEX IF NOT EXISTS idx_unras_identity_canonical ON unras_identity_registry(canonical_id);
+CREATE INDEX IF NOT EXISTS idx_unras_identity_date ON unras_identity_registry(event_date);
+
+CREATE TABLE IF NOT EXISTS unras_review_queue (
+    id TEXT PRIMARY KEY,
+    source_row_hash TEXT NOT NULL,
+    tanggal TEXT NOT NULL,
+    waktu TEXT,
+    lokasi TEXT NOT NULL,
+    organisasi_kelompok TEXT,
+    isu_tuntutan TEXT NOT NULL,
+    raw_payload TEXT DEFAULT '{}',
+    ambiguity_reason TEXT NOT NULL,
+    matched_canonical_id TEXT,
+    similarity_score REAL,
+    status TEXT NOT NULL DEFAULT 'pending_review',
+    created_at TEXT NOT NULL,
+    reviewed_at TEXT,
+    reviewed_by TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_unras_review_queue_date ON unras_review_queue(tanggal);
+CREATE INDEX IF NOT EXISTS idx_unras_review_queue_status ON unras_review_queue(status);

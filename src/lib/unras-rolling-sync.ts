@@ -25,6 +25,10 @@ import {
   inferProtestCategory
 } from "./ms-graph-sync";
 import { normalizeTimeString } from "./time-normalization";
+import {
+  classifyCandidate,
+  ExistingProtestComparisonItem
+} from "./unras-identity-registry";
 
 // Rolling 7-calendar-day window: 7 days (168 hours) + 2 hours clock skew margin
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
@@ -726,6 +730,9 @@ async function processSyncCore(
   let newestEventDate: string | null = null;
   let insertedByDate: Record<string, number> = {};
 
+  const cachedRegistryKeys = await protestStore.getAllIdentityKeys();
+  const protestsByDateCache = new Map<string, ExistingProtestComparisonItem[]>();
+
   const validBatchForStore: Array<{
     id_kejadian: string;
     kode_unras: string;
@@ -847,6 +854,7 @@ async function processSyncCore(
       const sasaranAksi = getField(row, "SASARAN", "sasaran", "sasaran_aksi") ? String(getField(row, "SASARAN", "sasaran", "sasaran_aksi")).trim() : null;
       const isu = String(getField(row, "ISU", "tuntutan", "isu_tuntutan", "isu") || "Aksi Unjuk Rasa").trim();
       const tanggal = eventDateWib;
+      const organisasi = getField(row, "ORGANISASI", "aliansi", "organisasi_kelompok", "organisasi") ? String(getField(row, "ORGANISASI", "aliansi", "organisasi_kelompok", "organisasi")).trim() : null;
 
       // Time normalization
       const rawWaktu = getField(row, "WAKTU", "waktu", "waktu_mulai");
@@ -864,6 +872,89 @@ async function processSyncCore(
         waktuNormalized = wibTime !== "00:00:00" ? wibTime : "09:00:00";
       } else {
         waktuNormalized = "09:00:00";
+      }
+
+      // Step 4: 4-Tier Candidate Classification via Persistent Identity Registry
+      if (!protestsByDateCache.has(eventDateWib)) {
+        const sameDayExisting = await protestStore.getProtestsByDate(eventDateWib);
+        protestsByDateCache.set(eventDateWib, sameDayExisting);
+      }
+      const sameDayExisting = protestsByDateCache.get(eventDateWib) || [];
+
+      const candidateVerdict = classifyCandidate(
+        {
+          id_kejadian: idKejadian,
+          kode_unras: kodeUnras,
+          tanggal: eventDateWib,
+          lokasi,
+          organisasi_kelompok: organisasi,
+          isu_tuntutan: isu
+        },
+        cachedRegistryKeys,
+        sameDayExisting
+      );
+
+      if (candidateVerdict.action === "EXISTING") {
+        skipped++;
+        errors.push(`[ID: ${idKejadian}] Dilewati (EXISTING): ${candidateVerdict.reason}`);
+        continue;
+      }
+
+      if (candidateVerdict.action === "DUPLICATE") {
+        skipped++;
+        errors.push(`[ID: ${idKejadian}] Dilewati (DUPLICATE): ${candidateVerdict.reason}`);
+        if (candidateVerdict.canonicalId) {
+          cachedRegistryKeys.set(`ID:${idKejadian}`, candidateVerdict.canonicalId);
+          cachedRegistryKeys.set(candidateVerdict.fingerprints.exact, candidateVerdict.canonicalId);
+          if (candidateVerdict.fingerprints.semantic) {
+            cachedRegistryKeys.set(candidateVerdict.fingerprints.semantic, candidateVerdict.canonicalId);
+          }
+          if (candidateVerdict.fingerprints.sourceKey) {
+            cachedRegistryKeys.set(candidateVerdict.fingerprints.sourceKey, candidateVerdict.canonicalId);
+          }
+        }
+        continue;
+      }
+
+      if (candidateVerdict.action === "AMBIGUOUS") {
+        skipped++;
+        await protestStore.addToReviewQueue({
+          id: crypto.randomUUID(),
+          source_row_hash: candidateVerdict.fingerprints.exact,
+          tanggal: eventDateWib,
+          waktu: waktuNormalized,
+          lokasi,
+          organisasi_kelompok: organisasi,
+          isu_tuntutan: isu,
+          raw_payload: row,
+          ambiguity_reason: candidateVerdict.reason,
+          matched_canonical_id: candidateVerdict.canonicalId || null,
+          similarity_score: candidateVerdict.similarityScore || null,
+          status: "pending_review",
+          created_at: new Date().toISOString()
+        });
+        errors.push(`[Baris ${rowIndex}] Ditahan untuk Review (AMBIGU): ${candidateVerdict.reason}`);
+        continue;
+      }
+
+      // action === "NEW": Update local caches so following rows in this batch recognize it
+      sameDayExisting.push({
+        id: idKejadian,
+        id_kejadian: idKejadian,
+        kode_unras: kodeUnras,
+        tanggal: eventDateWib,
+        lokasi,
+        organisasi_kelompok: organisasi,
+        isu_tuntutan: isu,
+        created_at: new Date().toISOString()
+      });
+      cachedRegistryKeys.set(`ID:${idKejadian}`, idKejadian);
+      cachedRegistryKeys.set(candidateVerdict.fingerprints.exact, idKejadian);
+      if (candidateVerdict.fingerprints.semantic) {
+        cachedRegistryKeys.set(candidateVerdict.fingerprints.semantic, idKejadian);
+      }
+      if (candidateVerdict.fingerprints.sourceKey) {
+        cachedRegistryKeys.set(candidateVerdict.fingerprints.sourceKey, idKejadian);
       }
 
       // Coordinate validation: if provided, must be within valid geospatial ranges (-90..90, -180..180)
@@ -897,7 +988,6 @@ async function processSyncCore(
         }
       }
 
-      const organisasi = getField(row, "ORGANISASI", "aliansi", "organisasi_kelompok", "organisasi") ? String(getField(row, "ORGANISASI", "aliansi", "organisasi_kelompok", "organisasi")).trim() : null;
       const korlap = getField(row, "KORLAP", "korlap", "korlap_pimpinan") ? String(getField(row, "KORLAP", "korlap", "korlap_pimpinan")).trim() : null;
       // Wilayah hukum preserves KPBI, KPwDN, or regional jurisdiction
       const wilayahHukum = getField(row, "WILAYAH HUKUM", "wilayah_hukum", "KP/KPw", "kp", "kp_kpw") ? String(getField(row, "WILAYAH HUKUM", "wilayah_hukum", "KP/KPw", "kp", "kp_kpw")).trim() : null;
