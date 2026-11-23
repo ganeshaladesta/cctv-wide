@@ -257,7 +257,8 @@ export async function executeManualSyncTrigger(
       source: "scc-admin",
       requested_by: user.id,
       request_id: requestId,
-      trigger_secret: triggerSecret
+      trigger_secret: triggerSecret,
+      sync_type: "rolling_7d"
     };
 
     const timeoutMs = options?.timeoutMs ?? 15000;

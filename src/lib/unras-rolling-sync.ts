@@ -29,13 +29,78 @@ import { normalizeTimeString } from "./time-normalization";
 // Rolling 7-calendar-day window: 7 days (168 hours) + 2 hours clock skew margin
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 const SEVEN_DAYS_MS = 7 * ONE_DAY_MS;
-const MAX_WINDOW_TOLERANCE_MS = SEVEN_DAYS_MS + 2 * 60 * 60 * 1000;
+export const MAX_SAME_DAY_WINDOW_TOLERANCE_MS = 26 * 60 * 60 * 1000; // 26 hours
+export const MAX_ROLLING_WINDOW_TOLERANCE_MS = 170 * 60 * 60 * 1000; // 170 hours
 const MAX_BATCH_LIMIT = 1000;
 
 // In-memory concurrency lock
 let isRollingSyncActive = false;
 let rollingSyncStartedAt: number | null = null;
 const SYNC_LOCK_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes failsafe
+
+/**
+ * Calculates exact Same-Day (H-0) calendar window for Asia/Jakarta (WIB)
+ * Start: 00:00:00 WIB today, inclusive
+ * End: 00:00:00 WIB tomorrow, exclusive
+ * Total duration: 24 hours (1 calendar day)
+ * Inclusion rule: event_datetime >= period_start AND event_datetime < period_end
+ */
+export function calculateSameDayWindow(refDate: Date = new Date()): {
+  date_wib: string;
+  start_date_wib: string;
+  end_date_wib: string;
+  period_start: string;
+  period_end: string;
+  period_start_ms: number;
+  period_end_ms: number;
+} {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(refDate);
+
+  const y = parts.find((p) => p.type === "year")?.value || String(refDate.getFullYear());
+  const m = parts.find((p) => p.type === "month")?.value || String(refDate.getMonth() + 1).padStart(2, "0");
+  const d = parts.find((p) => p.type === "day")?.value || String(refDate.getDate()).padStart(2, "0");
+
+  const todayWib = `${y}-${m}-${d}`;
+  if (todayWib.includes("--")) {
+    throw new Error(`Malformed date_wib generated with double dash: ${todayWib}`);
+  }
+
+  const todayStartWib = new Date(`${todayWib}T00:00:00+07:00`);
+  const tomorrowStartWib = new Date(todayStartWib.getTime() + ONE_DAY_MS);
+
+  const period_start = todayStartWib.toISOString();
+  const period_end = tomorrowStartWib.toISOString();
+
+  if (period_start.includes("--") || period_end.includes("--")) {
+    throw new Error(`Malformed ISO string generated with double dash: ${period_start}`);
+  }
+
+  const endParts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(tomorrowStartWib);
+  const ey = endParts.find((p) => p.type === "year")?.value;
+  const em = endParts.find((p) => p.type === "month")?.value;
+  const ed = endParts.find((p) => p.type === "day")?.value;
+  const end_date_wib = `${ey}-${em}-${ed}`;
+
+  return {
+    date_wib: todayWib,
+    start_date_wib: todayWib,
+    end_date_wib,
+    period_start,
+    period_end,
+    period_start_ms: todayStartWib.getTime(),
+    period_end_ms: tomorrowStartWib.getTime()
+  };
+}
 
 /**
  * Calculates exact Rolling 7-Calendar-Day synchronization window for Asia/Jakarta (WIB)
@@ -114,9 +179,6 @@ export function calculateRolling7DayWindow(refDate: Date = new Date()): {
     period_end_ms: endWib.getTime()
   };
 }
-
-// Backwards-compatibility alias
-export const calculateSameDayWindow = calculateRolling7DayWindow;
 
 /**
  * Extracts a field value case-insensitively across provided candidate keys
@@ -234,9 +296,12 @@ export function verifyIntegrationToken(
 }
 
 /**
- * Validates request schema and Rolling 7-Calendar-Day window constraints
+ * Generic sync request validator that validates window according to sync_type
+ * - same_day / same_day_h0: maximum 26 hours
+ * - rolling_7d / rolling_7_days: maximum 170 hours
+ * Rejects mismatched or invalid windows
  */
-export function validateRollingSyncRequest(payload: any): {
+export function validateSyncRequest(payload: any): {
   valid: boolean;
   error?: string;
   startMs?: number;
@@ -252,7 +317,7 @@ export function validateRollingSyncRequest(payload: any): {
   if (!validSyncTypes.includes(syncType)) {
     return {
       valid: false,
-      error: `sync_type '${payload.sync_type}' tidak didukung. Wajib 'rolling_7d' atau 'rolling_7_days'.`
+      error: `sync_type '${payload.sync_type}' tidak didukung. Wajib 'rolling_7d' atau 'same_day'.`
     };
   }
 
@@ -282,9 +347,13 @@ export function validateRollingSyncRequest(payload: any): {
   let pStartStr = payload.period_start ? String(payload.period_start).trim() : "";
   let pEndStr = payload.period_end ? String(payload.period_end).trim() : "";
 
-  // Auto-populate default rolling 7-day window if missing
+  const isSameDayType = syncType === "same_day" || syncType === "same_day_h0";
+
+  // Auto-populate default window if missing, matching sync_type
   if (!pStartStr || !pEndStr) {
-    const defaultWindow = calculateRolling7DayWindow();
+    const defaultWindow = isSameDayType
+      ? calculateSameDayWindow()
+      : calculateRolling7DayWindow();
     pStartStr = defaultWindow.period_start;
     pEndStr = defaultWindow.period_end;
     payload.period_start = pStartStr;
@@ -312,11 +381,20 @@ export function validateRollingSyncRequest(payload: any): {
   }
 
   const windowDurationMs = endMs - startMs;
-  if (windowDurationMs > MAX_WINDOW_TOLERANCE_MS) {
-    return {
-      valid: false,
-      error: `Rentang waktu melebihi batas sinkronisasi rolling 7 hari (${(windowDurationMs / 3600000).toFixed(2)} jam, maks 168 jam).`
-    };
+  if (isSameDayType) {
+    if (windowDurationMs > MAX_SAME_DAY_WINDOW_TOLERANCE_MS) {
+      return {
+        valid: false,
+        error: `Rentang waktu melebihi batas sinkronisasi same_day (${(windowDurationMs / 3600000).toFixed(2)} jam, maks 26 jam).`
+      };
+    }
+  } else {
+    if (windowDurationMs > MAX_ROLLING_WINDOW_TOLERANCE_MS) {
+      return {
+        valid: false,
+        error: `Rentang waktu melebihi batas sinkronisasi rolling 7 hari (${(windowDurationMs / 3600000).toFixed(2)} jam, maks 170 jam).`
+      };
+    }
   }
 
   if (!Array.isArray(payload.events)) {
@@ -336,18 +414,62 @@ export function validateRollingSyncRequest(payload: any): {
   return { valid: true, startMs, endMs };
 }
 
-export const validateSameDaySyncRequest = validateRollingSyncRequest;
+/**
+ * Validates rolling 7-day sync request:
+ * Rejects if sync_type is specified as same_day or anything other than rolling_7d / rolling_7_days.
+ * Enforces max 170 hours window.
+ */
+export function validateRollingSyncRequest(payload: any): {
+  valid: boolean;
+  error?: string;
+  startMs?: number;
+  endMs?: number;
+} {
+  if (payload && typeof payload === "object" && payload.sync_type) {
+    if (payload.sync_type !== "rolling_7d" && payload.sync_type !== "rolling_7_days") {
+      return {
+        valid: false,
+        error: `sync_type '${payload.sync_type}' tidak cocok untuk sinkronisasi rolling 7 hari. Wajib 'rolling_7d'.`
+      };
+    }
+  }
+  return validateSyncRequest(payload);
+}
 
 /**
- * Core Rolling 7-Calendar-Day Synchronization Processor
- * Evaluates Excel UNRAS records from [today - 6 days, today + 1 day) WIB.
- * Skips existing records by id_kejadian and in-payload duplicate IDs.
- * Strictly preserves all operator-managed fields (updated: 0).
+ * Validates same-day (H-0) sync request:
+ * Rejects if sync_type is specified as rolling_7d or anything other than same_day / same_day_h0.
+ * Enforces max 26 hours window.
  */
-export async function processRolling7DaySync(
+export function validateSameDaySyncRequest(payload: any): {
+  valid: boolean;
+  error?: string;
+  startMs?: number;
+  endMs?: number;
+} {
+  if (payload && typeof payload === "object") {
+    if (!payload.sync_type) {
+      payload.sync_type = "same_day";
+    } else if (payload.sync_type !== "same_day" && payload.sync_type !== "same_day_h0") {
+      return {
+        valid: false,
+        error: `sync_type '${payload.sync_type}' tidak cocok untuk sinkronisasi same_day (H-0). Wajib 'same_day'.`
+      };
+    }
+  }
+  return validateSyncRequest(payload);
+}
+
+/**
+ * Core Synchronization Engine
+ * Handles lock guard, validation, identifier resolution, event datetime boundary check,
+ * insert-only / skip policy, database error resilience, and audit logging.
+ */
+async function processSyncCore(
   payload: ProtestSyncPayload,
   triggeredBy: ProtestSyncLog["triggered_by"] = "power_automate",
-  triggeredByUser?: string
+  triggeredByUser?: string,
+  targetMode: "rolling_7d" | "same_day" = "rolling_7d"
 ): Promise<ProtestSyncResult> {
   const startTime = Date.now();
   let executionId = (payload as any).execution_id;
@@ -365,7 +487,8 @@ export async function processRolling7DaySync(
       finalTriggeredBy = activeManual.triggered_by;
       finalTriggeredByUser = activeManual.triggered_by_user || finalTriggeredByUser;
     } else {
-      executionId = `sync-rolling7d-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
+      const prefix = targetMode === "same_day" ? "sync-sameday" : "sync-rolling7d";
+      executionId = `${prefix}-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
     }
   }
 
@@ -395,8 +518,11 @@ export async function processRolling7DaySync(
   isRollingSyncActive = true;
   rollingSyncStartedAt = Date.now();
 
-  // 2. Validate Request
-  const validation = validateRollingSyncRequest(payload);
+  // 2. Validate Request according to target mode
+  const validation = targetMode === "same_day"
+    ? validateSameDaySyncRequest(payload)
+    : validateRollingSyncRequest(payload);
+
   if (!validation.valid || validation.startMs === undefined || validation.endMs === undefined) {
     isRollingSyncActive = false;
     rollingSyncStartedAt = null;
@@ -758,5 +884,38 @@ export async function processRolling7DaySync(
   }
 }
 
-// Backwards-compatibility alias
-export const processSameDaySync = processRolling7DaySync;
+/**
+ * Core Rolling 7-Calendar-Day Synchronization Processor
+ * Evaluates Excel UNRAS records from [today - 6 days, today + 1 day) WIB.
+ * Skips existing records by id_kejadian and in-payload duplicate IDs.
+ * Strictly preserves all operator-managed fields (updated: 0).
+ */
+export async function processRolling7DaySync(
+  payload: ProtestSyncPayload,
+  triggeredBy: ProtestSyncLog["triggered_by"] = "power_automate",
+  triggeredByUser?: string
+): Promise<ProtestSyncResult> {
+  const cloned = { ...payload };
+  if (!cloned.sync_type) {
+    cloned.sync_type = "rolling_7d";
+  }
+  return processSyncCore(cloned, triggeredBy, triggeredByUser || "Manual Sync (Rolling 7-Day)", "rolling_7d");
+}
+
+/**
+ * Core Same-Day (H-0) Synchronization Processor
+ * Evaluates Excel UNRAS records for today's WIB calendar day [today 00:00:00+07:00, tomorrow 00:00:00+07:00).
+ * Skips existing records by id_kejadian and in-payload duplicate IDs.
+ * Strictly preserves all operator-managed fields (updated: 0).
+ */
+export async function processSameDaySync(
+  payload: ProtestSyncPayload,
+  triggeredBy: ProtestSyncLog["triggered_by"] = "power_automate",
+  triggeredByUser?: string
+): Promise<ProtestSyncResult> {
+  const cloned = { ...payload };
+  if (!cloned.sync_type) {
+    cloned.sync_type = "same_day";
+  }
+  return processSyncCore(cloned, triggeredBy, triggeredByUser || "Scheduled Sync (05:00 WIB)", "same_day");
+}

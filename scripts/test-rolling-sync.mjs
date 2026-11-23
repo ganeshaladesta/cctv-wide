@@ -25,7 +25,10 @@ import {
   parseSourceEventDatetime,
   verifyIntegrationToken,
   validateRollingSyncRequest,
-  processRolling7DaySync
+  validateSameDaySyncRequest,
+  validateSyncRequest,
+  processRolling7DaySync,
+  processSameDaySync
 } from "../src/lib/unras-rolling-sync.ts";
 import { protestStore } from "../src/lib/protest-store.ts";
 
@@ -486,8 +489,99 @@ async function runTests() {
   assert.equal(checkFuture, null, "Future record outside 7-day window must not exist");
   console.log("  ✔ Data 8 hari lalu dan masa depan berhasil dikecualikan (SKIPPED).");
 
+  // ---------------------------------------------------------------------------
+  // Test 13: Separation of same_day (24h) and rolling_7d (168h) helpers
+  // ---------------------------------------------------------------------------
+  console.log("\n[Test 13/15] Verifikasi Pemisahan Helper Jendela same_day vs rolling_7d...");
+  const sameDayWin = calculateSameDayWindow(refDate);
+  const rollingWin = calculateRolling7DayWindow(refDate);
+
+  assert.notEqual(calculateSameDayWindow, calculateRolling7DayWindow, "Helpers must NOT be aliased");
+  assert.equal(sameDayWin.date_wib, "2026-11-23");
+  assert.equal(sameDayWin.start_date_wib, "2026-11-23");
+  assert.equal(sameDayWin.end_date_wib, "2026-11-24");
+  assert.equal(sameDayWin.period_end_ms - sameDayWin.period_start_ms, ONE_DAY_MS, "Same-day window must be exactly 24h");
+
+  assert.equal(rollingWin.date_wib, "2026-11-23");
+  assert.equal(rollingWin.start_date_wib, "2026-11-17");
+  assert.equal(rollingWin.end_date_wib, "2026-11-24");
+  assert.equal(rollingWin.period_end_ms - rollingWin.period_start_ms, SEVEN_DAYS_MS, "Rolling window must be exactly 168h");
+  console.log("  ✔ Pemisahan kalkulasi waktu same_day (24 jam) dan rolling_7d (168 jam) diverifikasi tidak ter-alias.");
+
+  // ---------------------------------------------------------------------------
+  // Test 14: Validation of sync window constraints according to sync_type
+  // ---------------------------------------------------------------------------
+  console.log("\n[Test 14/15] Validasi Toleransi & Penolakan Jendela Tidak Sah Berdasarkan sync_type...");
+  // same_day with window > 26h should be rejected
+  const invalidSameDayPayload = {
+    sync_type: "same_day",
+    timezone: "Asia/Jakarta",
+    period_start: "2026-11-17T00:00:00+07:00",
+    period_end: "2026-11-24T00:00:00+07:00", // 168h > 26h
+    events: []
+  };
+  const sameDayVal = validateSyncRequest(invalidSameDayPayload);
+  assert.equal(sameDayVal.valid, false, "same_day with 168h window must be rejected");
+  assert.ok(sameDayVal.error?.includes("same_day"), "Error must mention same_day window limit");
+
+  // rolling_7d with window > 170h should be rejected
+  const invalidRollingPayload = {
+    sync_type: "rolling_7d",
+    timezone: "Asia/Jakarta",
+    period_start: "2026-11-10T00:00:00+07:00",
+    period_end: "2026-11-24T00:00:00+07:00", // 14 days > 170h
+    events: []
+  };
+  const rollingVal = validateSyncRequest(invalidRollingPayload);
+  assert.equal(rollingVal.valid, false, "rolling_7d with 14-day window must be rejected");
+  assert.ok(rollingVal.error?.includes("rolling 7 hari"), "Error must mention rolling 7 hari window limit");
+
+  // Inverted window (start >= end) should be rejected
+  const invertedPayload = {
+    sync_type: "rolling_7d",
+    timezone: "Asia/Jakarta",
+    period_start: "2026-11-24T00:00:00+07:00",
+    period_end: "2026-11-20T00:00:00+07:00",
+    events: []
+  };
+  const invertedVal = validateSyncRequest(invertedPayload);
+  assert.equal(invertedVal.valid, false, "Inverted window must be rejected");
+
+  // Mismatched sync_type for specific validators
+  const mismatchedRolling = validateRollingSyncRequest({ sync_type: "same_day", events: [] });
+  assert.equal(mismatchedRolling.valid, false, "validateRollingSyncRequest must reject sync_type: same_day");
+
+  const mismatchedSameDay = validateSameDaySyncRequest({ sync_type: "rolling_7d", events: [] });
+  assert.equal(mismatchedSameDay.valid, false, "validateSameDaySyncRequest must reject sync_type: rolling_7d");
+  console.log("  ✔ Seluruh batas durasi dan validasi window (same_day <= 26 jam, rolling_7d <= 170 jam) berhasil diverifikasi.");
+
+  // ---------------------------------------------------------------------------
+  // Test 15: Direct database-level concurrent duplicate insertion safety check
+  // ---------------------------------------------------------------------------
+  console.log("\n[Test 15/15] Uji Penjaminan Database Level Uniqueness pada Eksekusi Paralel Langsung...");
+  const dbConcurrentId = `DB-CONCURRENT-TEST-${Date.now()}`;
+  const batchRow = {
+    id_kejadian: dbConcurrentId,
+    kode_unras: "UNR-DB-CONC",
+    tanggal: "2026-11-23",
+    lokasi: "Gedung BI",
+    isu_tuntutan: "Uji Database Uniqueness Paralel",
+    event_datetime: "2026-11-23T10:00:00+07:00"
+  };
+
+  const [dbRes1, dbRes2] = await Promise.all([
+    protestStore.upsertFromExcelBatch([batchRow]),
+    protestStore.upsertFromExcelBatch([batchRow])
+  ]);
+
+  const totalCreated = dbRes1.created + dbRes2.created;
+  const totalSkipped = dbRes1.skipped + dbRes2.skipped;
+  assert.equal(totalCreated, 1, "Exactly one insert must succeed");
+  assert.equal(totalSkipped, 1, "The duplicate insert must be skipped");
+  console.log("  ✔ Database-level uniqueness terjamin: 1 dibuat (created), 1 dilewati (skipped), 0 duplikasi.");
+
   console.log("\n================================================================================");
-  console.log("=== SEMUA 12 PENGUJIAN SINKRONISASI ROLLING 7 HARI BERHASIL DENGAN SEMPURNA! ===");
+  console.log("=== SEMUA 15 PENGUJIAN SINKRONISASI UNRAS BERHASIL DENGAN SEMPURNA!          ===");
   console.log("================================================================================\n");
 }
 

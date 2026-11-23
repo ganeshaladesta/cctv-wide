@@ -9,6 +9,7 @@ import { NextRequest } from "next/server";
 import { POST } from "../src/app/api/integrations/unras/sync/route.ts";
 import {
   calculateSameDayWindow,
+  calculateRolling7DayWindow,
   parseSourceEventDatetime,
   verifyIntegrationToken,
   validateRollingSyncRequest,
@@ -358,17 +359,26 @@ async function runTestSuite() {
   }
 
   // ---------------------------------------------------------------------------
-  // Test 12: Valid H-0 WIB window verification
+  // Test 12: Valid H-0 & Rolling 7-Day WIB window verification
   // ---------------------------------------------------------------------------
   try {
-    const win = calculateSameDayWindow();
-    assert.ok(win.period_start.endsWith("Z") || win.period_start.includes("+"));
-    assert.ok(win.period_end.endsWith("Z") || win.period_end.includes("+"));
-    const durationHours = (win.period_end_ms - win.period_start_ms) / (1000 * 60 * 60);
-    assert.equal(durationHours, 168, "Window must be exactly 168 hours (7 days)");
-    recordTest(12, "Valid Rolling 7-Day WIB window verification", true, `Window 168h: ${win.period_start} to ${win.period_end}`);
+    const sameDayWin = calculateSameDayWindow();
+    assert.ok(sameDayWin.period_start.endsWith("Z") || sameDayWin.period_start.includes("+"));
+    assert.ok(sameDayWin.period_end.endsWith("Z") || sameDayWin.period_end.includes("+"));
+    const sameDayDurationHours = (sameDayWin.period_end_ms - sameDayWin.period_start_ms) / (1000 * 60 * 60);
+    assert.equal(sameDayDurationHours, 24, "H-0 same-day window must be exactly 24 hours");
+
+    const rollingWin = calculateRolling7DayWindow();
+    assert.ok(rollingWin.period_start.endsWith("Z") || rollingWin.period_start.includes("+"));
+    assert.ok(rollingWin.period_end.endsWith("Z") || rollingWin.period_end.includes("+"));
+    const rollingDurationHours = (rollingWin.period_end_ms - rollingWin.period_start_ms) / (1000 * 60 * 60);
+    assert.equal(rollingDurationHours, 168, "Rolling window must be exactly 168 hours (7 days)");
+
+    assert.notEqual(calculateSameDayWindow, calculateRolling7DayWindow, "Helpers must not be aliased");
+
+    recordTest(12, "Valid H-0 and Rolling 7-Day WIB window verification", true, `H-0: 24h (${sameDayWin.period_start} to ${sameDayWin.period_end}), Rolling: 168h (${rollingWin.period_start} to ${rollingWin.period_end})`);
   } catch (err) {
-    recordTest(12, "Valid H-0 WIB window verification", false, err.message);
+    recordTest(12, "Valid H-0 and Rolling 7-Day WIB window verification", false, err.message);
   }
 
   // ---------------------------------------------------------------------------
