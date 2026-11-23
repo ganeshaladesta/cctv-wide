@@ -191,7 +191,10 @@ export default function CommandCenter({
   );
 
   // Unjuk Rasa Monitoring States (Strict Asia/Jakarta Daily Operational Scope)
-  const [operationalDateWib, setOperationalDateWib] = useState<string>(getTodayWib);
+  // 1. currentOperationalDate: Live Asia/Jakarta calendar date (rolls over at midnight WIB)
+  const [currentOperationalDateWib, setCurrentOperationalDateWib] = useState<string>(getTodayWib);
+  // 2. selectedOperationalDate: User-selected operational date for UNRAS filtering (persists through auto-refresh)
+  const [selectedOperationalDateWib, setSelectedOperationalDateWib] = useState<string>(getTodayWib);
   const [dailyOverview, setDailyOverview] = useState<DailyUnrasSituationOverview | null>(null);
   const [protestEvents, setProtestEvents] = useState<ProtestEvent[]>([]);
   const [protestStats, setProtestStats] = useState<ProtestStats | null>(null);
@@ -296,9 +299,9 @@ export default function CommandCenter({
     }
   }, []);
 
-  // Fetch verified and active Unjuk Rasa events strictly for today's operational date (Asia/Jakarta)
+  // Fetch verified and active Unjuk Rasa events strictly for selected operational date (Asia/Jakarta)
   const fetchProtestEvents = useCallback(async (targetDate?: string) => {
-    const activeDate = targetDate || operationalDateWib;
+    const activeDate = targetDate || selectedOperationalDateWib;
     try {
       const res = await fetch(`/api/protests?operational_date=${encodeURIComponent(activeDate)}&is_archived=false&limit=500&sort_by=tanggal&sort_order=desc`);
       const j = await res.json();
@@ -308,11 +311,11 @@ export default function CommandCenter({
     } catch (err) {
       console.warn("[CommandCenter] Gagal memuat event unjuk rasa harian:", err);
     }
-  }, [operationalDateWib]);
+  }, [selectedOperationalDateWib]);
 
-  // Fetch daily situation overview for today's operational date
+  // Fetch daily situation overview for selected operational date
   const fetchDailyOverview = useCallback(async (targetDate?: string) => {
-    const activeDate = targetDate || operationalDateWib;
+    const activeDate = targetDate || selectedOperationalDateWib;
     try {
       const res = await fetch(`/api/protests/daily-situation?date=${encodeURIComponent(activeDate)}`);
       const j = await res.json();
@@ -322,12 +325,12 @@ export default function CommandCenter({
     } catch (err) {
       console.warn("[CommandCenter] Gagal memuat daily situation overview:", err);
     }
-  }, [operationalDateWib]);
+  }, [selectedOperationalDateWib]);
 
   // Synchronized operational date handler across National Map, Priority Panel, and KPI strip
   const handleOperationalDateChange = useCallback(
     (newDate: string) => {
-      setOperationalDateWib(newDate);
+      setSelectedOperationalDateWib(newDate);
       fetchProtestEvents(newDate);
       fetchDailyOverview(newDate);
     },
@@ -352,22 +355,28 @@ export default function CommandCenter({
     };
   }, [fetchProtestEvents, fetchDailyOverview, fetchProtestStats]);
 
-  // Midnight Rollover Watcher (Asia/Jakarta): automatically flips operational date and reloads daily events at 00:00 WIB
+  // Midnight Rollover Watcher (Asia/Jakarta): tracks live calendar day change at 00:00 WIB without resetting historical dates
   useEffect(() => {
     const checkRollover = () => {
       const currentWib = getTodayWib();
-      if (currentWib !== operationalDateWib) {
-        console.info(`[CommandCenter] Asia/Jakarta midnight rollover: ${operationalDateWib} -> ${currentWib}`);
-        setOperationalDateWib(currentWib);
-        fetchProtestEvents(currentWib);
-        fetchDailyOverview(currentWib);
+      if (currentWib !== currentOperationalDateWib) {
+        console.info(`[CommandCenter] Asia/Jakarta midnight rollover: ${currentOperationalDateWib} -> ${currentWib}`);
+        const wasTrackingCurrentDate = selectedOperationalDateWib === currentOperationalDateWib;
+        setCurrentOperationalDateWib(currentWib);
+
+        // Only advance selected date if user was viewing live 'today' (not an intentional historical date selection)
+        if (wasTrackingCurrentDate) {
+          setSelectedOperationalDateWib(currentWib);
+          fetchProtestEvents(currentWib);
+          fetchDailyOverview(currentWib);
+        }
         fetchProtestStats();
       }
     };
 
     const interval = setInterval(checkRollover, 30000);
     return () => clearInterval(interval);
-  }, [operationalDateWib, fetchProtestEvents, fetchDailyOverview, fetchProtestStats]);
+  }, [currentOperationalDateWib, selectedOperationalDateWib, fetchProtestEvents, fetchDailyOverview, fetchProtestStats]);
 
   // Periodic background telemetry refresh (every 60s) for live operational awareness
   useEffect(() => {
@@ -911,7 +920,7 @@ export default function CommandCenter({
         unrasStats={protestStats}
         activeProtests={protestEvents}
         dailyOverview={dailyOverview}
-        operationalDate={operationalDateWib}
+        operationalDate={selectedOperationalDateWib}
         onSelectTab={setActiveTab}
       />
 
@@ -1062,7 +1071,8 @@ export default function CommandCenter({
               <div className="lg:col-span-4 min-w-0">
                 <UnrasPriorityPanel
                   protestEvents={protestEvents}
-                  operationalDate={operationalDateWib}
+                  operationalDate={selectedOperationalDateWib}
+                  currentOperationalDate={currentOperationalDateWib}
                   onOperationalDateChange={handleOperationalDateChange}
                   onSelectEventDetail={handleProtestMarkerClick}
                   onFocusEventOnMap={(event) => {

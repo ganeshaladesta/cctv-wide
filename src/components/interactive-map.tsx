@@ -1555,95 +1555,73 @@ export default function InteractiveMap({
             Cluster: {clustering ? "ON" : "OFF"}
           </button>
 
-          {/* UNRAS Layer & Radius */}
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={() => toggleLayer("unras")}
-              title="Aktifkan / Nonaktifkan Layer Peta Aksi Unjuk Rasa"
-              className={`px-2.5 sm:px-3 py-1.5 rounded-xl text-[11px] sm:text-xs font-semibold border backdrop-blur-md transition-all shadow-lg flex items-center gap-1.5 cursor-pointer ${
-                showProtestLayer
-                  ? "bg-red-500/20 border-red-500/40 text-red-400 shadow-red-500/10"
-                  : "bg-[#090C12]/92 border-[var(--border-default)] text-[#98A4B8] hover:text-white"
-              }`}
-            >
-              <span className="relative flex h-2 w-2">
-                {showProtestLayer && (
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                )}
-                <span className={`relative inline-flex rounded-full h-2 w-2 ${showProtestLayer ? "bg-red-500" : "bg-slate-500"}`}></span>
-              </span>
-              <span>Unras</span>
-              <span className="font-mono text-[10px] px-1.5 py-0.5 rounded-full bg-red-500/20 text-white tabular-nums border border-red-500/30">
-                {protestEvents ? protestEvents.filter((p) => p.validated_lat !== null && p.validated_lng !== null && isValidLatLng(p.validated_lat, p.validated_lng)).length : 0}
-              </span>
-            </button>
-
-            {showProtestLayer && (
-              <button
-                type="button"
-                onClick={() => {
-                  const nextMap: Record<number, number> = {
-                    1000: 1500,
-                    1500: 0,
-                    0: 250,
-                    250: 500,
-                    500: 1000
-                  };
-                  setUnrasRadiusDistance(nextMap[unrasRadiusDistance] ?? 1000);
-                }}
-                title="Siklus Radius Perimeter Unjuk Rasa: 250m, 500m, 1km, 1.5km, Nonaktif"
-                className="px-2 py-1.5 rounded-xl text-[10px] sm:text-[11px] font-mono font-medium border bg-[#090C12]/92 border-red-500/30 text-red-300 hover:text-white backdrop-blur-md transition-colors shadow-lg cursor-pointer"
-              >
-                Rad: {unrasRadiusDistance === 0 ? "OFF" : unrasRadiusDistance >= 1000 ? `${unrasRadiusDistance / 1000}km` : `${unrasRadiusDistance}m`}
-              </button>
-            )}
-          </div>
-
-          {/* Bank Indonesia Layer & Radius */}
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={() => toggleLayer("biOffice")}
-              title="Aktifkan / Nonaktifkan Layer Kantor Bank Indonesia (47 Kantor)"
-              className={`px-2.5 sm:px-3 py-1.5 rounded-xl text-[11px] sm:text-xs font-semibold border backdrop-blur-md transition-all shadow-lg flex items-center gap-1.5 cursor-pointer ${
-                showBIOfficeLayer
-                  ? "bg-cyan-500/20 border-cyan-500/40 text-cyan-300 shadow-cyan-500/10"
-                  : "bg-[#090C12]/92 border-[var(--border-default)] text-[#98A4B8] hover:text-white"
-              }`}
-            >
-              <Building2 className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Kantor BI</span>
-              <span className="font-mono text-[10px] px-1.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 tabular-nums border border-cyan-500/30">
-                {allBIOffices.filter((o) => o.validation_status === "verified").length}
-              </span>
-            </button>
-
-            {showBIOfficeLayer && (
-              <button
-                type="button"
-                onClick={() => {
-                  const nextMap: Record<number, number> = {
-                    3000: 5000,
-                    5000: 10000,
-                    10000: -1,
-                    [-1]: 0,
-                    0: 1000,
-                    1000: 3000
-                  };
-                  setOfficeRadiusDistance(nextMap[officeRadiusDistance] ?? 3000);
-                }}
-                title="Siklus Radius Perimeter Kantor BI: 1km, 3km, 5km, 10km, Konsentris, Nonaktif"
-                className="px-2 py-1.5 rounded-xl text-[10px] sm:text-[11px] font-mono font-medium border bg-[#090C12]/92 border-cyan-500/30 text-cyan-300 hover:text-white backdrop-blur-md transition-colors shadow-lg cursor-pointer"
-              >
-                Rad: {officeRadiusDistance === -1 ? "Konsentris" : officeRadiusDistance === 0 ? "OFF" : `${officeRadiusDistance / 1000}km`}
-              </button>
-            )}
-          </div>
-
-          {/* Tactical GeoINT HUD Trigger */}
+          {/* Group B: Spatial Analysis Radius Controls */}
+          {/* Radius UNRAS */}
           <button
             type="button"
+            data-testid="btn-radius-unras"
+            onClick={() => {
+              const nextMap: Record<number, number> = {
+                1000: 1500,
+                1500: 0,
+                0: 250,
+                250: 500,
+                500: 1000
+              };
+              setUnrasRadiusDistance(nextMap[unrasRadiusDistance] ?? 1000);
+            }}
+            title="Mengatur jarak analisis dari titik kejadian unjuk rasa."
+            className={`px-2.5 sm:px-3 py-1.5 rounded-xl text-[11px] sm:text-xs font-medium border backdrop-blur-md transition-all shadow-lg flex items-center gap-1.5 cursor-pointer bg-red-500/15 border-red-500/40 text-red-300 hover:text-white hover:bg-red-500/25 ${
+              !showProtestLayer ? "opacity-75" : ""
+            }`}
+          >
+            <span className="w-2 h-2 rounded-full bg-red-400 shrink-0" />
+            <span className="whitespace-nowrap">Radius UNRAS:</span>
+            <span className="font-mono font-bold text-white tabular-nums">
+              {unrasRadiusDistance === 0
+                ? "Nonaktif"
+                : unrasRadiusDistance >= 1000
+                ? `${unrasRadiusDistance / 1000} km`
+                : `${unrasRadiusDistance} m`}
+            </span>
+          </button>
+
+          {/* Radius Pemantauan BI */}
+          <button
+            type="button"
+            data-testid="btn-radius-bi"
+            onClick={() => {
+              const nextMap: Record<number, number> = {
+                3000: 5000,
+                5000: 10000,
+                10000: -1,
+                [-1]: 0,
+                0: 1000,
+                1000: 3000
+              };
+              setOfficeRadiusDistance(nextMap[officeRadiusDistance] ?? 3000);
+            }}
+            title="Mengatur jarak pemantauan dari lokasi kantor BI."
+            className={`px-2.5 sm:px-3 py-1.5 rounded-xl text-[11px] sm:text-xs font-medium border backdrop-blur-md transition-all shadow-lg flex items-center gap-1.5 cursor-pointer bg-emerald-500/15 border-emerald-500/40 text-emerald-300 hover:text-white hover:bg-emerald-500/25 ${
+              !showBIOfficeLayer ? "opacity-75" : ""
+            }`}
+          >
+            <Building2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+            <span className="whitespace-nowrap">Radius Pemantauan BI:</span>
+            <span className="font-mono font-bold text-white tabular-nums">
+              {officeRadiusDistance === -1
+                ? "Konsentris"
+                : officeRadiusDistance === 0
+                ? "Nonaktif"
+                : `${officeRadiusDistance / 1000} km`}
+            </span>
+          </button>
+
+          {/* Group C: Tactical Visualization */}
+          <button
+            type="button"
+            data-testid="btn-tactical-hud"
+            title="Menampilkan overlay informasi dan elemen situasional taktis pada peta."
             onClick={() => {
               if (!selectedGeoIntAsset) {
                 // If no asset selected, pick first verified BI Office or first protest
