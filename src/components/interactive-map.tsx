@@ -449,11 +449,11 @@ function createProtestPopupHtml(
         isClose
           ? "bg-amber-950/50 border border-amber-500/40 text-amber-300"
           : "bg-blue-950/40 border border-blue-500/30 text-blue-300"
-      } px-2 py-1 rounded-lg">
-        <span class="flex items-center gap-1 font-semibold truncate max-w-[190px]">
+      } px-2.5 py-1.5 rounded-lg">
+        <span class="flex items-center gap-1.5 font-semibold truncate max-w-[210px]">
           🏢 BI: ${escapeHtml(nearestOffice.office.short_name || nearestOffice.office.office_name)}
         </span>
-        <span class="font-mono font-bold text-white shrink-0">
+        <span class="font-mono font-bold text-white shrink-0 ml-1">
           ${distText}
         </span>
       </div>
@@ -461,8 +461,8 @@ function createProtestPopupHtml(
   }
 
   return `
-    <div class="scc-protest-popup-root p-3 text-left font-sans text-white w-full max-w-[320px] box-border overflow-hidden" style="width: 100%; max-width: 320px; box-sizing: border-box;">
-      <div class="flex items-center justify-between gap-1.5 pb-2 mb-2 border-b border-[#1E293B]">
+    <div class="scc-protest-popup-root p-3.5 text-left font-sans text-white w-full box-border overflow-hidden" style="width: min(360px, calc(100vw - 40px)); max-width: 360px; box-sizing: border-box;">
+      <div class="flex items-center justify-between gap-2 pb-2 mb-2 border-b border-[#1E293B]">
         <div class="flex items-center gap-1.5 flex-wrap">
           <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${sBadge.bg}">
             ${sBadge.label}
@@ -471,28 +471,28 @@ function createProtestPopupHtml(
             ${uBadge.label}
           </span>
         </div>
-        <span class="font-mono text-[10px] text-[#98A4B8] font-bold truncate max-w-[110px]" title="${escapeHtml(p.kode_unras || p.id_kejadian)}">
+        <span class="font-mono text-[10px] text-[#98A4B8] font-bold truncate max-w-[130px]" title="${escapeHtml(p.kode_unras || p.id_kejadian)}">
           ${escapeHtml(p.kode_unras || p.id_kejadian)}
         </span>
       </div>
 
-      <h4 class="text-xs font-bold text-white line-clamp-2 leading-snug mb-2.5">
+      <h4 class="text-xs sm:text-[13px] font-bold text-white leading-snug mb-2.5 break-words line-clamp-3">
         ${safeIsu}
       </h4>
 
       <div class="space-y-1.5 text-[11px] text-[#98A4B8] mb-3">
         <div class="flex items-center gap-2">
-          <span class="text-xs">📅</span>
+          <span class="text-xs shrink-0">📅</span>
           <span class="text-[#F3F6FB]">${p.tanggal} • ${waktuFormatted}</span>
         </div>
         <div class="flex items-start gap-2">
           <span class="text-xs shrink-0 mt-0.5">📍</span>
-          <span class="text-[#F3F6FB] leading-tight line-clamp-2">
+          <span class="text-[#F3F6FB] leading-tight break-words">
             ${safeLokasi}${safeKota ? ` (${safeKota})` : ""}${safeProvinsi ? `, ${safeProvinsi}` : ""}
           </span>
         </div>
         <div class="flex items-center gap-2">
-          <span class="text-xs">👥</span>
+          <span class="text-xs shrink-0">👥</span>
           <span>Estimasi Massa: <strong class="text-white font-mono">${crowdFormatted}</strong></span>
         </div>
         <div class="flex items-center gap-1.5 pt-1 text-[10px] text-emerald-400 font-semibold border-t border-[#1E293B]/60">
@@ -507,7 +507,7 @@ function createProtestPopupHtml(
         <button
           type="button"
           id="btn-protest-geoint-${p.id}"
-          class="popup-btn-geoint w-full min-w-0 max-w-full py-2 px-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-blue-300 text-[11px] font-semibold flex items-center justify-center gap-1 border border-blue-500/25 transition-all cursor-pointer box-border text-center"
+          class="popup-btn-geoint w-full min-w-0 max-w-full py-2 px-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-blue-300 text-[11px] font-semibold flex items-center justify-center gap-1.5 border border-blue-500/25 transition-all cursor-pointer box-border text-center"
           style="width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; white-space: normal; overflow-wrap: anywhere; text-align: center;"
         >
           <svg class="w-3.5 h-3.5 text-blue-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -520,7 +520,7 @@ function createProtestPopupHtml(
         <button
           type="button"
           id="btn-protest-popup-${p.id}"
-          class="popup-btn-pantau w-full min-w-0 max-w-full py-2 px-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-semibold flex items-center justify-center gap-1 shadow-lg shadow-blue-500/20 transition-all cursor-pointer box-border text-center"
+          class="popup-btn-pantau w-full min-w-0 max-w-full py-2 px-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-semibold flex items-center justify-center gap-1.5 shadow-lg shadow-blue-500/20 transition-all cursor-pointer box-border text-center"
           style="width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; white-space: normal; overflow-wrap: anywhere; text-align: center;"
         >
           <span class="truncate">Pantau Situasi</span>
@@ -1062,8 +1062,10 @@ export default function InteractiveMap({
 
       marker.bindPopup(createProtestPopupHtml(p, nearestOffice), {
         className: "scc-leaflet-protest-popup",
-        maxWidth: 320,
-        autoPanPadding: [24, 24]
+        maxWidth: 360,
+        minWidth: 280,
+        autoPan: true,
+        autoPanPadding: [16, 16]
       });
 
       marker.on("popupopen", () => {
