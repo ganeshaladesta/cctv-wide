@@ -14,7 +14,8 @@ import {
   generateIdKejadian,
   generateKodeUnras,
   normalizeProtestStatus,
-  synthesizePointsForLegacyEvent
+  synthesizePointsForLegacyEvent,
+  mapSourceStatusToProtestStatus
 } from "./unras-helpers";
 import {
   ProtestEvent,
@@ -27,7 +28,8 @@ import {
   DailyUnrasSituationOverview,
   ProtestPoint,
   ProtestStatus,
-  ProtestUrgency
+  ProtestUrgency,
+  SourceStatusCategory
 } from "./types/protests";
 
 export { isSupabaseConfigured };
@@ -57,6 +59,7 @@ function mapRowToProtest(row: any): ProtestEvent {
     kota_kabupaten: row.kota_kabupaten,
     keterangan_source: row.keterangan_source,
     status: normalizeProtestStatus(row.status),
+    status_sumber: (row.status_sumber as SourceStatusCategory) || null,
     urgency: row.urgency || "medium",
     category_id: row.category_id,
     category_name: row.category_name,
@@ -493,6 +496,58 @@ export async function updateStatusInSupabase(
   }
 
   return mapRowToProtest(updated);
+}
+
+/**
+ * 5.1 Update Source-Owned Status Field (status_sumber) in Supabase
+ * Strictly preserves operator-managed fields (status, urgency, validated_lat, etc.)
+ */
+export async function updateProtestSourceStatusInSupabase(
+  id: string,
+  newStatusSumber: SourceStatusCategory,
+  rawSourceStatus?: string | null,
+  actorName: string = "Power Automate Sync"
+): Promise<boolean> {
+  const supabase = getSupabaseAdminClient();
+  if (!supabase) return false;
+
+  const existing = await getProtestByIdFromSupabase(id);
+  if (!existing) return false;
+
+  const previous = existing.status_sumber || null;
+  if (previous === newStatusSumber) return false;
+
+  const now = new Date().toISOString();
+  const { error: updateErr } = await supabase
+    .from("protests")
+    .update({
+      status_sumber: newStatusSumber,
+      updated_at: now
+    })
+    .eq("id", existing.id);
+
+  if (updateErr) {
+    console.error("[updateProtestSourceStatusInSupabase] Error updating status_sumber:", updateErr);
+    throw new Error(`Gagal memperbarui status_sumber di Supabase: ${updateErr.message}`);
+  }
+
+  const toProtestStatus = mapSourceStatusToProtestStatus(newStatusSumber);
+  const fromProtestStatus = previous ? mapSourceStatusToProtestStatus(previous) : existing.status;
+
+  const { error: histErr } = await supabase.from("protest_status_history").insert({
+    protest_id: existing.id,
+    from_status: fromProtestStatus,
+    to_status: toProtestStatus,
+    reason: `Sinkronisasi status sumber Excel: '${rawSourceStatus || newStatusSumber}'`,
+    changed_by_id: "power_automate",
+    changed_by_name: actorName
+  });
+
+  if (histErr) {
+    console.warn("[updateProtestSourceStatusInSupabase] Warning: Failed to insert status history:", histErr.message);
+  }
+
+  return true;
 }
 
 /**
@@ -1203,7 +1258,8 @@ export async function upsertExcelBatchInSupabase(
         provinsi: rec.provinsi || "DKI Jakarta",
         kota_kabupaten: rec.kota_kabupaten || null,
         keterangan_source: rec.keterangan_source || null,
-        status: "scheduled",
+        status: (rec as any).status || "scheduled",
+        status_sumber: (rec as any).status_sumber || null,
         urgency: "medium",
         source_type: "excel_sync",
         validated_lat: hasDirectCoords ? rec.validated_lat : null,

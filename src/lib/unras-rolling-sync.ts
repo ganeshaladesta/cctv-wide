@@ -29,6 +29,10 @@ import {
   classifyCandidate,
   ExistingProtestComparisonItem
 } from "./unras-identity-registry";
+import {
+  mapSourceStatus,
+  mapSourceStatusToProtestStatus
+} from "./unras-helpers";
 
 // Rolling 7-calendar-day window: 7 days (168 hours) + 2 hours clock skew margin
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
@@ -721,7 +725,8 @@ async function processSyncCore(
 
   const errors: string[] = [];
   let inserted = 0;
-  const updated = 0;
+  let updated = 0;
+  let statusUpdated = 0;
   let skipped = 0;
   let failed = 0;
   const seenPayloadIds = new Set<string>();
@@ -781,19 +786,9 @@ async function processSyncCore(
         continue;
       }
 
-      // Rolling window boundary check: event_datetime >= period_start && event_datetime < period_end
-      // Half-open interval [startMs, endMs)
-      if (timeParsed.epochMs < startMs) {
-        skipped++;
-        errors.push(`[Baris ${rowIndex}] Dilewati: Waktu kejadian (${timeParsed.iso}) lebih lampau dari batas awal jendela (${payload.period_start}).`);
-        continue;
-      }
-
-      if (timeParsed.epochMs >= endMs) {
-        skipped++;
-        errors.push(`[Baris ${rowIndex}] Dilewati: Waktu kejadian (${timeParsed.iso}) di luar atau melebihi batas akhir jendela (${payload.period_end}).`);
-        continue;
-      }
+      // Read source-owned status (mapped from Power Automate: item()?['Status Kejadian'] -> status_sumber)
+      const rawStatusSumber = getField(row, "status_sumber", "Status Kejadian", "status_kejadian");
+      const mappedStatusSumber = mapSourceStatus(rawStatusSumber);
 
       // Derive event date in Asia/Jakarta (WIB)
       const eventDateWib = new Intl.DateTimeFormat("en-CA", {
@@ -802,9 +797,6 @@ async function processSyncCore(
         month: "2-digit",
         day: "2-digit"
       }).format(new Date(timeParsed.epochMs));
-
-      if (!oldestEventDate || eventDateWib < oldestEventDate) oldestEventDate = eventDateWib;
-      if (!newestEventDate || eventDateWib > newestEventDate) newestEventDate = eventDateWib;
 
       const cleanDateCompact = eventDateWib.replace(/-/g, "");
 
@@ -839,6 +831,50 @@ async function processSyncCore(
         idKejadian = fallbackId;
         kodeUnras = fallbackId;
       }
+
+      // Rolling window boundary check: event_datetime >= period_start && event_datetime < period_end
+      // Half-open interval [startMs, endMs)
+      if (timeParsed.epochMs < startMs) {
+        // Task 10: Ensure older registered incidents can receive status updates even if their event date is outside the rolling 7-day window
+        let canonicalId: string | null = null;
+        if (idKejadian && cachedRegistryKeys.has(`ID:${idKejadian}`)) {
+          canonicalId = cachedRegistryKeys.get(`ID:${idKejadian}`)!;
+        } else if (idKejadian) {
+          const inDb = await protestStore.getProtestById(idKejadian);
+          if (inDb) canonicalId = inDb.id_kejadian;
+        }
+
+        if (canonicalId) {
+          skipped++;
+          if (mappedStatusSumber) {
+            const updateRes = await protestStore.updateProtestSourceStatus(
+              canonicalId,
+              mappedStatusSumber,
+              rawStatusSumber,
+              finalTriggeredBy
+            );
+            if (updateRes.updated) {
+              updated++;
+              statusUpdated++;
+            }
+          }
+          errors.push(`[ID: ${idKejadian}] Rekor lama (${timeParsed.iso}) di luar jendela terdaftar di sistem: Status sumber disinkronisasi ke '${mappedStatusSumber || "tidak berubah"}', rekor tidak diinsert.`);
+          continue;
+        }
+
+        skipped++;
+        errors.push(`[Baris ${rowIndex}] Dilewati: Waktu kejadian (${timeParsed.iso}) lebih lampau dari batas awal jendela (${payload.period_start}).`);
+        continue;
+      }
+
+      if (timeParsed.epochMs >= endMs) {
+        skipped++;
+        errors.push(`[Baris ${rowIndex}] Dilewati: Waktu kejadian (${timeParsed.iso}) di luar atau melebihi batas akhir jendela (${payload.period_end}).`);
+        continue;
+      }
+
+      if (!oldestEventDate || eventDateWib < oldestEventDate) oldestEventDate = eventDateWib;
+      if (!newestEventDate || eventDateWib > newestEventDate) newestEventDate = eventDateWib;
 
       // In-payload duplicate check: process first occurrence, skip subsequent occurrences
       if (seenPayloadIds.has(idKejadian)) {
@@ -896,12 +932,36 @@ async function processSyncCore(
 
       if (candidateVerdict.action === "EXISTING") {
         skipped++;
+        if (candidateVerdict.canonicalId && mappedStatusSumber) {
+          const updateRes = await protestStore.updateProtestSourceStatus(
+            candidateVerdict.canonicalId,
+            mappedStatusSumber,
+            rawStatusSumber,
+            finalTriggeredBy
+          );
+          if (updateRes.updated) {
+            updated++;
+            statusUpdated++;
+          }
+        }
         errors.push(`[ID: ${idKejadian}] Dilewati (EXISTING): ${candidateVerdict.reason}`);
         continue;
       }
 
       if (candidateVerdict.action === "DUPLICATE") {
         skipped++;
+        if (candidateVerdict.canonicalId && mappedStatusSumber) {
+          const updateRes = await protestStore.updateProtestSourceStatus(
+            candidateVerdict.canonicalId,
+            mappedStatusSumber,
+            rawStatusSumber,
+            finalTriggeredBy
+          );
+          if (updateRes.updated) {
+            updated++;
+            statusUpdated++;
+          }
+        }
         errors.push(`[ID: ${idKejadian}] Dilewati (DUPLICATE): ${candidateVerdict.reason}`);
         if (candidateVerdict.canonicalId) {
           cachedRegistryKeys.set(`ID:${idKejadian}`, candidateVerdict.canonicalId);
@@ -1022,6 +1082,8 @@ async function processSyncCore(
         validated_lat: coords.lat,
         validated_lng: coords.lng,
         category_id: category,
+        status_sumber: mappedStatusSumber || null,
+        status: mapSourceStatusToProtestStatus(mappedStatusSumber),
         raw_source_payload: row as unknown as Record<string, unknown>,
         regional,
         kategori_isu: kategoriIsu,
@@ -1033,7 +1095,6 @@ async function processSyncCore(
     if (validBatchForStore.length > 0) {
       const upsertStats = await protestStore.upsertFromExcelBatch(validBatchForStore);
       inserted = upsertStats.created;
-      // updated is guaranteed to be 0: sync skips existing events, never updates
       skipped += upsertStats.skipped;
       failed += (validBatchForStore.length - (inserted + upsertStats.skipped));
       if (upsertStats.insertedByDate) {
@@ -1047,7 +1108,7 @@ async function processSyncCore(
     const durationMs = Date.now() - startTime;
     let finalStatus: ProtestSyncLog["status"] = "success";
     if (failed > 0) {
-      if (inserted > 0) {
+      if (inserted > 0 || updated > 0) {
         finalStatus = "partial";
       } else {
         finalStatus = "failed";
@@ -1058,9 +1119,9 @@ async function processSyncCore(
       completed_at: new Date().toISOString(),
       status: finalStatus,
       records_received: payload.events.length,
-      records_processed: validBatchForStore.length,
+      records_processed: validBatchForStore.length + updated,
       records_created: inserted,
-      records_updated: 0,
+      records_updated: updated,
       records_skipped: skipped,
       records_failed: failed,
       error_details: errors.length > 0 ? errors.slice(0, 50).join(" | ") : null,
@@ -1079,9 +1140,10 @@ async function processSyncCore(
       period_end: payload.period_end || "",
       summary: {
         received: payload.events.length,
-        processed: validBatchForStore.length,
+        processed: validBatchForStore.length + updated,
         inserted,
-        updated: 0,
+        updated,
+        status_updated: statusUpdated,
         skipped,
         failed
       },
@@ -1104,9 +1166,9 @@ async function processSyncCore(
       completed_at: new Date().toISOString(),
       status: "failed",
       records_received: payload.events.length,
-      records_processed: validBatchForStore.length,
+      records_processed: validBatchForStore.length + updated,
       records_created: inserted,
-      records_updated: 0,
+      records_updated: updated,
       records_skipped: skipped,
       records_failed: payload.events.length - inserted,
       error_details: errors.join(" | "),
@@ -1121,9 +1183,10 @@ async function processSyncCore(
       period_end: payload.period_end || "",
       summary: {
         received: payload.events.length,
-        processed: validBatchForStore.length,
+        processed: validBatchForStore.length + updated,
         inserted,
-        updated: 0,
+        updated,
+        status_updated: statusUpdated,
         skipped,
         failed: payload.events.length - inserted
       },

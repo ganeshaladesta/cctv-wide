@@ -135,6 +135,7 @@ CREATE TABLE IF NOT EXISTS protests (
     kota_kabupaten TEXT,
     keterangan_source TEXT,
     raw_source_payload TEXT DEFAULT '{}',
+    status_sumber TEXT,
 
     -- Operator-Managed Fields
     status TEXT NOT NULL DEFAULT 'scheduled',
@@ -189,6 +190,7 @@ CREATE INDEX IF NOT EXISTS idx_protests_id_kejadian ON protests(id_kejadian);
 CREATE INDEX IF NOT EXISTS idx_protests_kode_unras ON protests(kode_unras);
 CREATE INDEX IF NOT EXISTS idx_protests_tanggal ON protests(tanggal);
 CREATE INDEX IF NOT EXISTS idx_protests_status ON protests(status);
+CREATE INDEX IF NOT EXISTS idx_protests_status_sumber ON protests(status_sumber);
 CREATE INDEX IF NOT EXISTS idx_protests_urgency ON protests(urgency);
 CREATE INDEX IF NOT EXISTS idx_protests_deleted ON protests(deleted_at);
 CREATE INDEX IF NOT EXISTS idx_protests_coords ON protests(validated_lat, validated_lng);

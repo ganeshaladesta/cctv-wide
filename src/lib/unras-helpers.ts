@@ -5,6 +5,7 @@
 
 import {
   ProtestStatus,
+  SourceStatusCategory,
   ProtestEvent,
   ProtestPoint,
   ProtestElement
@@ -294,6 +295,70 @@ export function synthesizeRedaksiText(params: {
   }
 
   return parts.join("\n");
+}
+
+/**
+ * Maps raw source status values (e.g. from Excel 'Status Kejadian' or 'status_sumber')
+ * to the 3 canonical SCC status categories:
+ * - Belum Berlangsung
+ * - Sedang Berlangsung
+ * - Selesai
+ * Returns null if the value is null, undefined, empty, or unrecognized.
+ */
+export function mapSourceStatus(raw?: unknown): SourceStatusCategory | null {
+  if (raw === undefined || raw === null) return null;
+  const s = String(raw).trim().toLowerCase();
+  if (!s) return null;
+
+  // Belum Berlangsung
+  if (
+    s === "belum berlangsung" ||
+    s === "belum" ||
+    s === "scheduled" ||
+    s === "terjadwal" ||
+    s === "rencana" ||
+    s === "persiapan" ||
+    s.startsWith("belum")
+  ) {
+    return "Belum Berlangsung";
+  }
+
+  // Sedang Berlangsung
+  if (
+    s === "sedang berlangsung" ||
+    s === "sedang" ||
+    s === "berlangsung" ||
+    s === "ongoing" ||
+    s === "aktif" ||
+    s === "active" ||
+    s.startsWith("sedang")
+  ) {
+    return "Sedang Berlangsung";
+  }
+
+  // Selesai
+  if (
+    s === "selesai" ||
+    s === "completed" ||
+    s === "rampung" ||
+    s === "bubar" ||
+    s === "terkendali" ||
+    s === "monitoring" ||
+    s.startsWith("selesai")
+  ) {
+    return "Selesai";
+  }
+
+  return null;
+}
+
+/**
+ * Maps SourceStatusCategory to internal operational ProtestStatus for initial insertion.
+ */
+export function mapSourceStatusToProtestStatus(category?: SourceStatusCategory | null): ProtestStatus {
+  if (category === "Sedang Berlangsung") return "ongoing";
+  if (category === "Selesai") return "completed";
+  return "scheduled";
 }
 
 /**
