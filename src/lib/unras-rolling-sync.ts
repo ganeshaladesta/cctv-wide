@@ -1,9 +1,11 @@
 /**
- * SCC - EAGLE EYES: Unjuk Rasa Same-Day (H-0) Sync Engine
- * Contract: Scheduled Sync (05:00 WIB Asia/Jakarta) -> Vercel API -> Supabase / Local Store
+ * SCC - EAGLE EYES: Unjuk Rasa Rolling 7-Calendar-Day Sync Engine
+ * Contract: Scheduled Sync (05:00 WIB Asia/Jakarta) & Manual Sync -> Vercel API -> Supabase / Local Store
  * Worksheet: 'NEW UNRAS 2022-2026'
  *
- * Boundary: Current Calendar Day in Asia/Jakarta (00:00:00 WIB today <= event < 00:00:00 WIB tomorrow)
+ * Boundary: Rolling 7 Calendar Days in Asia/Jakarta:
+ * [00:00:00 WIB (Today - 6 days), 00:00:00 WIB (Today + 1 day)) (exclusive)
+ * Total duration: exactly 7 days * 24 hours = 168 hours
  */
 
 import crypto from "node:crypto";
@@ -24,24 +26,28 @@ import {
 } from "./ms-graph-sync";
 import { normalizeTimeString } from "./time-normalization";
 
-// Maximum window duration: 24 hours (1 calendar day in Asia/Jakarta) + 10 minutes clock skew margin
+// Rolling 7-calendar-day window: 7 days (168 hours) + 2 hours clock skew margin
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
-const MAX_WINDOW_TOLERANCE_MS = ONE_DAY_MS + 10 * 60 * 1000;
+const SEVEN_DAYS_MS = 7 * ONE_DAY_MS;
+const MAX_WINDOW_TOLERANCE_MS = SEVEN_DAYS_MS + 2 * 60 * 60 * 1000;
 const MAX_BATCH_LIMIT = 1000;
 
 // In-memory concurrency lock
-let isSameDaySyncActive = false;
-let sameDaySyncStartedAt: number | null = null;
+let isRollingSyncActive = false;
+let rollingSyncStartedAt: number | null = null;
 const SYNC_LOCK_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes failsafe
 
 /**
- * Calculates exact Same-Day (H-0) synchronization window for Asia/Jakarta (WIB)
- * Start: 00:00:00 WIB today, inclusive
- * End: 00:00:00 WIB tomorrow, exclusive (exact 24-hour window)
+ * Calculates exact Rolling 7-Calendar-Day synchronization window for Asia/Jakarta (WIB)
+ * Start: 00:00:00 WIB (today - 6 days), inclusive
+ * End: 00:00:00 WIB tomorrow (today + 1 day), exclusive
+ * Total duration: 168 hours (7 calendar days)
  * Inclusion rule: event_datetime >= period_start AND event_datetime < period_end
  */
-export function calculateSameDayWindow(refDate: Date = new Date()): {
+export function calculateRolling7DayWindow(refDate: Date = new Date()): {
   date_wib: string;
+  start_date_wib: string;
+  end_date_wib: string;
   period_start: string;
   period_end: string;
   period_start_ms: number;
@@ -59,13 +65,15 @@ export function calculateSameDayWindow(refDate: Date = new Date()): {
   const m = parts.find((p) => p.type === "month")?.value || String(refDate.getMonth() + 1).padStart(2, "0");
   const d = parts.find((p) => p.type === "day")?.value || String(refDate.getDate()).padStart(2, "0");
 
-  const date_wib = `${y}-${m}-${d}`;
-  if (date_wib.includes("--")) {
-    throw new Error(`Malformed date_wib generated with double dash: ${date_wib}`);
+  const todayWib = `${y}-${m}-${d}`;
+  if (todayWib.includes("--")) {
+    throw new Error(`Malformed date_wib generated with double dash: ${todayWib}`);
   }
 
-  const startWib = new Date(`${date_wib}T00:00:00+07:00`);
-  const endWib = new Date(startWib.getTime() + ONE_DAY_MS);
+  const todayStartWib = new Date(`${todayWib}T00:00:00+07:00`);
+  // Rolling 7 calendar days: Start is 6 days ago at 00:00:00 WIB, End is tomorrow at 00:00:00 WIB (exclusive)
+  const startWib = new Date(todayStartWib.getTime() - 6 * ONE_DAY_MS);
+  const endWib = new Date(todayStartWib.getTime() + ONE_DAY_MS);
 
   const period_start = startWib.toISOString();
   const period_end = endWib.toISOString();
@@ -74,8 +82,32 @@ export function calculateSameDayWindow(refDate: Date = new Date()): {
     throw new Error(`Malformed ISO string generated with double dash: ${period_start}`);
   }
 
+  const startParts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(startWib);
+  const sy = startParts.find((p) => p.type === "year")?.value;
+  const sm = startParts.find((p) => p.type === "month")?.value;
+  const sd = startParts.find((p) => p.type === "day")?.value;
+  const start_date_wib = `${sy}-${sm}-${sd}`;
+
+  const endParts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(endWib);
+  const ey = endParts.find((p) => p.type === "year")?.value;
+  const em = endParts.find((p) => p.type === "month")?.value;
+  const ed = endParts.find((p) => p.type === "day")?.value;
+  const end_date_wib = `${ey}-${em}-${ed}`;
+
   return {
-    date_wib,
+    date_wib: todayWib,
+    start_date_wib,
+    end_date_wib,
     period_start,
     period_end,
     period_start_ms: startWib.getTime(),
@@ -84,7 +116,7 @@ export function calculateSameDayWindow(refDate: Date = new Date()): {
 }
 
 // Backwards-compatibility alias
-export const calculateRolling7DayWindow = calculateSameDayWindow;
+export const calculateSameDayWindow = calculateRolling7DayWindow;
 
 /**
  * Extracts a field value case-insensitively across provided candidate keys
@@ -202,7 +234,7 @@ export function verifyIntegrationToken(
 }
 
 /**
- * Validates request schema and Same-Day (H-0) window constraints
+ * Validates request schema and Rolling 7-Calendar-Day window constraints
  */
 export function validateRollingSyncRequest(payload: any): {
   valid: boolean;
@@ -214,13 +246,13 @@ export function validateRollingSyncRequest(payload: any): {
     return { valid: false, error: "Payload request tidak valid (bukan JSON object)." };
   }
 
-  // Gracefully default sync_type to "same_day" if omitted
-  const syncType = payload.sync_type || "same_day";
-  const validSyncTypes = ["same_day", "same_day_h0", "rolling_7d"];
+  // Gracefully default sync_type to "rolling_7d" if omitted
+  const syncType = payload.sync_type || "rolling_7d";
+  const validSyncTypes = ["rolling_7d", "rolling_7_days", "same_day", "same_day_h0"];
   if (!validSyncTypes.includes(syncType)) {
     return {
       valid: false,
-      error: `sync_type '${payload.sync_type}' tidak didukung. Wajib 'same_day' atau 'same_day_h0'.`
+      error: `sync_type '${payload.sync_type}' tidak didukung. Wajib 'rolling_7d' atau 'rolling_7_days'.`
     };
   }
 
@@ -250,9 +282,9 @@ export function validateRollingSyncRequest(payload: any): {
   let pStartStr = payload.period_start ? String(payload.period_start).trim() : "";
   let pEndStr = payload.period_end ? String(payload.period_end).trim() : "";
 
-  // Auto-populate default same-day window if missing
+  // Auto-populate default rolling 7-day window if missing
   if (!pStartStr || !pEndStr) {
-    const defaultWindow = calculateSameDayWindow();
+    const defaultWindow = calculateRolling7DayWindow();
     pStartStr = defaultWindow.period_start;
     pEndStr = defaultWindow.period_end;
     payload.period_start = pStartStr;
@@ -283,7 +315,7 @@ export function validateRollingSyncRequest(payload: any): {
   if (windowDurationMs > MAX_WINDOW_TOLERANCE_MS) {
     return {
       valid: false,
-      error: `Rentang waktu melebihi batas sinkronisasi H-0 hari yang sama (${(windowDurationMs / 3600000).toFixed(2)} jam, maks 24 jam).`
+      error: `Rentang waktu melebihi batas sinkronisasi rolling 7 hari (${(windowDurationMs / 3600000).toFixed(2)} jam, maks 168 jam).`
     };
   }
 
@@ -307,9 +339,12 @@ export function validateRollingSyncRequest(payload: any): {
 export const validateSameDaySyncRequest = validateRollingSyncRequest;
 
 /**
- * Core Same-Day (H-0) Synchronization Processor
+ * Core Rolling 7-Calendar-Day Synchronization Processor
+ * Evaluates Excel UNRAS records from [today - 6 days, today + 1 day) WIB.
+ * Skips existing records by id_kejadian and in-payload duplicate IDs.
+ * Strictly preserves all operator-managed fields (updated: 0).
  */
-export async function processSameDaySync(
+export async function processRolling7DaySync(
   payload: ProtestSyncPayload,
   triggeredBy: ProtestSyncLog["triggered_by"] = "power_automate",
   triggeredByUser?: string
@@ -330,13 +365,13 @@ export async function processSameDaySync(
       finalTriggeredBy = activeManual.triggered_by;
       finalTriggeredByUser = activeManual.triggered_by_user || finalTriggeredByUser;
     } else {
-      executionId = `sync-h0-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
+      executionId = `sync-rolling7d-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
     }
   }
 
   // 1. Concurrency Guard Lock
-  if (isSameDaySyncActive) {
-    if (sameDaySyncStartedAt && Date.now() - sameDaySyncStartedAt < SYNC_LOCK_TIMEOUT_MS) {
+  if (isRollingSyncActive) {
+    if (rollingSyncStartedAt && Date.now() - rollingSyncStartedAt < SYNC_LOCK_TIMEOUT_MS) {
       return {
         success: false,
         status: "skipped",
@@ -357,14 +392,14 @@ export async function processSameDaySync(
     }
   }
 
-  isSameDaySyncActive = true;
-  sameDaySyncStartedAt = Date.now();
+  isRollingSyncActive = true;
+  rollingSyncStartedAt = Date.now();
 
   // 2. Validate Request
   const validation = validateRollingSyncRequest(payload);
   if (!validation.valid || validation.startMs === undefined || validation.endMs === undefined) {
-    isSameDaySyncActive = false;
-    sameDaySyncStartedAt = null;
+    isRollingSyncActive = false;
+    rollingSyncStartedAt = null;
     return {
       success: false,
       status: "failed",
@@ -419,9 +454,10 @@ export async function processSameDaySync(
 
   const errors: string[] = [];
   let inserted = 0;
-  let updated = 0;
+  const updated = 0;
   let skipped = 0;
   let failed = 0;
+  const seenPayloadIds = new Set<string>();
 
   const validBatchForStore: Array<{
     id_kejadian: string;
@@ -496,6 +532,14 @@ export async function processSameDaySync(
         continue;
       }
 
+      // In-payload duplicate check: process first occurrence, skip subsequent occurrences
+      if (seenPayloadIds.has(idKejadian)) {
+        skipped++;
+        errors.push(`[ID: ${idKejadian}] Dilewati: Duplikasi ID kejadian berulang di dalam payload batch yang sama (kejadian pertama telah diproses).`);
+        continue;
+      }
+      seenPayloadIds.add(idKejadian);
+
       // 2. Event Timestamp Extraction & Boundary Check
       const rawTimeISO = getField(row, "WAKTU DAN TGL KEJADIAN ISO", "tanggal_kejadian", "event_datetime");
       const timeParsed = parseSourceEventDatetime(rawTimeISO, dateStr);
@@ -506,17 +550,17 @@ export async function processSameDaySync(
         continue;
       }
 
-      // Same-Day (H-0) boundary check: event_datetime >= period_start && event_datetime < period_end
-      // Exact start boundary (00:00:00 WIB today) is INCLUDED; exact end boundary (00:00:00 WIB tomorrow) is EXCLUDED
+      // Rolling 7-day boundary check: event_datetime >= period_start && event_datetime < period_end
+      // Half-open interval [startMs, endMs)
       if (timeParsed.epochMs < startMs) {
         skipped++;
-        errors.push(`[ID: ${idKejadian}] Dilewati: Waktu kejadian (${timeParsed.iso}) lebih lampau dari hari ini (kemarin/historis).`);
+        errors.push(`[ID: ${idKejadian}] Dilewati: Waktu kejadian (${timeParsed.iso}) lebih lampau dari batas awal jendela 7 hari (${payload.period_start}).`);
         continue;
       }
 
       if (timeParsed.epochMs >= endMs) {
         skipped++;
-        errors.push(`[ID: ${idKejadian}] Dilewati: Waktu kejadian (${timeParsed.iso}) di luar atau di masa depan hari ini (besok atau lebih).`);
+        errors.push(`[ID: ${idKejadian}] Dilewati: Waktu kejadian (${timeParsed.iso}) di luar atau melebihi batas akhir jendela 7 hari (${payload.period_end}).`);
         continue;
       }
 
@@ -618,31 +662,22 @@ export async function processSameDaySync(
       } as any);
     }
 
-    // 5. Deduplicate Batch by id_kejadian to prevent batch insert collision
-    const dedupedBatchMap = new Map<string, typeof validBatchForStore[0]>();
-    for (const item of validBatchForStore) {
-      if (dedupedBatchMap.has(item.id_kejadian)) {
-        errors.push(`[ID: ${item.id_kejadian}] Peringatan: Terdapat duplikasi ID di dalam batch input. Menggunakan data baris terakhir.`);
-      }
-      dedupedBatchMap.set(item.id_kejadian, item);
-    }
-    const finalBatch = Array.from(dedupedBatchMap.values());
-
-    // 6. Execute Idempotent Batch Upsert
-    if (finalBatch.length > 0) {
-      const upsertStats = await protestStore.upsertFromExcelBatch(finalBatch);
+    // 5. Execute Batch Insertion (Insert only new events, skip existing)
+    if (validBatchForStore.length > 0) {
+      const upsertStats = await protestStore.upsertFromExcelBatch(validBatchForStore);
       inserted = upsertStats.created;
-      updated = upsertStats.updated;
-      failed += (finalBatch.length - (inserted + updated));
+      // updated is guaranteed to be 0: sync skips existing events, never updates
+      skipped += upsertStats.skipped;
+      failed += (validBatchForStore.length - (inserted + upsertStats.skipped));
       if ((upsertStats as any).error) {
-        errors.push(`[Supabase Database Error]: ${(upsertStats as any).error}`);
+        errors.push(`[Database Error]: ${(upsertStats as any).error}`);
       }
     }
 
     const durationMs = Date.now() - startTime;
     let finalStatus: ProtestSyncLog["status"] = "success";
-    if (failed > 0 || (skipped > 0 && errors.length > 0)) {
-      if (inserted + updated > 0) {
+    if (failed > 0) {
+      if (inserted > 0) {
         finalStatus = "partial";
       } else {
         finalStatus = "failed";
@@ -655,7 +690,7 @@ export async function processSameDaySync(
       records_received: payload.events.length,
       records_processed: validBatchForStore.length,
       records_created: inserted,
-      records_updated: updated,
+      records_updated: 0,
       records_skipped: skipped,
       records_failed: failed,
       error_details: errors.length > 0 ? errors.slice(0, 50).join(" | ") : null,
@@ -664,8 +699,10 @@ export async function processSameDaySync(
 
     await protestStore.updateSyncLog(executionId, finalLog);
 
+    const isSuccess = (finalStatus as ProtestSyncLog["status"]) !== "failed";
+
     return {
-      success: finalStatus !== "failed",
+      success: isSuccess,
       status: finalStatus,
       execution_id: executionId,
       period_start: payload.period_start || "",
@@ -674,7 +711,7 @@ export async function processSameDaySync(
         received: payload.events.length,
         processed: validBatchForStore.length,
         inserted,
-        updated,
+        updated: 0,
         skipped,
         failed
       },
@@ -691,9 +728,9 @@ export async function processSameDaySync(
       records_received: payload.events.length,
       records_processed: validBatchForStore.length,
       records_created: inserted,
-      records_updated: updated,
+      records_updated: 0,
       records_skipped: skipped,
-      records_failed: payload.events.length - (inserted + updated),
+      records_failed: payload.events.length - inserted,
       error_details: errors.join(" | "),
       duration_ms: durationMs
     });
@@ -708,18 +745,18 @@ export async function processSameDaySync(
         received: payload.events.length,
         processed: validBatchForStore.length,
         inserted,
-        updated,
+        updated: 0,
         skipped,
-        failed: payload.events.length - (inserted + updated)
+        failed: payload.events.length - inserted
       },
       errors,
       duration_ms: durationMs
     };
   } finally {
-    isSameDaySyncActive = false;
-    sameDaySyncStartedAt = null;
+    isRollingSyncActive = false;
+    rollingSyncStartedAt = null;
   }
 }
 
 // Backwards-compatibility alias
-export const processRolling7DaySync = processSameDaySync;
+export const processSameDaySync = processRolling7DaySync;

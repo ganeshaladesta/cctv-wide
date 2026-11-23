@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   verifyIntegrationToken,
   validateRollingSyncRequest,
-  processSameDaySync
+  processRolling7DaySync
 } from "@/lib/unras-rolling-sync";
 import { ProtestSyncPayload } from "@/lib/types/protests";
 
@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 
 /**
  * POST /api/integrations/unras/sync
- * Secure webhook integration for Scheduled Cloud Sync (Same-Day H-0 Asia/Jakarta)
+ * Secure webhook integration for Scheduled & Manual Cloud Sync (Rolling 7-Calendar-Day Asia/Jakarta)
  * Authenticated via Bearer token: UNRAS_SYNC_SECRET (timing-safe constant-time comparison)
  */
 export async function POST(request: NextRequest) {
@@ -52,10 +52,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const result = await processSameDaySync(
+    const result = await processRolling7DaySync(
       body,
       "power_automate",
-      "Scheduled Sync (Same-Day H-0)"
+      "Sync (Rolling 7-Day)"
     );
 
     if (result.status === "skipped") {
@@ -68,7 +68,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         success: false,
-        error: error.message || "Internal server error during same-day sync"
+        error: error.message || "Internal server error during rolling 7-day sync"
       },
       { status: 500 }
     );
