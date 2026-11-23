@@ -461,7 +461,7 @@ function createProtestPopupHtml(
   }
 
   return `
-    <div class="p-3 text-left font-sans text-white" style="min-width: 270px; max-width: 320px;">
+    <div class="scc-protest-popup-root p-3 text-left font-sans text-white w-full max-w-[320px] box-border overflow-hidden" style="width: 100%; max-width: 320px; box-sizing: border-box;">
       <div class="flex items-center justify-between gap-1.5 pb-2 mb-2 border-b border-[#1E293B]">
         <div class="flex items-center gap-1.5 flex-wrap">
           <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${sBadge.bg}">
@@ -503,22 +503,28 @@ function createProtestPopupHtml(
         ${elementsHtml}
       </div>
 
-      <div class="grid grid-cols-2 gap-1.5">
+      <div class="popup-actions grid grid-cols-2 gap-2 w-full min-w-0" style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; width: 100%; min-width: 0; box-sizing: border-box;">
         <button
           type="button"
           id="btn-protest-geoint-${p.id}"
-          class="py-1.5 px-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-blue-300 text-[11px] font-semibold flex items-center justify-center gap-1 border border-blue-500/25 transition-all cursor-pointer"
+          class="popup-btn-geoint w-full min-w-0 max-w-full py-2 px-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-blue-300 text-[11px] font-semibold flex items-center justify-center gap-1 border border-blue-500/25 transition-all cursor-pointer box-border text-center"
+          style="width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; white-space: normal; overflow-wrap: anywhere; text-align: center;"
         >
-          <Radar class="w-3 h-3 text-blue-400" />
-          <span>GeoINT HUD</span>
+          <svg class="w-3.5 h-3.5 text-blue-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 12m-9 0a9 9 0 1 0 18 0a9 9 0 1 0 -18 0" />
+            <path d="M12 12m-5 0a5 5 0 1 0 10 0a5 5 0 1 0 -10 0" />
+            <line x1="12" y1="3" x2="12" y2="12" />
+          </svg>
+          <span class="truncate">GeoINT HUD</span>
         </button>
         <button
           type="button"
           id="btn-protest-popup-${p.id}"
-          class="py-1.5 px-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-semibold flex items-center justify-center gap-1 shadow-lg shadow-blue-500/20 transition-all cursor-pointer"
+          class="popup-btn-pantau w-full min-w-0 max-w-full py-2 px-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-semibold flex items-center justify-center gap-1 shadow-lg shadow-blue-500/20 transition-all cursor-pointer box-border text-center"
+          style="width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; white-space: normal; overflow-wrap: anywhere; text-align: center;"
         >
-          <span>Pantau Situasi</span>
-          <span>→</span>
+          <span class="truncate">Pantau Situasi</span>
+          <span class="shrink-0">→</span>
         </button>
       </div>
     </div>
