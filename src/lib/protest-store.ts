@@ -736,10 +736,24 @@ class ProtestDataStore {
       if (filters.status) {
         if (filters.status === "active") {
           whereClauses.push("status IN ('scheduled', 'ongoing', 'monitoring') AND is_archived = 0");
+        } else if (filters.status === "completed") {
+          // Tab Selesai (Arsip): status_sumber = 'Selesai' OR status = 'completed'
+          whereClauses.push("(status_sumber = 'Selesai' OR status = 'completed')");
+        } else if (filters.status === "ongoing") {
+          // Tab Sedang Berlangsung: status_sumber = 'Sedang Berlangsung'
+          whereClauses.push("status_sumber = 'Sedang Berlangsung'");
+        } else if (filters.status === "scheduled") {
+          // Tab Belum Berlangsung: status_sumber = 'Belum Berlangsung'
+          whereClauses.push("status_sumber = 'Belum Berlangsung'");
         } else if (filters.status !== "all") {
           whereClauses.push("status = ?");
           params.push(filters.status);
         }
+      }
+
+      if (filters.status_sumber && filters.status_sumber !== "all") {
+        whereClauses.push("status_sumber = ?");
+        params.push(filters.status_sumber);
       }
 
       if (filters.is_archived !== undefined) {
@@ -842,9 +856,22 @@ class ProtestDataStore {
     if (filters.status) {
       if (filters.status === "active") {
         items = items.filter((e) => ["scheduled", "ongoing", "monitoring"].includes(e.status) && !e.is_archived);
+      } else if (filters.status === "completed") {
+        // Tab Selesai (Arsip): status_sumber = 'Selesai' OR status = 'completed'
+        items = items.filter((e) => e.status_sumber === "Selesai" || e.status === "completed");
+      } else if (filters.status === "ongoing") {
+        // Tab Sedang Berlangsung: status_sumber = 'Sedang Berlangsung'
+        items = items.filter((e) => e.status_sumber === "Sedang Berlangsung");
+      } else if (filters.status === "scheduled") {
+        // Tab Belum Berlangsung: status_sumber = 'Belum Berlangsung'
+        items = items.filter((e) => e.status_sumber === "Belum Berlangsung");
       } else if (filters.status !== "all") {
         items = items.filter((e) => e.status === filters.status);
       }
+    }
+
+    if (filters.status_sumber && filters.status_sumber !== "all") {
+      items = items.filter((e) => e.status_sumber === filters.status_sumber);
     }
 
     if (filters.is_archived !== undefined) {
@@ -1031,6 +1058,7 @@ class ProtestDataStore {
       keterangan_source: input.keterangan_source || null,
       raw_source_payload: input.raw_source_payload || {},
       status: input.status || "scheduled",
+      status_sumber: input.status_sumber || null,
       urgency: input.urgency || "medium",
       category_id: input.category_id || null,
       category_name: input.category_name || null,
@@ -1083,7 +1111,7 @@ class ProtestDataStore {
           id, id_kejadian, kode_unras, tanggal, waktu_mulai, waktu_selesai, event_datetime,
           lokasi, titik_kumpul, sasaran_aksi, isu_tuntutan, estimasi_massa_source,
           organisasi_kelompok, korlap_pimpinan, wilayah_hukum, provinsi, kota_kabupaten,
-          keterangan_source, raw_source_payload, status, urgency, category_id,
+          keterangan_source, raw_source_payload, status, status_sumber, urgency, category_id,
           validated_lat, validated_lng, has_coordinates, actual_crowd_size, situation_summary,
           editorial_draft, editorial_final, is_archived, completed_at, completed_by_id,
           completed_by_name, suggested_lat, suggested_lng, suggested_address, geocoding_provider,
@@ -1096,7 +1124,7 @@ class ProtestDataStore {
           ?, ?, ?, ?, ?, ?, ?,
           ?, ?, ?, ?, ?,
           ?, ?, ?, ?, ?,
-          ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?,
           ?, ?, ?, ?, ?,
           ?, ?, ?, ?, ?,
           ?, ?, ?, ?, ?,
@@ -1129,6 +1157,7 @@ class ProtestDataStore {
         newEvent.keterangan_source,
         JSON.stringify(newEvent.raw_source_payload || {}),
         newEvent.status,
+        newEvent.status_sumber ?? null,
         newEvent.urgency,
         newEvent.category_id,
         newEvent.validated_lat,
