@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   verifyIntegrationToken,
-  validateRollingSyncRequest,
-  processRolling7DaySync
+  validateSyncRequest,
+  processRolling7DaySync,
+  processSameDaySync
 } from "@/lib/unras-rolling-sync";
 import { ProtestSyncPayload } from "@/lib/types/protests";
 
@@ -10,7 +11,7 @@ export const dynamic = "force-dynamic";
 
 /**
  * POST /api/integrations/unras/sync
- * Secure webhook integration for Scheduled & Manual Cloud Sync (Rolling 7-Calendar-Day Asia/Jakarta)
+ * Secure webhook integration for Scheduled (Same-Day H-0) & Manual (Rolling 7-Day) UNRAS Sync
  * Authenticated via Bearer token: UNRAS_SYNC_SECRET (timing-safe constant-time comparison)
  */
 export async function POST(request: NextRequest) {
@@ -41,7 +42,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const validation = validateRollingSyncRequest(body);
+    const validation = validateSyncRequest(body);
     if (!validation.valid) {
       return NextResponse.json(
         {
@@ -52,11 +53,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const result = await processRolling7DaySync(
-      body,
-      "power_automate",
-      "Sync (Rolling 7-Day)"
-    );
+    const isSameDay = body.sync_type === "same_day" || body.sync_type === "same_day_h0";
+    const defaultTriggeredByUser = isSameDay
+      ? "Scheduled Sync (05:00 WIB)"
+      : "Manual Sync (Rolling 7-Day)";
+
+    const result = isSameDay
+      ? await processSameDaySync(body, "power_automate", defaultTriggeredByUser)
+      : await processRolling7DaySync(body, "power_automate", defaultTriggeredByUser);
 
     if (result.status === "skipped") {
       return NextResponse.json(result, { status: 409 });
@@ -68,7 +72,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         success: false,
-        error: error.message || "Internal server error during rolling 7-day sync"
+        error: error.message || "Internal server error during UNRAS sync"
       },
       { status: 500 }
     );
