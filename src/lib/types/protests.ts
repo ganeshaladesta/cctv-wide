@@ -379,6 +379,12 @@ export interface ProtestStats {
   completed_today: number;
   total_camera_links: number;
   last_successful_sync: string | null;
+
+  // Source-Owned Status Metrics (from Excel status_sumber)
+  source_status_scheduled?: number;
+  source_status_ongoing?: number;
+  source_status_completed?: number;
+  source_status_unspecified?: number;
 }
 
 

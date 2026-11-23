@@ -845,7 +845,7 @@ async function processSyncCore(
         }
 
         if (canonicalId) {
-          skipped++;
+          let wasStatusUpdated = false;
           if (mappedStatusSumber) {
             const updateRes = await protestStore.updateProtestSourceStatus(
               canonicalId,
@@ -856,7 +856,11 @@ async function processSyncCore(
             if (updateRes.updated) {
               updated++;
               statusUpdated++;
+              wasStatusUpdated = true;
             }
+          }
+          if (!wasStatusUpdated) {
+            skipped++;
           }
           errors.push(`[ID: ${idKejadian}] Rekor lama (${timeParsed.iso}) di luar jendela terdaftar di sistem: Status sumber disinkronisasi ke '${mappedStatusSumber || "tidak berubah"}', rekor tidak diinsert.`);
           continue;
@@ -931,7 +935,7 @@ async function processSyncCore(
       );
 
       if (candidateVerdict.action === "EXISTING") {
-        skipped++;
+        let wasStatusUpdated = false;
         if (candidateVerdict.canonicalId && mappedStatusSumber) {
           const updateRes = await protestStore.updateProtestSourceStatus(
             candidateVerdict.canonicalId,
@@ -942,15 +946,22 @@ async function processSyncCore(
           if (updateRes.updated) {
             updated++;
             statusUpdated++;
+            wasStatusUpdated = true;
           }
+        }
+        if (!wasStatusUpdated) {
+          skipped++;
         }
         errors.push(`[ID: ${idKejadian}] Dilewati (EXISTING): ${candidateVerdict.reason}`);
         continue;
       }
 
       if (candidateVerdict.action === "DUPLICATE") {
-        skipped++;
-        if (candidateVerdict.canonicalId && mappedStatusSumber) {
+        let isDuplicateUpdated = false;
+        // Requirement 5: For DUPLICATE matches, resolve identity confidence first.
+        // Only apply source status update if identity confidence is strictly "confirmed" (Tier 1/2/3/4A).
+        // Never blindly apply status to an arbitrary canonical record on "probable" similarity matches.
+        if (candidateVerdict.confidence === "confirmed" && candidateVerdict.canonicalId && mappedStatusSumber) {
           const updateRes = await protestStore.updateProtestSourceStatus(
             candidateVerdict.canonicalId,
             mappedStatusSumber,
@@ -960,7 +971,11 @@ async function processSyncCore(
           if (updateRes.updated) {
             updated++;
             statusUpdated++;
+            isDuplicateUpdated = true;
           }
+        }
+        if (!isDuplicateUpdated) {
+          skipped++;
         }
         errors.push(`[ID: ${idKejadian}] Dilewati (DUPLICATE): ${candidateVerdict.reason}`);
         if (candidateVerdict.canonicalId) {

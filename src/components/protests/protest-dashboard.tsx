@@ -355,7 +355,7 @@ export function ProtestDashboard({
         </div>
       </div>
 
-      {/* Exactly Four Primary KPI Cards */}
+      {/* Exactly Four Primary KPI Cards (Source Excel Status) */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {/* Card 1: Jumlah Total Unras */}
         <div className="p-4 rounded-2xl bg-[#0D121B] border border-[var(--border-default)]">
@@ -370,56 +370,95 @@ export function ProtestDashboard({
               stats?.total_events ?? 0
             )}
           </div>
-          <span className="text-[10px] text-[#64748B] block mt-0.5">Seluruh aksi tercatat</span>
+          <span className="text-[10px] text-[#64748B] block mt-0.5">Seluruh aksi tercatat di sistem</span>
         </div>
 
         {/* Card 2: Sedang Berlangsung */}
         <div className="p-4 rounded-2xl bg-[#0D121B] border border-[var(--border-default)]">
           <div className="flex items-center justify-between">
-            <span className="text-xs text-[#98A4B8] font-medium">Sedang Berlangsung</span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-[#98A4B8] font-medium">Sedang Berlangsung</span>
+              <span className="text-[9px] uppercase px-1.5 py-0.2 rounded bg-red-500/10 text-red-400 font-semibold border border-red-500/20">Sumber Excel</span>
+            </div>
             <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
           </div>
           <div className="text-2xl font-black text-red-400 mt-1">
             {statsLoading && !stats ? (
               <div className="h-8 w-16 bg-red-500/10 rounded-lg animate-pulse my-1" />
             ) : (
-              stats?.ongoing_events ?? 0
+              stats?.source_status_ongoing ?? 0
             )}
           </div>
-          <span className="text-[10px] text-[#64748B] block mt-0.5">Prioritas pemantauan aktif</span>
+          <span className="text-[10px] text-[#64748B] block mt-0.5">Aksi berlangsung di lapangan (Excel)</span>
         </div>
 
         {/* Card 3: Belum Berlangsung */}
         <div className="p-4 rounded-2xl bg-[#0D121B] border border-[var(--border-default)]">
           <div className="flex items-center justify-between">
-            <span className="text-xs text-[#98A4B8] font-medium">Belum Berlangsung</span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-[#98A4B8] font-medium">Belum Berlangsung</span>
+              <span className="text-[9px] uppercase px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-400 font-semibold border border-amber-500/20">Sumber Excel</span>
+            </div>
             <Clock className="w-3.5 h-3.5 text-amber-400" />
           </div>
           <div className="text-2xl font-black text-amber-400 mt-1">
             {statsLoading && !stats ? (
               <div className="h-8 w-16 bg-amber-500/10 rounded-lg animate-pulse my-1" />
             ) : (
-              stats?.scheduled_events ?? 0
+              stats?.source_status_scheduled ?? 0
             )}
           </div>
-          <span className="text-[10px] text-[#64748B] block mt-0.5">Terjadwal & siaga pengamanan</span>
+          <span className="text-[10px] text-[#64748B] block mt-0.5">Terdaftar belum berlangsung (Excel)</span>
         </div>
 
         {/* Card 4: Selesai */}
         <div className="p-4 rounded-2xl bg-[#0D121B] border border-[var(--border-default)]">
           <div className="flex items-center justify-between">
-            <span className="text-xs text-[#98A4B8] font-medium">Selesai</span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-[#98A4B8] font-medium">Selesai</span>
+              <span className="text-[9px] uppercase px-1.5 py-0.2 rounded bg-emerald-500/10 text-emerald-400 font-semibold border border-emerald-500/20">Sumber Excel</span>
+            </div>
             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
           </div>
           <div className="text-2xl font-black text-emerald-400 mt-1">
             {statsLoading && !stats ? (
               <div className="h-8 w-16 bg-emerald-500/10 rounded-lg animate-pulse my-1" />
             ) : (
-              (stats?.completed_events ?? 0) + (stats?.monitoring_events ?? 0)
+              stats?.source_status_completed ?? 0
             )}
           </div>
-          <span className="text-[10px] text-[#64748B] block mt-0.5">Kondusif & observasi terekam</span>
+          <span className="text-[10px] text-[#64748B] block mt-0.5">Selesai dilaporkan (Excel)</span>
         </div>
+      </div>
+
+      {/* Secondary Status Strip: Operator Dispositions & Unspecified Source Counter */}
+      <div className="flex flex-wrap items-center justify-between gap-2.5 px-4 py-2.5 rounded-xl bg-[#080C14] border border-[var(--border-default)]">
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
+            Disposisi Operator SCC
+          </span>
+          <span className="text-[#98A4B8]">
+            Aktif: <strong className="text-white">{stats?.ongoing_events ?? 0}</strong>
+          </span>
+          <span className="text-[#64748B]">•</span>
+          <span className="text-[#98A4B8]">
+            Terjadwal: <strong className="text-white">{stats?.scheduled_events ?? 0}</strong>
+          </span>
+          <span className="text-[#64748B]">•</span>
+          <span className="text-[#98A4B8]">
+            Monitoring: <strong className="text-white">{stats?.monitoring_events ?? 0}</strong>
+          </span>
+          <span className="text-[#64748B]">•</span>
+          <span className="text-[#98A4B8]">
+            Selesai: <strong className="text-white">{stats?.completed_events ?? 0}</strong>
+          </span>
+        </div>
+        {(stats?.source_status_unspecified ?? 0) > 0 && (
+          <div className="text-[11px] text-[#98A4B8] flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+            <span>Status sumber belum ditentukan (kosong di Excel): <strong className="text-amber-400">{stats?.source_status_unspecified}</strong> aksi</span>
+          </div>
+        )}
       </div>
 
       {/* Dedicated Sync Status Panel */}

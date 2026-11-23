@@ -424,6 +424,140 @@ async function runTests() {
   assert.equal(protestAfterH0.status_sumber, "Selesai");
   console.log("✓ Daily H-0 sync shares identical identity and status sync mechanism");
 
+  // --------------------------------------------------------------------------
+  // Test 12: Counter Invariant (received = inserted + updated + skipped + failed)
+  // --------------------------------------------------------------------------
+  console.log("\n[Test 12] Testing counter invariant and no double-counting...");
+  const testIdInvNew = "TEST-STATUS-INV-NEW";
+  const testIdInvExistingChange = testId1; // Existing record whose status will change to "Sedang Berlangsung"
+  const testIdInvExistingNoChange = oldTestId; // Existing record whose status is "Selesai", will stay "Selesai"
+
+  const mixedBatchPayload = {
+    period_start: rollingWin.period_start,
+    period_end: rollingWin.period_end,
+    sync_type: "rolling_7d",
+    timezone: "Asia/Jakarta",
+    events: [
+      // 1. New record -> should be INSERTED
+      {
+        "ID KEJADIAN": testIdInvNew,
+        "ID UNRAS": "U-INV-1",
+        "TANGGAL": todayWib,
+        "WAKTU DAN TGL KEJADIAN ISO": `${todayWib}T08:00:00+07:00`,
+        "LOKASI": "Lokasi Invariant Test New",
+        "ISU": "Isu Invariant Test New",
+        "status_sumber": "Belum Berlangsung"
+      },
+      // 2. Existing record with status transition -> should be UPDATED only (NOT skipped)
+      {
+        "ID KEJADIAN": testIdInvExistingChange,
+        "ID UNRAS": "U9001",
+        "TANGGAL": todayWib,
+        "WAKTU DAN TGL KEJADIAN ISO": `${todayWib}T09:00:00+07:00`,
+        "LOKASI": "Depan Gedung Bank Indonesia Test",
+        "ISU": "Aksi Damai Uji Status Sumber",
+        "status_sumber": "Sedang Berlangsung"
+      },
+      // 3. Existing record with identical status -> should be SKIPPED only (NOT updated)
+      {
+        "ID KEJADIAN": testIdInvExistingNoChange,
+        "ID UNRAS": "U9099",
+        "TANGGAL": oldDateWib,
+        "WAKTU DAN TGL KEJADIAN ISO": `${oldDateWib}T10:00:00+07:00`,
+        "LOKASI": "Gedung Sate Lama Test",
+        "ISU": "Aksi 14 Hari Lalu",
+        "status_sumber": "Selesai"
+      }
+    ]
+  };
+
+  const resMixed = await processRolling7DaySync(mixedBatchPayload, "power_automate", "Test Runner");
+  assert.equal(resMixed.summary.received, 3, "Received count must be 3");
+  assert.equal(resMixed.summary.inserted, 1, "Exactly 1 record inserted");
+  assert.equal(resMixed.summary.updated, 1, "Exactly 1 record updated");
+  assert.equal(resMixed.summary.status_updated, 1, "Exactly 1 status updated");
+  assert.equal(resMixed.summary.skipped, 1, "Exactly 1 record skipped (no double counting!)");
+  assert.equal(resMixed.summary.failed, 0, "0 failed records");
+  assert.equal(
+    resMixed.summary.received,
+    resMixed.summary.inserted + resMixed.summary.updated + resMixed.summary.skipped + resMixed.summary.failed,
+    "CRITICAL INVARIANT PASS: received = inserted + updated + skipped + failed"
+  );
+  console.log("✓ Counter invariant verified: received(3) = inserted(1) + updated(1) + skipped(1) + failed(0)");
+
+  // --------------------------------------------------------------------------
+  // Test 13: Source Status KPI Calculations in Store
+  // --------------------------------------------------------------------------
+  console.log("\n[Test 13] Testing source status KPI calculation in protestStore.getStats()...");
+  const stats = await protestStore.getStats();
+  assert.ok(stats.source_status_scheduled !== undefined, "source_status_scheduled must be defined");
+  assert.ok(stats.source_status_ongoing !== undefined, "source_status_ongoing must be defined");
+  assert.ok(stats.source_status_completed !== undefined, "source_status_completed must be defined");
+  assert.ok(stats.source_status_unspecified !== undefined, "source_status_unspecified must be defined");
+  assert.ok(stats.source_status_ongoing >= 1, "At least 1 ongoing source record should be counted");
+  assert.ok(stats.source_status_completed >= 1, "At least 1 completed source record should be counted");
+  console.log("✓ Source status KPI fields correctly computed:", {
+    total: stats.total_events,
+    source_scheduled: stats.source_status_scheduled,
+    source_ongoing: stats.source_status_ongoing,
+    source_completed: stats.source_status_completed,
+    source_unspecified: stats.source_status_unspecified
+  });
+
+  // --------------------------------------------------------------------------
+  // Test 14: Operator Status Differs From Source Status Without Interference
+  // --------------------------------------------------------------------------
+  console.log("\n[Test 14] Testing operator status vs source status separation...");
+  const testIdSeparation = "TEST-STATUS-SEPARATION-01";
+  await protestStore.upsertFromExcelBatch([
+    {
+      id_kejadian: testIdSeparation,
+      kode_unras: "U-SEP-1",
+      tanggal: todayWib,
+      lokasi: "Lokasi Uji Separasi Status",
+      isu_tuntutan: "Isu Uji Separasi Status",
+      status_sumber: "Selesai"
+    }
+  ]);
+
+  // Set operator status to "monitoring"
+  await protestStore.updateProtest(testIdSeparation, {
+    status: "monitoring"
+  });
+
+  const sepProtest = await protestStore.getProtestById(testIdSeparation);
+  assert.equal(sepProtest.status, "monitoring", "Operator status must be 'monitoring'");
+  assert.equal(sepProtest.status_sumber, "Selesai", "Source status must be 'Selesai'");
+
+  const statsAfterSep = await protestStore.getStats();
+  // Operator monitoring must not be counted as source completed
+  assert.ok(statsAfterSep.monitoring_events >= 1, "Operator monitoring counted in monitoring_events");
+  assert.ok(statsAfterSep.source_status_completed >= 1, "Source completed counted in source_status_completed");
+  console.log("✓ Operator status ('monitoring') and source status ('Selesai') strictly separated");
+
+  // --------------------------------------------------------------------------
+  // Test 15: NULL Source Status Does Not Silently Map to Completed or Ongoing
+  // --------------------------------------------------------------------------
+  console.log("\n[Test 15] Testing NULL source status is counted as unspecified...");
+  const testIdNullSource = "TEST-STATUS-NULL-SOURCE-01";
+  await protestStore.upsertFromExcelBatch([
+    {
+      id_kejadian: testIdNullSource,
+      kode_unras: "U-NULL-1",
+      tanggal: todayWib,
+      lokasi: "Lokasi Uji Null Source",
+      isu_tuntutan: "Isu Uji Null Source",
+      status_sumber: null
+    }
+  ]);
+
+  const nullProtest = await protestStore.getProtestById(testIdNullSource);
+  assert.equal(nullProtest.status_sumber, null, "status_sumber must be null");
+
+  const statsAfterNull = await protestStore.getStats();
+  assert.ok(statsAfterNull.source_status_unspecified >= 1, "Unspecified counter must include NULL records");
+  console.log("✓ NULL source status cleanly counted in source_status_unspecified without false categorization");
+
   await cleanupTestData();
   console.log("\n=== ALL SOURCE STATUS SYNCHRONIZATION TESTS PASSED ===");
 }

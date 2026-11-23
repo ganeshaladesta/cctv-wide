@@ -65,7 +65,10 @@ import {
   createSyncLogInSupabase,
   updateSyncLogInSupabase,
   upsertExcelBatchInSupabase,
-  updateProtestSourceStatusInSupabase
+  updateProtestSourceStatusInSupabase,
+  fetchIdentityKeysFromSupabase,
+  fetchProtestsByDateFromSupabase,
+  registerIdentityEntriesInSupabase
 } from "./supabase-protest-service";
 import {
   deriveTahunBulan,
@@ -2387,6 +2390,17 @@ class ProtestDataStore {
 
   async getAllIdentityKeys(): Promise<Map<string, string>> {
     const map = new Map<string, string>();
+    if (isSupabaseConfigured()) {
+      try {
+        const supaMap = await fetchIdentityKeysFromSupabase();
+        for (const [k, v] of supaMap.entries()) {
+          map.set(k, v);
+        }
+      } catch (err) {
+        console.warn("[ProtestDataStore] Supabase getAllIdentityKeys failed, fallback to local:", err);
+      }
+    }
+
     if (this.db) {
       try {
         const rows = this.db.prepare("SELECT identity_key, canonical_id FROM unras_identity_registry").all() as Array<{ identity_key: string; canonical_id: string }>;
@@ -2405,6 +2419,17 @@ class ProtestDataStore {
   }
 
   async getProtestsByDate(dateStr: string): Promise<ExistingProtestComparisonItem[]> {
+    if (isSupabaseConfigured()) {
+      try {
+        const supaProtests = await fetchProtestsByDateFromSupabase(dateStr);
+        if (supaProtests && supaProtests.length > 0) {
+          return supaProtests;
+        }
+      } catch (err) {
+        console.warn("[ProtestDataStore] Supabase getProtestsByDate failed, fallback to local:", err);
+      }
+    }
+
     if (this.db) {
       try {
         const rows = this.db.prepare(`
@@ -2439,6 +2464,14 @@ class ProtestDataStore {
 
   async registerIdentityEntries(entries: IdentityRegistryEntry[]): Promise<void> {
     const now = new Date().toISOString();
+    if (isSupabaseConfigured()) {
+      try {
+        await registerIdentityEntriesInSupabase(entries);
+      } catch (err) {
+        console.warn("[ProtestDataStore] Supabase registerIdentityEntries warning:", err);
+      }
+    }
+
     if (this.db) {
       try {
         const stmt = this.db.prepare(`
@@ -2842,7 +2875,11 @@ class ProtestDataStore {
           SUM(CASE WHEN urgency IN ('high', 'critical') AND is_archived = 0 THEN 1 ELSE 0 END) as high_critical_urgency,
           SUM(CASE WHEN (validated_lat IS NULL OR validated_lng IS NULL) AND is_archived = 0 THEN 1 ELSE 0 END) as events_without_coords,
           SUM(CASE WHEN tanggal = ? THEN 1 ELSE 0 END) as today_events,
-          SUM(CASE WHEN status = 'completed' AND SUBSTR(completed_at, 1, 10) = ? THEN 1 ELSE 0 END) as completed_today
+          SUM(CASE WHEN status = 'completed' AND SUBSTR(completed_at, 1, 10) = ? THEN 1 ELSE 0 END) as completed_today,
+          SUM(CASE WHEN status_sumber = 'Belum Berlangsung' THEN 1 ELSE 0 END) as source_status_scheduled,
+          SUM(CASE WHEN status_sumber = 'Sedang Berlangsung' THEN 1 ELSE 0 END) as source_status_ongoing,
+          SUM(CASE WHEN status_sumber = 'Selesai' THEN 1 ELSE 0 END) as source_status_completed,
+          SUM(CASE WHEN status_sumber IS NULL OR trim(status_sumber) = '' THEN 1 ELSE 0 END) as source_status_unspecified
         FROM protests
         WHERE deleted_at IS NULL
       `).get(todayStr, todayStr) as Record<string, number>;
@@ -2862,7 +2899,11 @@ class ProtestDataStore {
         today_events: Number(row.today_events || 0),
         completed_today: Number(row.completed_today || 0),
         total_camera_links: Number(linkRow?.links || 0),
-        last_successful_sync: lastSyncRow?.completed_at || null
+        last_successful_sync: lastSyncRow?.completed_at || null,
+        source_status_scheduled: Number(row.source_status_scheduled || 0),
+        source_status_ongoing: Number(row.source_status_ongoing || 0),
+        source_status_completed: Number(row.source_status_completed || 0),
+        source_status_unspecified: Number(row.source_status_unspecified || 0)
       };
     }
 
@@ -2876,6 +2917,10 @@ class ProtestDataStore {
     let noCoords = 0;
     let todayCount = 0;
     let completedToday = 0;
+    let srcScheduled = 0;
+    let srcOngoing = 0;
+    let srcCompleted = 0;
+    let srcUnspecified = 0;
 
     for (const e of items) {
       if (e.status === "scheduled" && !e.is_archived) scheduled++;
@@ -2887,6 +2932,11 @@ class ProtestDataStore {
       if (!e.validated_lat && !e.is_archived) noCoords++;
       if (e.tanggal === todayStr) todayCount++;
       if (e.status === "completed" && e.completed_at && e.completed_at.startsWith(todayStr)) completedToday++;
+
+      if (e.status_sumber === "Belum Berlangsung") srcScheduled++;
+      else if (e.status_sumber === "Sedang Berlangsung") srcOngoing++;
+      else if (e.status_sumber === "Selesai") srcCompleted++;
+      else srcUnspecified++;
     }
 
     return {
@@ -2901,7 +2951,11 @@ class ProtestDataStore {
       today_events: todayCount,
       completed_today: completedToday,
       total_camera_links: this.memoryLinks.size,
-      last_successful_sync: this.memorySyncLogs.find((l) => l.status === "success")?.completed_at || null
+      last_successful_sync: this.memorySyncLogs.find((l) => l.status === "success")?.completed_at || null,
+      source_status_scheduled: srcScheduled,
+      source_status_ongoing: srcOngoing,
+      source_status_completed: srcCompleted,
+      source_status_unspecified: srcUnspecified
     };
   }
 
