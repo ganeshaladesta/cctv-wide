@@ -535,9 +535,9 @@ export function UnrasPriorityPanel({
                 const hasCoords = event.validated_lat !== null && event.validated_lng !== null;
                 const cctvCount = event.camera_links?.length || 0;
 
-                const isOngoing = event.status === "ongoing";
-                const isMonitoring = event.status === "monitoring";
-                const isScheduled = event.status === "scheduled";
+                const isOngoing = normalizeProtestStatus(event.status) === "ongoing";
+                const isMonitoring = normalizeProtestStatus(event.status) === "monitoring";
+                const isScheduled = normalizeProtestStatus(event.status) === "scheduled";
 
                 return (
                   <div
