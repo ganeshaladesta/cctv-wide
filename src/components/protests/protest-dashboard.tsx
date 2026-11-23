@@ -707,13 +707,13 @@ export function ProtestDashboard({
               setStatusFilter("scheduled");
               setPage(1);
             }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors flex items-center gap-1.5 ${
               statusFilter === "scheduled"
                 ? "bg-amber-600 text-white shadow-md shadow-amber-500/20"
                 : "bg-[#111622] text-[#98A4B8] hover:text-white"
             }`}
           >
-            Terencana
+            <span>Belum Berlangsung</span>
           </button>
 
           <button
@@ -737,13 +737,18 @@ export function ProtestDashboard({
               setStatusFilter("completed");
               setPage(1);
             }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors flex items-center gap-1.5 ${
               statusFilter === "completed"
                 ? "bg-emerald-600 text-white shadow-md shadow-emerald-500/20"
                 : "bg-[#111622] text-[#98A4B8] hover:text-white"
             }`}
           >
-            Selesai (Arsip)
+            <span>Selesai (Arsip)</span>
+            {statusFilter === "completed" && totalCount > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-emerald-400/25 text-white font-bold">
+                {totalCount}
+              </span>
+            )}
           </button>
 
           <button
@@ -844,6 +849,22 @@ export function ProtestDashboard({
                 >
                   <div className="space-y-1.5 flex-1 min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
+                      {/* Badge Status Sumber Excel */}
+                      {event.status_sumber ? (
+                        <span
+                          className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider ${
+                            event.status_sumber === "Selesai"
+                              ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                              : event.status_sumber === "Sedang Berlangsung"
+                              ? "bg-red-500/20 text-red-300 border border-red-500/40 animate-pulse"
+                              : "bg-blue-500/20 text-blue-300 border border-blue-500/40"
+                          }`}
+                        >
+                          Sumber: {event.status_sumber}
+                        </span>
+                      ) : null}
+
+                      {/* Badge Status Operator SCC */}
                       <span
                         className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
                           isOngoing
@@ -852,10 +873,12 @@ export function ProtestDashboard({
                             ? "bg-amber-500/20 text-amber-400 border border-amber-500/40"
                             : isMonitoring
                             ? "bg-purple-500/20 text-purple-400 border border-purple-500/40"
+                            : isCompleted
+                            ? "bg-emerald-600/30 text-emerald-300 border border-emerald-500/50"
                             : "bg-slate-500/20 text-slate-300 border border-slate-500/40"
                         }`}
                       >
-                        {event.status}
+                        Operator: {event.status}
                       </span>
 
                       <span

@@ -399,7 +399,12 @@ export function ProtestDetailModal({
           {/* Modal Top Bar */}
           <div className="px-4 sm:px-5 py-3 sm:py-4 border-b border-[var(--border-subtle)] bg-[#111622] flex items-center justify-between gap-3 shrink-0">
             {/* Flexible Left Container with responsive truncation */}
-            <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1">
+            <div className="flex items-center gap-2 sm:gap-2.5 min-w-0 flex-1 flex-wrap">
+              {eventData?.status_sumber && (
+                <span className="px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wider shrink-0 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                  Sumber Excel: {eventData.status_sumber}
+                </span>
+              )}
               <span
                 className={`px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wider shrink-0 ${
                   eventData?.status === "ongoing"
@@ -408,10 +413,12 @@ export function ProtestDetailModal({
                     ? "bg-amber-500/20 text-amber-400 border border-amber-500/40"
                     : eventData?.status === "monitoring"
                     ? "bg-purple-500/20 text-purple-400 border border-purple-500/40"
+                    : eventData?.status === "completed"
+                    ? "bg-emerald-600/30 text-emerald-300 border border-emerald-500/50"
                     : "bg-slate-500/20 text-slate-300 border border-slate-500/40"
                 }`}
               >
-                {eventData?.status || "Loading..."}
+                Operator: {eventData?.status || "Loading..."}
               </span>
               <div className="min-w-0 flex-1">
                 <h2 id="unras-detail-title" className="text-sm sm:text-base font-bold text-white truncate">
@@ -559,6 +566,14 @@ export function ProtestDetailModal({
                       <div>
                         <span className="text-[#98A4B8] block">ID Kejadian / Kode:</span>
                         <span className="text-white font-medium">{eventData.id_kejadian} / {eventData.kode_unras}</span>
+                      </div>
+                      <div>
+                        <span className="text-[#98A4B8] block">Status Sumber (Excel):</span>
+                        <span className="text-emerald-400 font-semibold">{eventData.status_sumber || "Belum Ditentukan"}</span>
+                      </div>
+                      <div>
+                        <span className="text-[#98A4B8] block">Disposisi Operator SCC:</span>
+                        <span className="text-white font-medium capitalize">{eventData.status}</span>
                       </div>
                       <div>
                         <span className="text-[#98A4B8] block">Kategori Kejadian:</span>

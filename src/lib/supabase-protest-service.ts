@@ -145,9 +145,23 @@ export async function queryProtestsFromSupabase(filters: ProtestFilterParams = {
       query = query
         .in("status", ["scheduled", "ongoing", "monitoring"])
         .eq("is_archived", false);
+    } else if (filters.status === "completed") {
+      // Tab Selesai (Arsip): status_sumber = 'Selesai' OR status = 'completed'
+      query = query.or("status_sumber.eq.Selesai,status.eq.completed");
+    } else if (filters.status === "ongoing") {
+      // Tab Sedang Berlangsung: status_sumber = 'Sedang Berlangsung'
+      query = query.eq("status_sumber", "Sedang Berlangsung");
+    } else if (filters.status === "scheduled") {
+      // Tab Belum Berlangsung: status_sumber = 'Belum Berlangsung'
+      query = query.eq("status_sumber", "Belum Berlangsung");
     } else if (filters.status !== "all") {
       query = query.eq("status", filters.status);
     }
+  }
+
+  // Source Status Filter
+  if (filters.status_sumber && filters.status_sumber !== "all") {
+    query = query.eq("status_sumber", filters.status_sumber);
   }
 
   // Archived Filter

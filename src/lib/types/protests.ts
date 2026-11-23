@@ -343,6 +343,7 @@ export interface ProtestAttachment {
 export interface ProtestFilterParams {
   q?: string;
   status?: ProtestStatus | "active" | "all"; // "active" excludes completed & cancelled
+  status_sumber?: SourceStatusCategory | "all";
   urgency?: ProtestUrgency;
   category?: string;
   province?: string;
