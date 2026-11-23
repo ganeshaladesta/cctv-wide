@@ -82,7 +82,7 @@ export function ProtestSyncModal({
     setErrorMessage(null);
 
     try {
-      const res = await fetch("/api/protests/sync", {
+      const res = await fetch("/api/integrations/unras/manual-trigger", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -96,8 +96,8 @@ export function ProtestSyncModal({
         throw new Error(json.error || "Gagal menjalankan sinkronisasi data.");
       }
 
-      const executionId = json.execution_id;
-      setStatusMessage("Sinkronisasi dimulai. Menunggu eksekusi Power Automate...");
+      const executionId = json.request_id || json.execution_id;
+      setStatusMessage("Permintaan sinkronisasi diterima. Menunggu proses Power Automate...");
 
       let isCompleted = false;
       const startTime = Date.now();
@@ -237,7 +237,7 @@ export function ProtestSyncModal({
             ) : (
               <>
                 <RefreshCw className="w-3.5 h-3.5" />
-                <span>Jalankan Sinkronisasi Sekarang (Admin)</span>
+                <span>Sinkronisasi Manual</span>
               </>
             )}
           </button>
