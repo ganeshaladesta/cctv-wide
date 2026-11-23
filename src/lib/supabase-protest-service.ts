@@ -1168,132 +1168,76 @@ export async function upsertExcelBatchInSupabase(
       }
 
       if (existing) {
-        // UPDATE EXCEL FIELDS ONLY — DO NOT TOUCH OPERATOR FIELDS
-        const updatePayload: Record<string, any> = {
-          kode_unras: rec.kode_unras,
-          tanggal: rec.tanggal,
-          waktu_mulai: normStart.time,
-          waktu_selesai: normEnd.time,
-          event_datetime: rec.event_datetime || null,
-          lokasi: rec.lokasi,
-          titik_kumpul: rec.titik_kumpul || null,
-          sasaran_aksi: rec.sasaran_aksi || null,
-          isu_tuntutan: rec.isu_tuntutan,
-          estimasi_massa_source: rec.estimasi_massa_source || null,
-          organisasi_kelompok: rec.organisasi_kelompok || null,
-          korlap_pimpinan: rec.korlap_pimpinan || null,
-          wilayah_hukum: rec.wilayah_hukum || null,
-          provinsi: rec.provinsi || "DKI Jakarta",
-          kota_kabupaten: rec.kota_kabupaten || null,
-          keterangan_source: rec.keterangan_source || null,
-          last_synced_at: now,
-          updated_at: now
-        };
+        // SKIP EXISTING RECORD — NEVER UPDATE OR OVERWRITE OPERATOR FIELDS
+        skipped++;
+        continue;
+      }
 
-        if ((rec as any).regional) updatePayload.regional = (rec as any).regional;
-        if ((rec as any).kategori_isu) updatePayload.kategori_isu = (rec as any).kategori_isu;
-        if ((rec as any).dampak) updatePayload.dampak = (rec as any).dampak;
-
-        // Check if coordinates need geocoding suggestion
-        if (existing.validated_lat === null && existing.validated_lng === null) {
-          if (rec.validated_lat !== undefined && rec.validated_lng !== undefined && rec.validated_lat !== null) {
-            updatePayload.validated_lat = rec.validated_lat;
-            updatePayload.validated_lng = rec.validated_lng;
-            updatePayload.location_validation_status = "verified";
-          } else {
-            // Auto-geocode suggestion if not yet present
-            try {
-              const autoGeo = await geocodingService.geocodeProtestEvent(rec);
-              if (autoGeo.suggested_lat && autoGeo.suggested_lng) {
-                updatePayload.suggested_lat = autoGeo.suggested_lat;
-                updatePayload.suggested_lng = autoGeo.suggested_lng;
-                updatePayload.suggested_address = autoGeo.suggested_address;
-                updatePayload.geocoding_provider = autoGeo.geocoding_provider;
-                updatePayload.geocoding_confidence = autoGeo.geocoding_confidence;
-                updatePayload.geocoding_alternatives = autoGeo.geocoding_alternatives;
-                updatePayload.location_validation_status = autoGeo.location_validation_status;
-              }
-            } catch (geoErr) {
-              console.warn(`[AutoGeocode skip on update ${rec.id_kejadian}]:`, geoErr);
-            }
-          }
+      // Auto-geocode suggestion for new row if coordinates are missing
+      let geoSuggestion: any = null;
+      if (!rec.validated_lat || !rec.validated_lng) {
+        try {
+          geoSuggestion = await geocodingService.geocodeProtestEvent(rec);
+        } catch (geoErr) {
+          console.warn(`[AutoGeocode skip on insert ${rec.id_kejadian}]:`, geoErr);
         }
+      }
 
-        const { error: updErr } = await supabase
-          .from("protests")
-          .update(updatePayload)
-          .eq("id", existing.id);
+      // INSERT NEW ROW
+      const hasDirectCoords = rec.validated_lat !== undefined && rec.validated_lat !== null && rec.validated_lng !== undefined && rec.validated_lng !== null;
+      const insertPayload = {
+        id_kejadian: rec.id_kejadian,
+        kode_unras: rec.kode_unras,
+        tanggal: rec.tanggal,
+        waktu_mulai: normStart.time,
+        waktu_selesai: normEnd.time,
+        event_datetime: rec.event_datetime || `${rec.tanggal}T09:00:00+07:00`,
+        lokasi: rec.lokasi,
+        titik_kumpul: rec.titik_kumpul || null,
+        sasaran_aksi: rec.sasaran_aksi || null,
+        isu_tuntutan: rec.isu_tuntutan,
+        estimasi_massa_source: rec.estimasi_massa_source || null,
+        organisasi_kelompok: rec.organisasi_kelompok || null,
+        korlap_pimpinan: rec.korlap_pimpinan || null,
+        wilayah_hukum: rec.wilayah_hukum || null,
+        provinsi: rec.provinsi || "DKI Jakarta",
+        kota_kabupaten: rec.kota_kabupaten || null,
+        keterangan_source: rec.keterangan_source || null,
+        status: "scheduled",
+        urgency: "medium",
+        source_type: "excel_sync",
+        validated_lat: hasDirectCoords ? rec.validated_lat : null,
+        validated_lng: hasDirectCoords ? rec.validated_lng : null,
+        location_validation_status: hasDirectCoords
+          ? "verified"
+          : (geoSuggestion?.suggested_lat ? geoSuggestion.location_validation_status : "unmapped"),
+        suggested_lat: geoSuggestion?.suggested_lat || null,
+        suggested_lng: geoSuggestion?.suggested_lng || null,
+        suggested_address: geoSuggestion?.suggested_address || null,
+        geocoding_provider: geoSuggestion?.geocoding_provider || null,
+        geocoding_confidence: geoSuggestion?.geocoding_confidence || null,
+        geocoding_alternatives: geoSuggestion?.geocoding_alternatives || [],
+        raw_source_payload: rec.raw_source_payload || {},
+        last_synced_at: now,
+        created_at: now,
+        updated_at: now
+      };
 
-        if (updErr) {
-          lastError = updErr.message || JSON.stringify(updErr);
-          console.error("[Supabase upsert updErr]", updErr);
-          failed++;
+      if ((rec as any).regional) (insertPayload as any).regional = (rec as any).regional;
+      if ((rec as any).kategori_isu) (insertPayload as any).kategori_isu = (rec as any).kategori_isu;
+      if ((rec as any).dampak) (insertPayload as any).dampak = (rec as any).dampak;
+
+      const { error: insErr } = await supabase.from("protests").insert(insertPayload);
+      if (insErr) {
+        if (insErr.code === "23505" || String(insErr.message).includes("duplicate key") || String(insErr.message).includes("unique constraint")) {
+          skipped++;
         } else {
-          updated++;
-        }
-      } else {
-        // Auto-geocode suggestion for new row if coordinates are missing
-        let geoSuggestion: any = null;
-        if (!rec.validated_lat || !rec.validated_lng) {
-          try {
-            geoSuggestion = await geocodingService.geocodeProtestEvent(rec);
-          } catch (geoErr) {
-            console.warn(`[AutoGeocode skip on insert ${rec.id_kejadian}]:`, geoErr);
-          }
-        }
-
-        // INSERT NEW ROW
-        const hasDirectCoords = rec.validated_lat !== undefined && rec.validated_lat !== null && rec.validated_lng !== undefined && rec.validated_lng !== null;
-        const insertPayload = {
-          id_kejadian: rec.id_kejadian,
-          kode_unras: rec.kode_unras,
-          tanggal: rec.tanggal,
-          waktu_mulai: normStart.time,
-          waktu_selesai: normEnd.time,
-          event_datetime: rec.event_datetime || `${rec.tanggal}T09:00:00+07:00`,
-          lokasi: rec.lokasi,
-          titik_kumpul: rec.titik_kumpul || null,
-          sasaran_aksi: rec.sasaran_aksi || null,
-          isu_tuntutan: rec.isu_tuntutan,
-          estimasi_massa_source: rec.estimasi_massa_source || null,
-          organisasi_kelompok: rec.organisasi_kelompok || null,
-          korlap_pimpinan: rec.korlap_pimpinan || null,
-          wilayah_hukum: rec.wilayah_hukum || null,
-          provinsi: rec.provinsi || "DKI Jakarta",
-          kota_kabupaten: rec.kota_kabupaten || null,
-          keterangan_source: rec.keterangan_source || null,
-          status: "scheduled",
-          urgency: "medium",
-          source_type: "excel_sync",
-          validated_lat: hasDirectCoords ? rec.validated_lat : null,
-          validated_lng: hasDirectCoords ? rec.validated_lng : null,
-          location_validation_status: hasDirectCoords
-            ? "verified"
-            : (geoSuggestion?.suggested_lat ? geoSuggestion.location_validation_status : "unmapped"),
-          suggested_lat: geoSuggestion?.suggested_lat || null,
-          suggested_lng: geoSuggestion?.suggested_lng || null,
-          suggested_address: geoSuggestion?.suggested_address || null,
-          geocoding_provider: geoSuggestion?.geocoding_provider || null,
-          geocoding_confidence: geoSuggestion?.geocoding_confidence || null,
-          geocoding_alternatives: geoSuggestion?.geocoding_alternatives || [],
-          raw_source_payload: rec.raw_source_payload || {},
-          last_synced_at: now,
-          created_at: now,
-          updated_at: now
-        };
-
-        if ((rec as any).regional) (insertPayload as any).regional = (rec as any).regional;
-        if ((rec as any).kategori_isu) (insertPayload as any).kategori_isu = (rec as any).kategori_isu;
-        if ((rec as any).dampak) (insertPayload as any).dampak = (rec as any).dampak;
-
-        const { error: insErr } = await supabase.from("protests").insert(insertPayload);
-        if (insErr) {
           lastError = insErr.message || JSON.stringify(insErr);
           console.error("[Supabase upsert insErr]", insErr);
           failed++;
-        } else {
-          inserted++;
         }
+      } else {
+        inserted++;
       }
     } catch (err: any) {
       lastError = err?.message || String(err);
@@ -1302,6 +1246,6 @@ export async function upsertExcelBatchInSupabase(
     }
   }
 
-  return { inserted, updated, skipped, failed, error: lastError };
+  return { inserted, updated: 0, skipped, failed, error: lastError };
 }
 

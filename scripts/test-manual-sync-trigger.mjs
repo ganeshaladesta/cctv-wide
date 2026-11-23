@@ -61,7 +61,7 @@ async function runTestSuite() {
     };
     const res = await processSameDaySync(scheduledPayload, "power_automate", "Scheduled Sync (05:00 WIB)");
     assert.equal(res.success, true);
-    assert.ok(res.summary.inserted >= 1 || res.summary.updated >= 1);
+    assert.ok(res.summary.inserted >= 1 || res.summary.skipped >= 1);
     
     const logs = await protestStore.getSyncLogs(5);
     const lastLog = logs.find((l) => l.id === res.execution_id);
@@ -314,18 +314,18 @@ async function runTestSuite() {
   }
 
   // ---------------------------------------------------------------------------
-  // Test 10: H-0 WIB filtering remains unchanged
+  // Test 10: Rolling 7-day WIB filtering (historical events outside window excluded)
   // ---------------------------------------------------------------------------
   try {
-    // Yesterday event (H-1)
-    const yesterdayIso = "2026-11-18T10:00:00+07:00";
+    // 8 days ago event (outside [today - 6 days, today + 1 day))
+    const pastOutsideIso = new Date(Date.now() - 9 * 24 * 3600 * 1000).toISOString();
     const payload = {
       events: [
         {
           id_kejadian: "KEJ-PAST-010",
           kode_unras: "U2010",
-          tanggal_kejadian: yesterdayIso,
-          tuntutan: "Aksi Masa Lampau Kemarin",
+          tanggal_kejadian: pastOutsideIso,
+          tuntutan: "Aksi Masa Lampau di Luar Jendela 7 Hari",
           lokasi: "Monas"
         }
       ]
@@ -333,14 +333,14 @@ async function runTestSuite() {
 
     const res = await processSameDaySync(payload, "power_automate");
     assert.equal(res.summary.skipped, 1);
-    assert.ok(res.errors.some((e) => e.includes("lebih lampau dari hari ini")));
-    recordTest(10, "H-0 WIB filtering remains unchanged", true, "Yesterday event strictly excluded from same-day window");
+    assert.ok(res.errors.some((e) => e.includes("lebih lampau") || e.includes("jendela 7 hari")));
+    recordTest(10, "Rolling 7-day WIB filtering excludes outside events", true, "Event outside rolling 7-day window strictly excluded");
   } catch (err) {
-    recordTest(10, "H-0 WIB filtering remains unchanged", false, err.message);
+    recordTest(10, "Rolling 7-day WIB filtering excludes outside events", false, err.message);
   }
 
   // ---------------------------------------------------------------------------
-  // Test 11: Repeated sync does not duplicate records
+  // Test 11: Repeated sync does not duplicate records (skips existing)
   // ---------------------------------------------------------------------------
   try {
     const idKejadian = "KEJ-REPEAT-TEST-011";
@@ -364,7 +364,8 @@ async function runTestSuite() {
     const count2 = (await protestStore.queryProtests({ q: idKejadian })).total;
 
     assert.equal(count1, count2, "Total database rows must not increase");
-    assert.equal(res2.summary.updated, 1, "Second run must perform UPDATE");
+    assert.equal(res2.summary.updated, 0, "Second run must skip existing, updated is 0");
+    assert.equal(res2.summary.skipped, 1, "Second run must count skipped");
     recordTest(11, "Repeated sync does not duplicate records", true, `Row count stable at ${count1}, 0 duplicates created`);
   } catch (err) {
     recordTest(11, "Repeated sync does not duplicate records", false, err.message);

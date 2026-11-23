@@ -77,7 +77,7 @@ async function runTestSuite() {
     };
     const res = await processSameDaySync(payload, "power_automate");
     assert.equal(res.success, true);
-    assert.ok(res.summary.inserted >= 1 || res.summary.updated >= 1);
+    assert.ok(res.summary.inserted >= 1 || res.summary.skipped >= 1);
     
     // Verify stored
     const record = await findRecordByIdKejadian("KEJ-TEST-EXCEL-001");
@@ -186,10 +186,11 @@ async function runTestSuite() {
   // Test 5: Duplicate source records in batch (must deduplicate)
   // ---------------------------------------------------------------------------
   try {
+    const dedupId = `KEJ-BATCH-DEDUP-${Date.now()}`;
     const payload = {
       events: [
         {
-          id_kejadian: "KEJ-BATCH-DEDUP-05",
+          id_kejadian: dedupId,
           kode_unras: "U1005",
           tanggal_kejadian: validEventIso,
           tuntutan: "Versi Aksi Pertama",
@@ -197,7 +198,7 @@ async function runTestSuite() {
           waktu: "08:00"
         },
         {
-          id_kejadian: "KEJ-BATCH-DEDUP-05",
+          id_kejadian: dedupId,
           kode_unras: "U1005",
           tanggal_kejadian: validEventIso,
           tuntutan: "Versi Aksi Terkini (Revisi)",
@@ -208,10 +209,11 @@ async function runTestSuite() {
     };
     const res = await processSameDaySync(payload, "power_automate");
     assert.equal(res.success, true);
-    const record = await findRecordByIdKejadian("KEJ-BATCH-DEDUP-05");
+    assert.equal(res.summary.skipped, 1);
+    const record = await findRecordByIdKejadian(dedupId);
     assert.ok(record);
-    assert.equal(record.isu_tuntutan, "Versi Aksi Terkini (Revisi)");
-    recordTest(5, "Duplicate source records in batch deduplicated", true, "Merged to latest revision without unique collision");
+    assert.equal(record.isu_tuntutan, "Versi Aksi Pertama");
+    recordTest(5, "Duplicate source records in batch deduplicated", true, "First occurrence preserved, subsequent duplicate skipped");
   } catch (err) {
     recordTest(5, "Duplicate source records in batch deduplicated", false, err.message);
   }
@@ -363,8 +365,8 @@ async function runTestSuite() {
     assert.ok(win.period_start.endsWith("Z") || win.period_start.includes("+"));
     assert.ok(win.period_end.endsWith("Z") || win.period_end.includes("+"));
     const durationHours = (win.period_end_ms - win.period_start_ms) / (1000 * 60 * 60);
-    assert.equal(durationHours, 24, "Window must be exactly 24 hours");
-    recordTest(12, "Valid H-0 WIB window verification", true, `Window 24h: ${win.period_start} to ${win.period_end}`);
+    assert.equal(durationHours, 168, "Window must be exactly 168 hours (7 days)");
+    recordTest(12, "Valid Rolling 7-Day WIB window verification", true, `Window 168h: ${win.period_start} to ${win.period_end}`);
   } catch (err) {
     recordTest(12, "Valid H-0 WIB window verification", false, err.message);
   }
@@ -491,8 +493,9 @@ async function runTestSuite() {
     const countAfterRun2 = (await protestStore.queryProtests({ q: idKejadian })).total;
 
     assert.equal(countAfterRun1, countAfterRun2, "Total record count must remain identical");
-    assert.equal(res2.summary.updated, 1, "Second run must update existing record");
-    recordTest(16, "Idempotent repeated synchronization", true, "Exact same payload re-run creates 0 duplicates");
+    assert.equal(res2.summary.updated, 0, "Second run must skip existing record, updated must be 0");
+    assert.equal(res2.summary.skipped, 1, "Second run must increment skipped count");
+    recordTest(16, "Idempotent repeated synchronization", true, "Exact same payload re-run creates 0 duplicates and skips existing");
   } catch (err) {
     recordTest(16, "Idempotent repeated synchronization", false, err.message);
   }

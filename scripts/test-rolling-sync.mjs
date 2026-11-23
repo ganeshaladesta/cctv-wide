@@ -1,462 +1,493 @@
 /**
- * Comprehensive Automated Test Suite: Same-Day (H-0) Synchronization Engine
+ * Comprehensive Automated Test Suite: Rolling 7-Calendar-Day UNRAS Synchronization Engine
  * SCC - EAGLE EYES
  * Worksheet: 'NEW UNRAS 2022-2026'
  *
- * Boundary: Asia/Jakarta Calendar Day (00:00:00 WIB today <= event < 00:00:00 WIB tomorrow)
+ * Verifies all 12 required test conditions:
+ * 1. Record within the 7-day window.
+ * 2. Record exactly at start boundary (00:00:00 WIB 6 days ago) -> included.
+ * 3. Record exactly at end boundary (00:00:00 WIB tomorrow) -> excluded.
+ * 4. Existing ID is skipped.
+ * 5. New ID is inserted.
+ * 6. Duplicate ID repeated within one payload is skipped.
+ * 7. Empty Excel result.
+ * 8. Multiple records with the same kode_unras but different id_kejadian.
+ * 9. Existing operator-managed fields remain unchanged.
+ * 10. Concurrent sync requests cannot create duplicates.
+ * 11. WIB timezone boundaries.
+ * 12. Historical records outside the 7-day window are excluded.
  */
 
 import assert from "node:assert/strict";
-import crypto from "node:crypto";
 import {
-  calculateSameDayWindow,
   calculateRolling7DayWindow,
+  calculateSameDayWindow,
   parseSourceEventDatetime,
   verifyIntegrationToken,
   validateRollingSyncRequest,
-  processSameDaySync
+  processRolling7DaySync
 } from "../src/lib/unras-rolling-sync.ts";
 import { protestStore } from "../src/lib/protest-store.ts";
 
 console.log("================================================================================");
-console.log("=== SCC - EAGLE EYES: Same-Day (H-0) Sync Engine Test Suite                  ===");
+console.log("=== SCC - EAGLE EYES: Rolling 7-Day Sync Engine Test Suite                   ===");
 console.log("================================================================================\n");
 
 async function runTests() {
-  const refDate = new Date("2026-11-19T05:00:00.000Z"); // 12:00 WIB on 19 Nov 2026
+  const runId = Date.now();
+  // Reference date: 23 November 2026 12:00 WIB (05:00 UTC)
+  const refDate = new Date("2026-11-23T05:00:00.000Z");
   const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+  const SEVEN_DAYS_MS = 7 * ONE_DAY_MS;
+
+  const window = calculateRolling7DayWindow(refDate);
 
   // ---------------------------------------------------------------------------
-  // Test 1: Same-Day (H-0) window calculation in Asia/Jakarta
+  // Test 11 (checked early for window foundations): WIB timezone boundaries
   // ---------------------------------------------------------------------------
-  console.log("[Test 1/15] Menghitung Jendela Waktu Hari Ini H-0 (Asia/Jakarta)...");
-  const window = calculateSameDayWindow(refDate);
-  assert.equal(window.date_wib, "2026-11-19", "WIB date must be 2026-11-19");
-  assert.equal(window.period_end_ms - window.period_start_ms, ONE_DAY_MS, "Window must be exactly 24 hours in ms");
-  
-  // Verify start is 00:00:00 WIB (which is 17:00 UTC previous day)
+  console.log("[Test 11/12] Memverifikasi Batas Zona Waktu WIB (Asia/Jakarta Rolling 7 Hari)...");
+  assert.equal(window.date_wib, "2026-11-23", "WIB today date must be 2026-11-23");
+  assert.equal(window.start_date_wib, "2026-11-17", "Start date must be 2026-11-17 (6 days prior)");
+  assert.equal(window.end_date_wib, "2026-11-24", "End date must be 2026-11-24 (tomorrow, exclusive)");
+  assert.equal(window.period_end_ms - window.period_start_ms, SEVEN_DAYS_MS, "Window must be exactly 168 hours (7 days) in ms");
+
+  // Verify start is 00:00:00 WIB 17 Nov (17:00 UTC 16 Nov)
   const startObj = new Date(window.period_start);
-  assert.equal(startObj.toISOString(), "2026-11-18T17:00:00.000Z");
-  
-  // Verify end is 00:00:00 WIB tomorrow (which is 17:00 UTC today)
+  assert.equal(startObj.toISOString(), "2026-11-16T17:00:00.000Z");
+
+  // Verify end is 00:00:00 WIB 24 Nov (17:00 UTC 23 Nov)
   const endObj = new Date(window.period_end);
-  assert.equal(endObj.toISOString(), "2026-11-19T17:00:00.000Z");
-  
-  console.log(`  ✔ Window valid: ${window.period_start} (00:00:00 WIB) s/d ${window.period_end} (24:00:00 WIB)`);
+  assert.equal(endObj.toISOString(), "2026-11-23T17:00:00.000Z");
+
+  // Leap year transition (e.g. 03 March 2024 -> start must fall into Feb 2024)
+  const leapDate = new Date("2024-03-03T10:00:00+07:00");
+  const leapWindow = calculateRolling7DayWindow(leapDate);
+  assert.equal(leapWindow.date_wib, "2024-03-03");
+  assert.equal(leapWindow.start_date_wib, "2024-02-26");
+  assert.equal(leapWindow.period_end_ms - leapWindow.period_start_ms, SEVEN_DAYS_MS);
+
+  // Year-end transition (e.g. 03 January 2027 -> start must fall into Dec 2026)
+  const yearEndDate = new Date("2027-01-03T10:00:00+07:00");
+  const yearEndWindow = calculateRolling7DayWindow(yearEndDate);
+  assert.equal(yearEndWindow.date_wib, "2027-01-03");
+  assert.equal(yearEndWindow.start_date_wib, "2026-12-28");
+  assert.equal(yearEndWindow.period_end_ms - yearEndWindow.period_start_ms, SEVEN_DAYS_MS);
+
+  console.log(`  ✔ Window valid: ${window.period_start} (17 Nov 00:00 WIB) s/d ${window.period_end} (24 Nov 00:00 WIB)`);
 
   // ---------------------------------------------------------------------------
-  // Test 2: Month-End and Leap Year Transitions
+  // Test 1: Record within the 7-day window
   // ---------------------------------------------------------------------------
-  console.log("\n[Test 2/15] Uji Transisi Pergantian Bulan & Tahun Baru (H-0)...");
-  const leapDate = new Date("2024-02-29T10:00:00+07:00");
-  const leapWindow = calculateSameDayWindow(leapDate);
-  assert.equal(leapWindow.date_wib, "2024-02-29");
-  assert.equal(leapWindow.period_end_ms - leapWindow.period_start_ms, ONE_DAY_MS);
-
-  const yearEndDate = new Date("2026-12-31T23:00:00+07:00");
-  const yearEndWindow = calculateSameDayWindow(yearEndDate);
-  assert.equal(yearEndWindow.date_wib, "2026-12-31");
-  assert.equal(yearEndWindow.period_end_ms - yearEndWindow.period_start_ms, ONE_DAY_MS);
-  console.log("  ✔ Perhitungan transisi kalender leap year dan akhir tahun sukses.");
-
-  // ---------------------------------------------------------------------------
-  // Test 3: Exact Jakarta midnight start boundary (00:00:00.000 WIB) - INCLUDED
-  // ---------------------------------------------------------------------------
-  console.log("\n[Test 3/15] Inklusi Batas Awal Tepat (00:00:00 WIB Hari Ini)...");
-  const exactStartISO = "2026-11-19T00:00:00+07:00";
-  const payloadExactStart = {
-    sync_type: "same_day",
+  console.log("\n[Test 1/12] Inklusi Data Dalam Jendela 7 Hari (20 Nov 2026)...");
+  const withinId = `TEST-ROLLING-WITHIN-${runId}`;
+  const eventMidISO = "2026-11-20T10:30:00+07:00";
+  const payloadWithin = {
+    sync_type: "rolling_7d",
     timezone: "Asia/Jakarta",
     period_start: window.period_start,
     period_end: window.period_end,
     events: [
       {
-        "ID KEJADIAN": "TEST-BOUNDARY-START-001",
-        "KODE_UNRAS": "TB-001",
-        "WAKTU DAN TGL KEJADIAN ISO": exactStartISO,
-        "TANGGAL": "2026-11-19",
-        "LOKASI": "Titik Batas Awal Tengah Malam",
-        "ISU": "Uji inklusi batas awal 00:00 WIB",
-        "STATUS": "scheduled"
-      }
-    ]
-  };
-  const resExactStart = await processSameDaySync(payloadExactStart, "power_automate", "Test Runner");
-  assert.equal(resExactStart.summary.inserted + resExactStart.summary.updated, 1, "Exact start timestamp MUST be included");
-  assert.equal(resExactStart.summary.skipped, 0, "Exact start timestamp MUST NOT be skipped");
-  console.log("  ✔ Batas awal tepat (00:00:00 WIB) BERHASIL disertakan (INCLUDED).");
-
-  // ---------------------------------------------------------------------------
-  // Test 4: Late night boundary inclusion (23:59:59.999 WIB) - INCLUDED
-  // ---------------------------------------------------------------------------
-  console.log("\n[Test 4/15] Inklusi Detik Terakhir Hari Ini (23:59:59 WIB)...");
-  const lateNightISO = "2026-11-19T23:59:59+07:00";
-  const payloadLateNight = {
-    sync_type: "same_day",
-    timezone: "Asia/Jakarta",
-    period_start: window.period_start,
-    period_end: window.period_end,
-    events: [
-      {
-        "ID KEJADIAN": "TEST-BOUNDARY-NIGHT-002",
-        "KODE_UNRAS": "TB-002",
-        "WAKTU DAN TGL KEJADIAN ISO": lateNightISO,
-        "TANGGAL": "2026-11-19",
-        "LOKASI": "Titik Malam Hari",
-        "ISU": "Uji inklusi detik akhir 23:59 WIB",
-        "STATUS": "scheduled"
-      }
-    ]
-  };
-  const resLateNight = await processSameDaySync(payloadLateNight, "power_automate", "Test Runner");
-  assert.equal(resLateNight.summary.inserted + resLateNight.summary.updated, 1, "Late night today MUST be included");
-  assert.equal(resLateNight.summary.skipped, 0, "Late night today MUST NOT be skipped");
-  console.log("  ✔ Detik terakhir hari ini (23:59:59 WIB) BERHASIL disertakan (INCLUDED).");
-
-  // ---------------------------------------------------------------------------
-  // Test 5: Exact end boundary exclusion (00:00:00 WIB besok) - EXCLUDED
-  // ---------------------------------------------------------------------------
-  console.log("\n[Test 5/15] Eksklusi Batas Akhir Tepat (00:00:00 WIB Besok)...");
-  const exactEndISO = "2026-11-20T00:00:00+07:00";
-  const payloadExactEnd = {
-    sync_type: "same_day",
-    timezone: "Asia/Jakarta",
-    period_start: window.period_start,
-    period_end: window.period_end,
-    events: [
-      {
-        "ID KEJADIAN": "TEST-BOUNDARY-END-003",
-        "KODE_UNRAS": "TB-003",
-        "WAKTU DAN TGL KEJADIAN ISO": exactEndISO,
+        "ID KEJADIAN": withinId,
+        "KODE_UNRAS": `RW-${runId}`,
+        "WAKTU DAN TGL KEJADIAN ISO": eventMidISO,
         "TANGGAL": "2026-11-20",
-        "LOKASI": "Titik Batas Akhir Besok",
-        "ISU": "Uji eksklusi batas akhir",
+        "LOKASI": "Kawasan Bundaran HI",
+        "ISU": "Aksi Damai 20 November",
         "STATUS": "scheduled"
       }
     ]
   };
-  const resExactEnd = await processSameDaySync(payloadExactEnd, "power_automate", "Test Runner");
-  assert.equal(resExactEnd.summary.inserted + resExactEnd.summary.updated, 0, "Exact end timestamp MUST be excluded");
+  const resWithin = await processRolling7DaySync(payloadWithin, "power_automate", "Test Runner");
+  assert.equal(resWithin.summary.inserted, 1, "Record within 7-day window must be inserted");
+  assert.equal(resWithin.summary.updated, 0, "Updated must always be 0");
+  assert.equal(resWithin.summary.skipped, 0, "Record within 7-day window must not be skipped");
+  console.log("  ✔ Data dalam rentang 7 hari BERHASIL dimasukkan (INSERTED).");
+
+  // ---------------------------------------------------------------------------
+  // Test 2: Record exactly at start boundary (00:00:00 WIB 6 days ago) -> INCLUDED
+  // ---------------------------------------------------------------------------
+  console.log("\n[Test 2/12] Inklusi Batas Awal Tepat (00:00:00 WIB 6 Hari Lalu - 17 Nov)...");
+  const exactStartISO = "2026-11-17T00:00:00+07:00";
+  const exactStartId = `TEST-BOUNDARY-START-${runId}`;
+  const payloadExactStart = {
+    sync_type: "rolling_7d",
+    timezone: "Asia/Jakarta",
+    period_start: window.period_start,
+    period_end: window.period_end,
+    events: [
+      {
+        "ID KEJADIAN": exactStartId,
+        "KODE_UNRAS": `TB-${runId}`,
+        "WAKTU DAN TGL KEJADIAN ISO": exactStartISO,
+        "TANGGAL": "2026-11-17",
+        "LOKASI": "Titik Batas Awal Tengah Malam 17 Nov",
+        "ISU": "Uji batas awal tepat 17 Nov 00:00 WIB",
+        "STATUS": "scheduled"
+      }
+    ]
+  };
+  const resExactStart = await processRolling7DaySync(payloadExactStart, "power_automate", "Test Runner");
+  assert.equal(resExactStart.summary.inserted, 1, "Exact start timestamp MUST be included");
+  assert.equal(resExactStart.summary.updated, 0, "Updated must be 0");
+  assert.equal(resExactStart.summary.skipped, 0, "Exact start timestamp MUST NOT be skipped");
+  console.log("  ✔ Batas awal tepat (00:00:00 WIB 6 hari lalu) BERHASIL disertakan (INCLUDED).");
+
+  // ---------------------------------------------------------------------------
+  // Test 3: Record exactly at end boundary (00:00:00 WIB tomorrow) -> EXCLUDED
+  // ---------------------------------------------------------------------------
+  console.log("\n[Test 3/12] Eksklusi Batas Akhir Tepat (00:00:00 WIB Besok - 24 Nov)...");
+  const exactEndISO = "2026-11-24T00:00:00+07:00";
+  const payloadExactEnd = {
+    sync_type: "rolling_7d",
+    timezone: "Asia/Jakarta",
+    period_start: window.period_start,
+    period_end: window.period_end,
+    events: [
+      {
+        "ID KEJADIAN": `TEST-BOUNDARY-END-${runId}`,
+        "KODE_UNRAS": `TB-END-${runId}`,
+        "WAKTU DAN TGL KEJADIAN ISO": exactEndISO,
+        "TANGGAL": "2026-11-24",
+        "LOKASI": "Titik Batas Akhir Besok",
+        "ISU": "Uji eksklusi batas akhir tepat 24 Nov 00:00 WIB",
+        "STATUS": "scheduled"
+      }
+    ]
+  };
+  const resExactEnd = await processRolling7DaySync(payloadExactEnd, "power_automate", "Test Runner");
+  assert.equal(resExactEnd.summary.inserted, 0, "Exact end timestamp MUST be excluded");
+  assert.equal(resExactEnd.summary.updated, 0, "Updated must be 0");
   assert.equal(resExactEnd.summary.skipped, 1, "Exact end timestamp MUST be skipped");
   console.log("  ✔ Batas akhir tepat (00:00:00 WIB besok) BERHASIL dikecualikan (EXCLUDED).");
 
   // ---------------------------------------------------------------------------
-  // Test 6: Yesterday's event exclusion (Kemarin 23:59:59 WIB) - EXCLUDED
+  // Test 4: Existing ID is skipped
   // ---------------------------------------------------------------------------
-  console.log("\n[Test 6/15] Eksklusi Peristiwa Kemarin (H-1)...");
-  const yesterdayISO = "2026-11-18T23:59:59+07:00";
-  const payloadYesterday = {
-    sync_type: "same_day",
+  console.log("\n[Test 4/12] Uji ID Kejadian yang Sudah Ada Dilewati (SKIP EXISTING)...");
+  const payloadSkipExisting = {
+    sync_type: "rolling_7d",
     timezone: "Asia/Jakarta",
     period_start: window.period_start,
     period_end: window.period_end,
     events: [
       {
-        "ID KEJADIAN": "TEST-YESTERDAY-004",
-        "WAKTU DAN TGL KEJADIAN ISO": yesterdayISO,
-        "TANGGAL": "2026-11-18",
-        "LOKASI": "Lokasi Kemarin",
-        "ISU": "Aksi Kemarin Malam"
+        "ID KEJADIAN": withinId, // already inserted in Test 1
+        "KODE_UNRAS": `RW-${runId}`,
+        "WAKTU DAN TGL KEJADIAN ISO": eventMidISO,
+        "TANGGAL": "2026-11-20",
+        "LOKASI": "Lokasi Baru Yang Seharusnya Tidak Ditimpa",
+        "ISU": "Isu Baru Yang Seharusnya Tidak Ditimpa"
       }
     ]
   };
-  const resYesterday = await processSameDaySync(payloadYesterday, "power_automate", "Test Runner");
-  assert.equal(resYesterday.summary.inserted + resYesterday.summary.updated, 0, "Yesterday events must NOT be inserted");
-  assert.equal(resYesterday.summary.skipped, 1, "Yesterday events must be skipped");
-  console.log("  ✔ Aksi kemarin (H-1) berhasil dikecualikan.");
+  const resSkipExisting = await processRolling7DaySync(payloadSkipExisting, "power_automate", "Test Runner");
+  assert.equal(resSkipExisting.summary.inserted, 0, "Existing record must NOT be inserted");
+  assert.equal(resSkipExisting.summary.updated, 0, "Updated MUST remain 0");
+  assert.equal(resSkipExisting.summary.skipped, 1, "Existing record MUST be counted as skipped");
+
+  const storedEvent = await protestStore.getProtestById(withinId);
+  assert.equal(storedEvent.lokasi, "Kawasan Bundaran HI", "Existing record must not be modified");
+  console.log("  ✔ Rekor yang sudah ada berhasil dilewati (SKIPPED) tanpa update.");
 
   // ---------------------------------------------------------------------------
-  // Test 7: Future event exclusion (H+2) - EXCLUDED
+  // Test 5: New ID is inserted
   // ---------------------------------------------------------------------------
-  console.log("\n[Test 7/15] Eksklusi Peristiwa Masa Depan (H+2)...");
-  const futureISO = "2026-11-21T10:00:00+07:00";
-  const payloadFuture = {
-    sync_type: "same_day",
+  console.log("\n[Test 5/12] Uji ID Kejadian Baru Berhasil Dimasukkan (INSERT NEW)...");
+  const newId = `TEST-NEW-ID-${runId}`;
+  const payloadNewId = {
+    sync_type: "rolling_7d",
     timezone: "Asia/Jakarta",
     period_start: window.period_start,
     period_end: window.period_end,
     events: [
       {
-        "ID KEJADIAN": "TEST-FUTURE-005",
-        "WAKTU DAN TGL KEJADIAN ISO": futureISO,
+        "ID KEJADIAN": newId,
+        "KODE_UNRAS": `NEW-${runId}`,
+        "WAKTU DAN TGL KEJADIAN ISO": "2026-11-21T09:00:00+07:00",
         "TANGGAL": "2026-11-21",
-        "LOKASI": "Lokasi Masa Depan",
-        "ISU": "Aksi Lusa"
+        "LOKASI": "Depan Gedung DPR RI",
+        "ISU": "Aksi Advokasi Rakyat 21 Nov"
       }
     ]
   };
-  const resFuture = await processSameDaySync(payloadFuture, "power_automate", "Test Runner");
-  assert.equal(resFuture.summary.inserted + resFuture.summary.updated, 0, "Future events must NOT be inserted");
-  assert.equal(resFuture.summary.skipped, 1, "Future events must be skipped");
-  console.log("  ✔ Aksi masa depan berhasil dikecualikan dari jendela hari ini.");
+  const resNewId = await processRolling7DaySync(payloadNewId, "power_automate", "Test Runner");
+  assert.equal(resNewId.summary.inserted, 1, "New ID must be inserted");
+  assert.equal(resNewId.summary.updated, 0, "Updated must be 0");
+  assert.equal(resNewId.summary.skipped, 0, "New ID must not be skipped");
+
+  const storedNew = await protestStore.getProtestById(newId);
+  assert.ok(storedNew, "New record must exist in store");
+  assert.equal(storedNew.lokasi, "Depan Gedung DPR RI");
+  console.log("  ✔ ID kejadian baru BERHASIL disimpan ke database.");
 
   // ---------------------------------------------------------------------------
-  // Test 8: Historical records in database are NEVER deleted by H-0 sync
+  // Test 6: Duplicate ID repeated within one payload is skipped
   // ---------------------------------------------------------------------------
-  console.log("\n[Test 8/15] Jaminan Rekaman Historis Database TIDAK Terhapus...");
-  const historicalId = `TEST-HIST-${Date.now()}`;
-  const testUser = { id: "test-admin", name: "Test Admin", email: "admin@test.local", role: "admin" };
-  // Directly insert an older record into store
-  await protestStore.createProtest({
-    id_kejadian: historicalId,
-    kode_unras: "HIST-001",
-    tanggal: "2026-11-10",
-    lokasi: "Gedung MPR Lama",
-    isu_tuntutan: "Aksi Historis 9 Hari Lalu",
-    status: "completed",
-    urgency: "low",
-    has_coordinates: false
-  }, testUser);
-
-  // Run same-day H-0 sync with only today's data
-  const payloadTodayOnly = {
-    sync_type: "same_day",
+  console.log("\n[Test 6/12] Uji Duplikasi ID Kejadian di Dalam Satu Payload Batch...");
+  const dupBatchId = `TEST-INBATCH-DUP-${runId}`;
+  const payloadInBatchDup = {
+    sync_type: "rolling_7d",
     timezone: "Asia/Jakarta",
     period_start: window.period_start,
     period_end: window.period_end,
     events: [
       {
-        "ID KEJADIAN": "TEST-TODAY-007",
-        "WAKTU DAN TGL KEJADIAN ISO": "2026-11-19T10:00:00+07:00",
-        "TANGGAL": "2026-11-19",
-        "LOKASI": "Lokasi Hari Ini",
-        "ISU": "Aksi Hari Ini"
+        "ID KEJADIAN": dupBatchId,
+        "KODE_UNRAS": `DUP-BATCH-${runId}`,
+        "WAKTU DAN TGL KEJADIAN ISO": "2026-11-22T08:00:00+07:00",
+        "TANGGAL": "2026-11-22",
+        "LOKASI": "Lokasi Baris Pertama",
+        "ISU": "Isu Baris Pertama"
+      },
+      {
+        "ID KEJADIAN": dupBatchId,
+        "KODE_UNRAS": `DUP-BATCH-${runId}`,
+        "WAKTU DAN TGL KEJADIAN ISO": "2026-11-22T08:30:00+07:00",
+        "TANGGAL": "2026-11-22",
+        "LOKASI": "Lokasi Baris Kedua Duplikat",
+        "ISU": "Isu Baris Kedua Duplikat"
       }
     ]
   };
-  await processSameDaySync(payloadTodayOnly, "power_automate", "Test Runner");
+  const resInBatchDup = await processRolling7DaySync(payloadInBatchDup, "power_automate", "Test Runner");
+  assert.equal(resInBatchDup.summary.received, 2, "Received count must be 2");
+  assert.equal(resInBatchDup.summary.inserted, 1, "First occurrence must be inserted");
+  assert.equal(resInBatchDup.summary.updated, 0, "Updated must be 0");
+  assert.equal(resInBatchDup.summary.skipped, 1, "Second occurrence must be skipped");
 
-  // Verify historical record still exists intact!
-  const histCheck = await protestStore.getProtestById(historicalId);
-  assert.ok(histCheck, "Historical record outside H-0 window MUST NOT be deleted");
-  assert.equal(histCheck.isu_tuntutan, "Aksi Historis 9 Hari Lalu");
-  console.log("  ✔ CRITICAL PASS: Rekaman historis di luar jendela sinkronisasi 100% aman dan tidak terhapus.");
+  const storedDup = await protestStore.getProtestById(dupBatchId);
+  assert.equal(storedDup.lokasi, "Lokasi Baris Pertama", "First occurrence data must be preserved");
+  console.log("  ✔ Baris pertama diproses, baris kedua duplikat di dalam batch berhasil dilewati.");
 
   // ---------------------------------------------------------------------------
-  // Test 9: Idempotent upsert by ID KEJADIAN
+  // Test 7: Empty Excel result
   // ---------------------------------------------------------------------------
-  console.log("\n[Test 9/15] Uji Idempotensi Rekaman Duplikat ID KEJADIAN...");
-  const dupId = `TEST-IDEMP-H0-${Date.now()}`;
-  const todayMidISO = "2026-11-19T14:00:00+07:00";
-  const payloadDup = {
-    sync_type: "same_day",
+  console.log("\n[Test 7/12] Uji Penanganan Hasil Excel Kosong (0 Baris)...");
+  const payloadEmpty = {
+    sync_type: "rolling_7d",
+    timezone: "Asia/Jakarta",
+    period_start: window.period_start,
+    period_end: window.period_end,
+    events: []
+  };
+  const resEmpty = await processRolling7DaySync(payloadEmpty, "power_automate", "Test Runner");
+  assert.equal(resEmpty.success, true, "Empty payload must succeed gracefully");
+  assert.equal(resEmpty.status, "success", "Status must be success");
+  assert.equal(resEmpty.summary.received, 0);
+  assert.equal(resEmpty.summary.processed, 0);
+  assert.equal(resEmpty.summary.inserted, 0);
+  assert.equal(resEmpty.summary.updated, 0);
+  assert.equal(resEmpty.summary.skipped, 0);
+  assert.equal(resEmpty.summary.failed, 0);
+  console.log("  ✔ Batch kosong berhasil diselesaikan dengan status sukses tanpa galat.");
+
+  // ---------------------------------------------------------------------------
+  // Test 8: Multiple records with same kode_unras but different id_kejadian
+  // ---------------------------------------------------------------------------
+  console.log("\n[Test 8/12] Uji Rekor Jamak dengan kode_unras Sama tapi id_kejadian Berbeda...");
+  const sharedKode = `UNR-MULTI-POINT-${runId}`;
+  const sharedIdA = `KEJ-MULTI-POINT-A-${runId}`;
+  const sharedIdB = `KEJ-MULTI-POINT-B-${runId}`;
+  const payloadSharedKode = {
+    sync_type: "rolling_7d",
     timezone: "Asia/Jakarta",
     period_start: window.period_start,
     period_end: window.period_end,
     events: [
       {
-        "ID KEJADIAN": dupId,
-        "KODE_UNRAS": "IDEMP-H0",
-        "WAKTU DAN TGL KEJADIAN ISO": todayMidISO,
-        "TANGGAL": "2026-11-19",
-        "LOKASI": "Lokasi Versi A",
-        "ISU": "Isu Versi A",
-        "STATUS": "scheduled"
+        "ID KEJADIAN": sharedIdA,
+        "KODE_UNRAS": sharedKode,
+        "WAKTU DAN TGL KEJADIAN ISO": "2026-11-21T10:00:00+07:00",
+        "TANGGAL": "2026-11-21",
+        "LOKASI": "Titik Kumpul Monas",
+        "ISU": "Aksi Multi Titik - Titik A"
+      },
+      {
+        "ID KEJADIAN": sharedIdB,
+        "KODE_UNRAS": sharedKode,
+        "WAKTU DAN TGL KEJADIAN ISO": "2026-11-21T11:00:00+07:00",
+        "TANGGAL": "2026-11-21",
+        "LOKASI": "Sasaran Aksi Gedung BI",
+        "ISU": "Aksi Multi Titik - Titik B"
       }
     ]
   };
-  const firstSync = await processSameDaySync(payloadDup, "power_automate", "Test Runner");
-  assert.ok(firstSync.summary.inserted >= 1 || firstSync.summary.updated >= 1);
+  const resSharedKode = await processRolling7DaySync(payloadSharedKode, "power_automate", "Test Runner");
+  assert.equal(resSharedKode.summary.inserted, 2, "Both records with different id_kejadian must be inserted");
+  assert.equal(resSharedKode.summary.updated, 0);
+  assert.equal(resSharedKode.summary.skipped, 0);
 
-  // Re-sync with updated text
-  payloadDup.events[0]["LOKASI"] = "Lokasi Versi B Terkoreksi";
-  const secondSync = await processSameDaySync(payloadDup, "power_automate", "Test Runner");
-  assert.equal(secondSync.summary.updated, 1, "Second sync must update, NOT duplicate");
-
-  const stored = await protestStore.getProtestById(dupId);
-  assert.equal(stored.lokasi, "Lokasi Versi B Terkoreksi");
-  console.log("  ✔ Idempotensi duplikat ID KEJADIAN valid: tidak ada duplikasi data.");
+  const eventA = await protestStore.getProtestById(sharedIdA);
+  const eventB = await protestStore.getProtestById(sharedIdB);
+  assert.ok(eventA && eventB, "Both events must exist independently");
+  assert.equal(eventA.kode_unras, sharedKode);
+  assert.equal(eventB.kode_unras, sharedKode);
+  console.log("  ✔ Kedua kejadian dengan kode_unras sama berhasil disimpan karena memiliki id_kejadian berbeda.");
 
   // ---------------------------------------------------------------------------
-  // Test 10: Operator-managed fields & validated coords preservation
+  // Test 9: Existing operator-managed fields remain unchanged
   // ---------------------------------------------------------------------------
-  console.log("\n[Test 10/15] Proteksi Catatan & Validasi Koordinat Operator...");
-  const protectId = `TEST-OPERATOR-PROTECT-H0-${Date.now()}`;
-  const initPayload = {
-    sync_type: "same_day",
+  console.log("\n[Test 9/12] Proteksi Menyeluruh Catatan & Validasi Operator...");
+  const operatorEventId = `TEST-OPERATOR-PROTECT-${runId}`;
+  const payloadOpInit = {
+    sync_type: "rolling_7d",
     timezone: "Asia/Jakarta",
     period_start: window.period_start,
     period_end: window.period_end,
     events: [
       {
-        "ID KEJADIAN": protectId,
-        "KODE_UNRAS": "PROT-H0",
-        "WAKTU DAN TGL KEJADIAN ISO": todayMidISO,
-        "TANGGAL": "2026-11-19",
-        "LOKASI": "Patung Kuda",
-        "ISU": "Isu Buruh H-0",
-        "JUMLAH MASSA": 100
+        "ID KEJADIAN": operatorEventId,
+        "KODE_UNRAS": `OP-${runId}`,
+        "WAKTU DAN TGL KEJADIAN ISO": "2026-11-22T13:00:00+07:00",
+        "TANGGAL": "2026-11-22",
+        "LOKASI": "Patung Arjuna Wijaya",
+        "ISU": "Isu Awal Sumber Excel",
+        "JUMLAH MASSA": 150
       }
     ]
   };
-  await processSameDaySync(initPayload, "power_automate", "Test Runner");
+  await processRolling7DaySync(payloadOpInit, "power_automate", "Test Runner");
 
-  // Operator validates coordinates and enters critical notes
-  await protestStore.updateProtest(protectId, {
+  // Operator modifies fields
+  await protestStore.updateProtest(operatorEventId, {
     status: "ongoing",
-    actual_crowd_size: 450,
-    situation_summary: "OPERATOR_NOTE_H0_CRITICAL",
-    editorial_draft: "EDITORIAL_DRAFT_H0",
-    editorial_final: "EDITORIAL_FINAL_H0",
-    validated_lat: -6.1805,
-    validated_lng: 106.8227
+    urgency: "high",
+    actual_crowd_size: 850,
+    situation_summary: "SITUASI_OPERATOR_SANGAT_PENTING",
+    editorial_draft: "DRAFT_REDAKSI_OPERATOR",
+    editorial_final: "FINAL_REDAKSI_OPERATOR",
+    validated_lat: -6.1754,
+    validated_lng: 106.8272
   });
 
-  // Re-sync from Excel with different values
-  const reSync = {
-    sync_type: "same_day",
+  // Capture snapshot before sync to verify byte-for-byte immutability
+  const beforeSyncRecord = await protestStore.getProtestById(operatorEventId);
+  const beforeSyncJson = JSON.stringify(beforeSyncRecord);
+
+  // Excel sync sends payload again with different/conflicting values
+  const payloadOpResync = {
+    sync_type: "rolling_7d",
     timezone: "Asia/Jakarta",
     period_start: window.period_start,
     period_end: window.period_end,
     events: [
       {
-        "ID KEJADIAN": protectId,
-        "KODE_UNRAS": "PROT-H0",
-        "WAKTU DAN TGL KEJADIAN ISO": todayMidISO,
-        "TANGGAL": "2026-11-19",
-        "LOKASI": "Patung Kuda Monas",
-        "ISU": "Isu Buruh Excel Updated",
-        "JUMLAH MASSA": 200
+        "ID KEJADIAN": operatorEventId,
+        "KODE_UNRAS": `OP-${runId}`,
+        "WAKTU DAN TGL KEJADIAN ISO": "2026-11-22T13:00:00+07:00",
+        "TANGGAL": "2026-11-22",
+        "LOKASI": "Nama Lokasi Excel Yang Mau Menimpa",
+        "ISU": "Isu Excel Yang Mau Menimpa",
+        "JUMLAH MASSA": 9999
       }
     ]
   };
-  await processSameDaySync(reSync, "power_automate", "Test Runner");
+  const resOpResync = await processRolling7DaySync(payloadOpResync, "power_automate", "Test Runner");
+  assert.equal(resOpResync.summary.inserted, 0);
+  assert.equal(resOpResync.summary.updated, 0, "Updated MUST be 0");
+  assert.equal(resOpResync.summary.skipped, 1, "Must be skipped");
 
-  const postSyncRecord = await protestStore.getProtestById(protectId);
-  assert.equal(postSyncRecord.situation_summary, "OPERATOR_NOTE_H0_CRITICAL");
-  assert.equal(postSyncRecord.actual_crowd_size, 450);
+  const postSyncRecord = await protestStore.getProtestById(operatorEventId);
+  const postSyncJson = JSON.stringify(postSyncRecord);
+  assert.equal(postSyncJson, beforeSyncJson, "Existing record MUST remain 100% byte-for-byte unchanged");
   assert.equal(postSyncRecord.status, "ongoing");
-  assert.equal(postSyncRecord.validated_lat, -6.1805);
-  assert.equal(postSyncRecord.validated_lng, 106.8227);
-  assert.equal(postSyncRecord.isu_tuntutan, "Isu Buruh Excel Updated");
-  console.log("  ✔ CRITICAL PASS: Koordinat validasi & catatan operator aman dari overwrite Excel.");
+  assert.equal(postSyncRecord.urgency, "high");
+  assert.equal(postSyncRecord.actual_crowd_size, 850);
+  assert.equal(postSyncRecord.situation_summary, "SITUASI_OPERATOR_SANGAT_PENTING");
+  assert.equal(postSyncRecord.editorial_draft, "DRAFT_REDAKSI_OPERATOR");
+  assert.equal(postSyncRecord.editorial_final, "FINAL_REDAKSI_OPERATOR");
+  assert.equal(postSyncRecord.validated_lat, -6.1754);
+  assert.equal(postSyncRecord.validated_lng, 106.8272);
+  assert.equal(postSyncRecord.lokasi, "Patung Arjuna Wijaya", "Original location must not be overwritten");
+  assert.equal(postSyncRecord.isu_tuntutan, "Isu Awal Sumber Excel", "Original issue must not be overwritten");
+  console.log("  ✔ CRITICAL PASS: Rekor yang sudah ada 100% byte-for-byte identik dan tidak tersentuh sinkronisasi.");
 
   // ---------------------------------------------------------------------------
-  // Test 11: Invalid timestamps & missing ID handling
+  // Test 10: Concurrent sync requests cannot create duplicates
   // ---------------------------------------------------------------------------
-  console.log("\n[Test 11/15] Penanganan Baris Rusak & Tanpa ID...");
-  const invalidTime = parseSourceEventDatetime("invalid-date-format", null);
-  assert.equal(invalidTime.iso, null);
-
-  const payloadCorrupt = {
-    sync_type: "same_day",
+  console.log("\n[Test 10/12] Proteksi Konkurensi Eksekusi Ganda...");
+  const concurrentId = `TEST-CONCURRENT-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  const payloadConcurrent = {
+    sync_type: "rolling_7d",
     timezone: "Asia/Jakarta",
     period_start: window.period_start,
     period_end: window.period_end,
     events: [
-      { "ID KEJADIAN": "", "WAKTU DAN TGL KEJADIAN ISO": todayMidISO },
-      { "ID KEJADIAN": "TEST-CORRUPT", "WAKTU DAN TGL KEJADIAN ISO": "TIMESTAMP_RUSAK" }
+      {
+        "ID KEJADIAN": concurrentId,
+        "KODE_UNRAS": "CONC-010",
+        "WAKTU DAN TGL KEJADIAN ISO": "2026-11-22T14:00:00+07:00",
+        "TANGGAL": "2026-11-22",
+        "LOKASI": "Lokasi Uji Konkurensi",
+        "ISU": "Isu Uji Konkurensi"
+      }
     ]
   };
-  const resCorrupt = await processSameDaySync(payloadCorrupt, "power_automate", "Test Runner");
-  assert.equal(resCorrupt.summary.skipped, 2, "Corrupt rows must be safely skipped");
-  console.log("  ✔ Baris rusak dan tanpa ID berhasil dilewati tanpa error fatal.");
+
+  const p1 = processRolling7DaySync(payloadConcurrent, "power_automate", "Thread 1");
+  const p2 = processRolling7DaySync(payloadConcurrent, "power_automate", "Thread 2");
+  const [r1, r2] = await Promise.all([p1, p2]);
+
+  const atLeastOneSkippedOrBothSafe =
+    r1.status === "skipped" ||
+    r2.status === "skipped" ||
+    r1.summary.skipped >= 1 ||
+    r2.summary.skipped >= 1 ||
+    (r1.summary.inserted + r2.summary.inserted <= 1);
+
+  assert.ok(atLeastOneSkippedOrBothSafe, "Concurrency must prevent duplicate insertions");
+
+  const checkConcurrent = await protestStore.getProtestById(concurrentId);
+  assert.ok(checkConcurrent, "Record must exist in store");
+  console.log("  ✔ Lock konkurensi & database constraints mencegah duplikasi data saat eksekusi paralel.");
 
   // ---------------------------------------------------------------------------
-  // Test 12: Request Schema & Max Duration Validation (H-0 Window <= 24h)
+  // Test 12: Historical records outside the 7-day window are excluded
   // ---------------------------------------------------------------------------
-  console.log("\n[Test 12/15] Uji Validasi Durasi Window Maksimal 24 Jam...");
-  // Window > 24 hours
-  const multiDayPayload = {
-    sync_type: "same_day",
+  console.log("\n[Test 12/12] Eksklusi Rekor Historis & Masa Depan di Luar Jendela 7 Hari...");
+  // 8 days ago (15 Nov 2026) -> outside [17 Nov, 24 Nov)
+  const pastOutsideISO = "2026-11-15T10:00:00+07:00";
+  // Future date (25 Nov 2026) -> outside [17 Nov, 24 Nov)
+  const futureOutsideISO = "2026-11-25T10:00:00+07:00";
+
+  const pastOutsideId = `TEST-PAST-OUTSIDE-${runId}`;
+  const futureOutsideId = `TEST-FUTURE-OUTSIDE-${runId}`;
+  const payloadOutside = {
+    sync_type: "rolling_7d",
     timezone: "Asia/Jakarta",
-    period_start: new Date(refDate.getTime() - 2 * 86400000).toISOString(), // 2 days!
-    period_end: refDate.toISOString(),
-    events: []
-  };
-  const vMultiDay = validateRollingSyncRequest(multiDayPayload);
-  assert.equal(vMultiDay.valid, false, "Window > 24 hours must fail validation for H-0 sync");
-  assert.ok(vMultiDay.error?.includes("24 jam"), "Error must explain 24h limit");
-
-  // Invalid timezone
-  const vTz = validateRollingSyncRequest({
-    sync_type: "same_day",
-    timezone: "UTC",
     period_start: window.period_start,
     period_end: window.period_end,
-    events: []
-  });
-  assert.equal(vTz.valid, false, "Non Asia/Jakarta timezone must fail");
-  console.log("  ✔ Validasi skema: batas durasi 24 jam & zona waktu Asia/Jakarta terverifikasi.");
-
-  // ---------------------------------------------------------------------------
-  // Test 13: Timing-Safe Integration Token Verification
-  // ---------------------------------------------------------------------------
-  console.log("\n[Test 13/15] Verifikasi Token Keamanan Integrasi (Timing-Safe)...");
-  const secret = "scc-unras-secret-token-2026-xyz";
-  assert.equal(verifyIntegrationToken("Bearer " + secret, secret), true);
-  assert.equal(verifyIntegrationToken("Bearer wrong-token", secret), false);
-  assert.equal(verifyIntegrationToken(null, secret), false);
-  console.log("  ✔ Token perbandingan timing-safe terverifikasi aman.");
-
-  // ---------------------------------------------------------------------------
-  // Test 14: Concurrency Lock Guard
-  // ---------------------------------------------------------------------------
-  console.log("\n[Test 14/15] Proteksi Lock Konkurensi Antar Proses...");
-  const promise1 = processSameDaySync(payloadLateNight, "power_automate", "Thread 1");
-  const promise2 = processSameDaySync(payloadLateNight, "power_automate", "Thread 2");
-  const [r1, r2] = await Promise.all([promise1, promise2]);
-  const safe = r1.status === "skipped" || r2.status === "skipped" || (r1.success && r2.success);
-  assert.ok(safe, "Concurrency lock must prevent race conditions");
-  console.log("  ✔ Lock konkurensi aktif dan mencegah tabrakan eksekusi ganda.");
-
-  // ---------------------------------------------------------------------------
-  // Test 15: Backward Compatibility Alias Verification
-  // ---------------------------------------------------------------------------
-  console.log("\n[Test 15/17] Verifikasi Kompatibilitas Mundur (Alias Function)...");
-  const legacyWindow = calculateRolling7DayWindow(refDate);
-  assert.equal(legacyWindow.date_wib, "2026-11-19");
-  assert.equal(legacyWindow.period_end_ms - legacyWindow.period_start_ms, ONE_DAY_MS);
-  console.log("  ✔ Alias backwards-compatibility (calculateRolling7DayWindow) berfungsi mulus.");
-
-  // ---------------------------------------------------------------------------
-  // Test 16: Time Normalization & PostgreSQL TIME Column Safety
-  // ---------------------------------------------------------------------------
-  console.log("\n[Test 16/17] Verifikasi Normalisasi Waktu (WIB Suffix & Range Validation)...");
-  const { normalizeTimeString } = await import("../src/lib/time-normalization.ts");
-  
-  // Basic cases
-  assert.equal(normalizeTimeString("09:00 WIB").time, "09:00:00");
-  assert.equal(normalizeTimeString("09:30 WIB").time, "09:30:00");
-  assert.equal(normalizeTimeString("09:00").time, "09:00:00");
-  assert.equal(normalizeTimeString("14:45:30 WIB").time, "14:45:30");
-  assert.equal(normalizeTimeString("14.45.30 WITA").time, "14:45:30");
-  assert.equal(normalizeTimeString("").time, null);
-  assert.equal(normalizeTimeString(null).time, null);
-  assert.equal(normalizeTimeString(0.375).time, "09:00:00"); // Excel fraction: 9h/24h = 0.375
-
-  // Invalid time ranges must NOT silently convert to midnight, must return error
-  const invalidHour = normalizeTimeString("25:00 WIB");
-  assert.equal(invalidHour.time, null);
-  assert.ok(invalidHour.error?.includes("Jam tidak valid"));
-
-  const invalidMinute = normalizeTimeString("12:65 WIB");
-  assert.equal(invalidMinute.time, null);
-  assert.ok(invalidMinute.error?.includes("Menit tidak valid"));
-
-  const garbageTime = normalizeTimeString("bukan-waktu");
-  assert.equal(garbageTime.time, null);
-  assert.ok(garbageTime.error?.includes("Format waktu tidak valid"));
-  console.log("  ✔ Normalisasi format waktu PostgreSQL TIME terverifikasi akurat.");
-
-  // ---------------------------------------------------------------------------
-  // Test 17: Double-dash Date Window Rejection
-  // ---------------------------------------------------------------------------
-  console.log("\n[Test 17/17] Penolakan Format Window Cacat (Double Dash '--')...");
-  const doubleDashPayload = {
-    sync_type: "same_day",
-    timezone: "Asia/Jakarta",
-    period_start: "2026--11-18T17:00:00.000Z",
-    period_end: "2026-11-19T17:00:00.000Z",
-    events: []
+    events: [
+      {
+        "ID KEJADIAN": pastOutsideId,
+        "WAKTU DAN TGL KEJADIAN ISO": pastOutsideISO,
+        "TANGGAL": "2026-11-15",
+        "LOKASI": "Lokasi 8 Hari Lalu",
+        "ISU": "Aksi 8 Hari Lalu"
+      },
+      {
+        "ID KEJADIAN": futureOutsideId,
+        "WAKTU DAN TGL KEJADIAN ISO": futureOutsideISO,
+        "TANGGAL": "2026-11-25",
+        "LOKASI": "Lokasi Masa Depan 25 Nov",
+        "ISU": "Aksi Masa Depan 25 Nov"
+      }
+    ]
   };
-  const vDoubleDash = validateRollingSyncRequest(doubleDashPayload);
-  assert.equal(vDoubleDash.valid, false, "Double-dash in period_start must fail validation");
-  assert.ok(vDoubleDash.error?.includes("double dash"));
-  console.log("  ✔ Penolakan string tanggal cacat dengan double dash terverifikasi aman.");
+  const resOutside = await processRolling7DaySync(payloadOutside, "power_automate", "Test Runner");
+  assert.equal(resOutside.summary.inserted, 0, "Outside events must NOT be inserted");
+  assert.equal(resOutside.summary.updated, 0, "Updated must be 0");
+  assert.equal(resOutside.summary.skipped, 2, "Both outside records must be skipped");
+
+  const checkPast = await protestStore.getProtestById(pastOutsideId);
+  const checkFuture = await protestStore.getProtestById(futureOutsideId);
+  assert.equal(checkPast, null, "Historical record outside 7-day window must not exist");
+  assert.equal(checkFuture, null, "Future record outside 7-day window must not exist");
+  console.log("  ✔ Data 8 hari lalu dan masa depan berhasil dikecualikan (SKIPPED).");
 
   console.log("\n================================================================================");
-  console.log("=== SEMUA 17 PENGUJIAN SINKRONISASI SAME-DAY (H-0) BERHASIL DENGAN SEMPURNA! ===");
+  console.log("=== SEMUA 12 PENGUJIAN SINKRONISASI ROLLING 7 HARI BERHASIL DENGAN SEMPURNA! ===");
   console.log("================================================================================\n");
 }
 

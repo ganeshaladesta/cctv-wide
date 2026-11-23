@@ -1930,6 +1930,7 @@ class ProtestDataStore {
     updated: number;
     skipped: number;
     failed?: number;
+    error?: string | null;
   }> {
     if (isSupabaseConfigured()) {
       try {
@@ -1940,8 +1941,10 @@ class ProtestDataStore {
         return {
           processed: res.inserted + res.updated + res.skipped + (res.failed || 0),
           created: res.inserted,
-          error: res.error,
-          ...res
+          updated: 0,
+          skipped: res.skipped,
+          failed: res.failed,
+          error: res.error
         };
       } catch (err) {
         console.error("[ProtestDataStore] Supabase upsertExcelBatch failed:", err);
@@ -1992,125 +1995,56 @@ class ProtestDataStore {
       const existing = this.getProtestByIdLocal(rec.id_kejadian);
 
       if (existing) {
-        // UPDATE ONLY EXCEL FIELDS — PRESERVE OPERATOR FIELDS
-        if (this.db) {
-          this.db.prepare(`
-            UPDATE protests SET
-              kode_unras = ?,
-              tanggal = ?,
-              waktu_mulai = ?,
-              waktu_selesai = ?,
-              event_datetime = ?,
-              lokasi = ?,
-              titik_kumpul = ?,
-              sasaran_aksi = ?,
-              isu_tuntutan = ?,
-              estimasi_massa_source = ?,
-              organisasi_kelompok = ?,
-              korlap_pimpinan = ?,
-              wilayah_hukum = ?,
-              provinsi = ?,
-              kota_kabupaten = ?,
-              keterangan_source = ?,
-              raw_source_payload = ?,
-              regional = COALESCE(?, regional),
-              kategori_isu = COALESCE(?, kategori_isu),
-              dampak = COALESCE(?, dampak),
-              last_synced_at = ?,
-              updated_at = ?
-            WHERE id = ?
-          `).run(
-            rec.kode_unras || existing.kode_unras,
-            rec.tanggal || existing.tanggal,
-            rec.waktu_mulai ?? existing.waktu_mulai,
-            rec.waktu_selesai ?? existing.waktu_selesai,
-            (rec.event_datetime ?? existing.event_datetime) || null,
-            rec.lokasi || existing.lokasi,
-            rec.titik_kumpul ?? existing.titik_kumpul,
-            rec.sasaran_aksi ?? existing.sasaran_aksi,
-            rec.isu_tuntutan || existing.isu_tuntutan,
-            rec.estimasi_massa_source ?? existing.estimasi_massa_source,
-            rec.organisasi_kelompok ?? existing.organisasi_kelompok,
-            rec.korlap_pimpinan ?? existing.korlap_pimpinan,
-            rec.wilayah_hukum ?? existing.wilayah_hukum,
-            rec.provinsi ?? existing.provinsi,
-            rec.kota_kabupaten ?? existing.kota_kabupaten,
-            rec.keterangan_source ?? existing.keterangan_source,
-            JSON.stringify(rec.raw_source_payload || {}),
-            (rec as any).regional ?? null,
-            (rec as any).kategori_isu ?? null,
-            (rec as any).dampak ?? null,
-            now,
-            now,
-            existing.id
-          );
-        } else {
-          existing.kode_unras = rec.kode_unras || existing.kode_unras;
-          existing.tanggal = rec.tanggal || existing.tanggal;
-          existing.waktu_mulai = rec.waktu_mulai ?? existing.waktu_mulai;
-          existing.waktu_selesai = rec.waktu_selesai ?? existing.waktu_selesai;
-          existing.event_datetime = rec.event_datetime ?? existing.event_datetime;
-          existing.lokasi = rec.lokasi || existing.lokasi;
-          existing.titik_kumpul = rec.titik_kumpul ?? existing.titik_kumpul;
-          existing.sasaran_aksi = rec.sasaran_aksi ?? existing.sasaran_aksi;
-          existing.isu_tuntutan = rec.isu_tuntutan || existing.isu_tuntutan;
-          existing.estimasi_massa_source = rec.estimasi_massa_source ?? existing.estimasi_massa_source;
-          existing.organisasi_kelompok = rec.organisasi_kelompok ?? existing.organisasi_kelompok;
-          existing.korlap_pimpinan = rec.korlap_pimpinan ?? existing.korlap_pimpinan;
-          existing.wilayah_hukum = rec.wilayah_hukum ?? existing.wilayah_hukum;
-          existing.provinsi = rec.provinsi ?? existing.provinsi;
-          existing.kota_kabupaten = rec.kota_kabupaten ?? existing.kota_kabupaten;
-          existing.keterangan_source = rec.keterangan_source ?? existing.keterangan_source;
-          existing.raw_source_payload = rec.raw_source_payload || {};
-          existing.last_synced_at = now;
-          existing.updated_at = now;
-        }
-        updated++;
-      } else {
-        // CREATE NEW PROTEST FROM EXCEL
-        const id = crypto.randomUUID();
-        const newEvent: ProtestEvent = {
-          id,
-          id_kejadian: rec.id_kejadian,
-          kode_unras: rec.kode_unras || `UNR-${Date.now()}`,
-          tanggal: rec.tanggal,
-          waktu_mulai: rec.waktu_mulai || null,
-          waktu_selesai: rec.waktu_selesai || null,
-          event_datetime: rec.event_datetime || null,
-          lokasi: rec.lokasi,
-          titik_kumpul: rec.titik_kumpul || null,
-          sasaran_aksi: rec.sasaran_aksi || null,
-          isu_tuntutan: rec.isu_tuntutan,
-          estimasi_massa_source: rec.estimasi_massa_source ?? null,
-          organisasi_kelompok: rec.organisasi_kelompok || null,
-          korlap_pimpinan: rec.korlap_pimpinan || null,
-          wilayah_hukum: rec.wilayah_hukum || null,
-          provinsi: rec.provinsi || null,
-          kota_kabupaten: rec.kota_kabupaten || null,
-          keterangan_source: rec.keterangan_source || null,
-          raw_source_payload: rec.raw_source_payload || {},
-          status: "scheduled",
-          urgency: (rec.estimasi_massa_source && rec.estimasi_massa_source >= 1000) ? "high" : "medium",
-          category_id: null,
-          category_name: null,
-          validated_lat: null,
-          validated_lng: null,
-          has_coordinates: false,
-          actual_crowd_size: null,
-          situation_summary: null,
-          editorial_draft: null,
-          editorial_final: null,
-          is_archived: false,
-          completed_at: null,
-          completed_by_id: null,
-          completed_by_name: null,
-          created_at: now,
-          updated_at: now,
-          deleted_at: null,
-          last_synced_at: now
-        };
+        // SKIP EXISTING RECORD — NEVER OVERWRITE OR UPDATE OPERATOR FIELDS
+        skipped++;
+        continue;
+      }
 
-        if (this.db) {
+      // CREATE NEW PROTEST FROM EXCEL
+      const id = crypto.randomUUID();
+      const newEvent: ProtestEvent = {
+        id,
+        id_kejadian: rec.id_kejadian,
+        kode_unras: rec.kode_unras || `UNR-${Date.now()}`,
+        tanggal: rec.tanggal,
+        waktu_mulai: rec.waktu_mulai || null,
+        waktu_selesai: rec.waktu_selesai || null,
+        event_datetime: rec.event_datetime || null,
+        lokasi: rec.lokasi,
+        titik_kumpul: rec.titik_kumpul || null,
+        sasaran_aksi: rec.sasaran_aksi || null,
+        isu_tuntutan: rec.isu_tuntutan,
+        estimasi_massa_source: rec.estimasi_massa_source ?? null,
+        organisasi_kelompok: rec.organisasi_kelompok || null,
+        korlap_pimpinan: rec.korlap_pimpinan || null,
+        wilayah_hukum: rec.wilayah_hukum || null,
+        provinsi: rec.provinsi || null,
+        kota_kabupaten: rec.kota_kabupaten || null,
+        keterangan_source: rec.keterangan_source || null,
+        raw_source_payload: rec.raw_source_payload || {},
+        status: "scheduled",
+        urgency: (rec.estimasi_massa_source && rec.estimasi_massa_source >= 1000) ? "high" : "medium",
+        category_id: null,
+        category_name: null,
+        validated_lat: null,
+        validated_lng: null,
+        has_coordinates: false,
+        actual_crowd_size: null,
+        situation_summary: null,
+        editorial_draft: null,
+        editorial_final: null,
+        is_archived: false,
+        completed_at: null,
+        completed_by_id: null,
+        completed_by_name: null,
+        created_at: now,
+        updated_at: now,
+        deleted_at: null,
+        last_synced_at: now
+      };
+
+      if (this.db) {
+        try {
           this.db.prepare(`
             INSERT INTO protests (
               id, id_kejadian, kode_unras, tanggal, waktu_mulai, waktu_selesai, event_datetime,
@@ -2173,9 +2107,17 @@ class ProtestDataStore {
             (rec as any).kategori_isu ?? null,
             (rec as any).dampak ?? null
           );
-        } else {
-          this.memoryEvents.set(newEvent.id, newEvent);
+          created++;
+        } catch (insertErr: any) {
+          const msg = String(insertErr?.message || "");
+          if (msg.includes("UNIQUE constraint failed") || msg.includes("duplicate") || msg.includes("conflict")) {
+            skipped++;
+          } else {
+            throw insertErr;
+          }
         }
+      } else {
+        this.memoryEvents.set(newEvent.id, newEvent);
         created++;
       }
     }
@@ -2183,7 +2125,7 @@ class ProtestDataStore {
     return {
       processed: records.length,
       created,
-      updated,
+      updated: 0,
       skipped
     };
   }

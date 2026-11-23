@@ -166,12 +166,12 @@ export function ProtestDashboard({
               if (currentLog.status === "success") {
                 setSyncFeedback({
                   type: "success",
-                  message: `Sinkronisasi Berhasil (Manual): +${currentLog.records_created} baru, ~${currentLog.records_updated} diperbarui, /${currentLog.records_skipped} dilewati, !${currentLog.records_failed ?? 0} gagal.`
+                  message: `Sinkronisasi Berhasil (Manual): +${currentLog.records_created} baru, /${currentLog.records_skipped} dilewati, !${currentLog.records_failed ?? 0} gagal.`
                 });
               } else if (currentLog.status === "partial") {
                 setSyncFeedback({
                   type: "warning",
-                  message: `Sinkronisasi Selesai Sebagian: +${currentLog.records_created} baru, ~${currentLog.records_updated} diperbarui, /${currentLog.records_skipped} dilewati. Peringatan: ${currentLog.error_details || "Terdapat baris data yang dilewati."}`
+                  message: `Sinkronisasi Selesai Sebagian: +${currentLog.records_created} baru, /${currentLog.records_skipped} dilewati, !${currentLog.records_failed ?? 0} gagal. Peringatan: ${currentLog.error_details || "Terdapat baris data yang dilewati."}`
                 });
               } else if (currentLog.status === "failed") {
                 setSyncFeedback({
@@ -452,7 +452,7 @@ export function ProtestDashboard({
                 <RefreshCw className={`w-4 h-4 text-emerald-400 ${syncLoading ? "animate-spin" : ""}`} />
                 <div>
                   <h3 className="text-xs font-bold text-white tracking-wide uppercase">
-                    Status Sinkronisasi H-0 (Hari Ini)
+                    Sinkronisasi Rolling 7 Hari
                   </h3>
                   <p className="text-[11px] text-[#98A4B8]">
                     Sinkronisasi Otomatis Harian (05:00 WIB) & Integrasi Workbook
@@ -524,7 +524,7 @@ export function ProtestDashboard({
                     : "Otomatis (Jadwal 05:00 WIB)"}
                 </span>
                 <span className="text-[10px] text-[#98A4B8] truncate block">
-                  Jendela H-0: {formatWib(latestLog?.period_start)} s/d {formatWib(latestLog?.period_end)}
+                  Jendela Rolling 7 Hari: {formatWib(latestLog?.period_start)} s/d {formatWib(latestLog?.period_end)}
                 </span>
               </div>
 
@@ -546,15 +546,12 @@ export function ProtestDashboard({
               </div>
 
               <div className="p-2.5 rounded-xl bg-[#141A28] border border-[var(--border-subtle)]">
-                <span className="text-[10px] text-[#64748B] block">Hasil Upsert Database</span>
+                <span className="text-[10px] text-[#64748B] block">Hasil Sinkronisasi Database</span>
                 <div className="flex items-center gap-2 mt-1">
-                  <span className="text-emerald-400 font-bold" title="Baru Dibuat">
+                  <span className="text-emerald-400 font-bold" title="Baru Ditambahkan">
                     +{latestLog?.records_created ?? 0}
                   </span>
-                  <span className="text-blue-400 font-bold" title="Diperbarui">
-                    ~{latestLog?.records_updated ?? 0}
-                  </span>
-                  <span className="text-amber-400 font-bold" title="Dilewati (di luar hari ini / invalid)">
+                  <span className="text-amber-400 font-bold" title="Dilewati (sudah ada / duplikat / invalid)">
                     /{latestLog?.records_skipped ?? 0}
                   </span>
                   <span className="text-red-400 font-bold" title="Gagal">
@@ -562,7 +559,7 @@ export function ProtestDashboard({
                   </span>
                 </div>
                 <span className="text-[10px] text-[#64748B] block mt-0.5">
-                  (+baru, ~update, /skip, !gagal)
+                  (+baru, /dilewati, !gagal)
                 </span>
               </div>
             </div>

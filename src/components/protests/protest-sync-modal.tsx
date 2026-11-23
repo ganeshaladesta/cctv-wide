@@ -117,11 +117,11 @@ export function ProtestSyncModal({
               await fetchSyncStatus();
               if (currentLog.status === "success") {
                 setStatusMessage(
-                  `Sinkronisasi Selesai: +${currentLog.records_created} baru, ~${currentLog.records_updated} diperbarui, /${currentLog.records_skipped} dilewati.`
+                  `Sinkronisasi Selesai: +${currentLog.records_created} baru, /${currentLog.records_skipped} dilewati, !${currentLog.records_failed ?? 0} gagal.`
                 );
               } else if (currentLog.status === "partial") {
                 setStatusMessage(
-                  `Sinkronisasi Sebagian: +${currentLog.records_created} baru, ~${currentLog.records_updated} diperbarui.`
+                  `Sinkronisasi Sebagian: +${currentLog.records_created} baru, /${currentLog.records_skipped} dilewati.`
                 );
               } else {
                 setErrorMessage(currentLog.error_details || "Eksekusi Power Automate gagal.");
@@ -304,8 +304,8 @@ export function ProtestSyncModal({
                     <div className="flex flex-wrap items-center gap-3 text-[11px] text-[#98A4B8]">
                       <span>Dipindai: <strong className="text-white">{log.records_processed}</strong></span>
                       <span>Baru: <strong className="text-emerald-400">+{log.records_created}</strong></span>
-                      <span>Diperbarui: <strong className="text-blue-400">{log.records_updated}</strong></span>
-                      <span>Dilewati: <strong className="text-slate-400">{log.records_skipped}</strong></span>
+                      <span>Dilewati: <strong className="text-slate-400">/{log.records_skipped}</strong></span>
+                      {Boolean(log.records_failed) && <span>Gagal: <strong className="text-red-400">!{log.records_failed}</strong></span>}
                       <span className="text-[#64748B]">Pemicu: {log.triggered_by}</span>
                     </div>
 

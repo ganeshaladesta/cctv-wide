@@ -276,7 +276,7 @@ export interface ProtestSyncLog {
  * Contract for POST /api/integrations/unras/sync & /api/protests/sync
  * Scheduled Sync (Same-Day H-0 Asia/Jakarta) -> Vercel API
  */
-export type ProtestSyncType = "same_day" | "same_day_h0" | "rolling_7d";
+export type ProtestSyncType = "same_day" | "same_day_h0" | "rolling_7d" | "rolling_7_days";
 
 export interface ProtestSyncPayload {
   sync_type?: ProtestSyncType;
