@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { protestStore } from '@/lib/protest-store';
 import { resolveCurrentUser, canUpdateStatus } from '@/lib/auth-roles';
 import { ProtestStatus } from '@/lib/types/protests';
-import { dispatchOutboundSync } from '@/lib/unras-outbound-sync';
+import { enqueueOutboundSync } from '@/lib/unras-outbound-queue';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -56,12 +56,13 @@ export async function POST(request: NextRequest, { params }: Params) {
       user
     );
 
-    let outboundSync = null;
+    let outboundJob = null;
     if (updated) {
       try {
-        outboundSync = await dispatchOutboundSync(updated, { origin: "scc", route: "POST /api/protests/[id]/status" });
+        const queueRes = await enqueueOutboundSync(updated, { origin: "scc", route: "POST /api/protests/[id]/status" });
+        outboundJob = queueRes.job || null;
       } catch (err: any) {
-        console.warn("[Outbound Sync Warning]:", err?.message || err);
+        console.warn("[Outbound Queue Warning]:", err?.message || err);
       }
     }
 
@@ -69,7 +70,12 @@ export async function POST(request: NextRequest, { params }: Params) {
       success: true,
       message: `Status berhasil diubah menjadi '${toStatus}'.`,
       data: updated,
-      outbound_sync: outboundSync
+      outbound_sync: outboundJob ? {
+        status: outboundJob.status,
+        job_id: outboundJob.id,
+        attempts: outboundJob.attempts,
+        queued: true
+      } : null
     });
   } catch (error: any) {
     return NextResponse.json(

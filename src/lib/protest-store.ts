@@ -35,7 +35,8 @@ import {
   DailyUnrasSituationOverview,
   IdentityRegistryEntry,
   ReviewQueueItem,
-  SourceStatusCategory
+  SourceStatusCategory,
+  UnrasOutboundJob
 } from "@/lib/types/protests";
 import {
   generateExactFingerprint,
@@ -538,6 +539,36 @@ class ProtestDataStore {
         `);
       } catch (errMigration010) {
         console.warn("[ProtestDataStore] Migration 010 init notice:", errMigration010);
+      }
+
+      // Migration 013 persistent outbound job queue self-healing
+      try {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS unras_outbound_jobs (
+            id TEXT PRIMARY KEY,
+            protest_id TEXT,
+            kode_unras TEXT NOT NULL,
+            id_kejadian TEXT,
+            payload TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            attempts INTEGER NOT NULL DEFAULT 0,
+            max_attempts INTEGER NOT NULL DEFAULT 5,
+            last_error TEXT,
+            correlation_id TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            started_at TEXT,
+            processed_at TEXT,
+            next_retry_at TEXT,
+            locked_at TEXT
+          );
+          CREATE INDEX IF NOT EXISTS idx_unras_outbound_jobs_status ON unras_outbound_jobs(status);
+          CREATE INDEX IF NOT EXISTS idx_unras_outbound_jobs_protest_id ON unras_outbound_jobs(protest_id);
+          CREATE INDEX IF NOT EXISTS idx_unras_outbound_jobs_kode_unras ON unras_outbound_jobs(kode_unras);
+          CREATE INDEX IF NOT EXISTS idx_unras_outbound_jobs_created_at ON unras_outbound_jobs(created_at);
+        `);
+      } catch (errMigration013) {
+        console.warn("[ProtestDataStore] Migration 013 init notice:", errMigration013);
       }
 
       // Only seed dummy data if explicitly enabled via SEED_DUMMY_DATA=true
@@ -1153,32 +1184,32 @@ class ProtestDataStore {
         newEvent.id_kejadian,
         newEvent.kode_unras,
         newEvent.tanggal,
-        newEvent.waktu_mulai,
-        newEvent.waktu_selesai,
+        newEvent.waktu_mulai ?? null,
+        newEvent.waktu_selesai ?? null,
         newEvent.event_datetime || null,
         newEvent.lokasi,
-        newEvent.titik_kumpul,
-        newEvent.sasaran_aksi,
-        newEvent.isu_tuntutan,
-        newEvent.estimasi_massa_source,
-        newEvent.organisasi_kelompok,
-        newEvent.korlap_pimpinan,
-        newEvent.wilayah_hukum,
-        newEvent.provinsi,
-        newEvent.kota_kabupaten,
-        newEvent.keterangan_source,
+        newEvent.titik_kumpul ?? null,
+        newEvent.sasaran_aksi ?? null,
+        newEvent.isu_tuntutan ?? null,
+        newEvent.estimasi_massa_source ?? null,
+        newEvent.organisasi_kelompok ?? null,
+        newEvent.korlap_pimpinan ?? null,
+        newEvent.wilayah_hukum ?? null,
+        newEvent.provinsi ?? "DKI Jakarta",
+        newEvent.kota_kabupaten ?? null,
+        newEvent.keterangan_source ?? null,
         JSON.stringify(newEvent.raw_source_payload || {}),
         newEvent.status,
         newEvent.status_sumber ?? null,
         newEvent.urgency,
-        newEvent.category_id,
-        newEvent.validated_lat,
-        newEvent.validated_lng,
+        newEvent.category_id ?? null,
+        newEvent.validated_lat ?? null,
+        newEvent.validated_lng ?? null,
         newEvent.has_coordinates ? 1 : 0,
-        newEvent.actual_crowd_size,
-        newEvent.situation_summary,
-        newEvent.editorial_draft,
-        newEvent.editorial_final,
+        newEvent.actual_crowd_size ?? null,
+        newEvent.situation_summary ?? null,
+        newEvent.editorial_draft ?? null,
+        newEvent.editorial_final ?? null,
         newEvent.is_archived ? 1 : 0,
         newEvent.completed_at ?? null,
         newEvent.completed_by_id ?? null,
@@ -3791,6 +3822,191 @@ class ProtestDataStore {
       last_outbound_synced_at: r.last_outbound_synced_at ? String(r.last_outbound_synced_at) : null,
       outbound_sync_status: (r.outbound_sync_status as any) || 'none'
     };
+  }
+
+  // ============================================================================
+  // OUTBOUND SYNC JOB QUEUE (MIGRATION 013)
+  // ============================================================================
+
+  enqueueOutboundJobLocal(job: UnrasOutboundJob): UnrasOutboundJob {
+    if (this.db) {
+      const stmt = this.db.prepare(`
+        INSERT INTO unras_outbound_jobs (
+          id, protest_id, kode_unras, id_kejadian, payload,
+          status, attempts, max_attempts, last_error, correlation_id,
+          created_at, updated_at, started_at, processed_at, next_retry_at, locked_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      stmt.run(
+        job.id,
+        job.protest_id,
+        job.kode_unras,
+        job.id_kejadian || null,
+        typeof job.payload === "string" ? job.payload : JSON.stringify(job.payload),
+        job.status,
+        job.attempts,
+        job.max_attempts,
+        job.last_error || null,
+        job.correlation_id || null,
+        job.created_at,
+        job.updated_at,
+        job.started_at || null,
+        job.processed_at || null,
+        job.next_retry_at || null,
+        job.locked_at || null
+      );
+    }
+    return job;
+  }
+
+  claimOutboundJobLocal(workerId = "worker-local"): UnrasOutboundJob | null {
+    if (!this.db) return null;
+    const now = new Date().toISOString();
+    const staleLockThreshold = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+
+    const selectStmt = this.db.prepare(`
+      SELECT * FROM unras_outbound_jobs
+      WHERE (
+        status = 'pending'
+        OR (status = 'failed' AND attempts < max_attempts AND (next_retry_at IS NULL OR next_retry_at <= ?))
+      )
+      AND (locked_at IS NULL OR locked_at < ?)
+      ORDER BY created_at ASC
+      LIMIT 1
+    `);
+
+    const row = selectStmt.get(now, staleLockThreshold) as any;
+    if (!row) return null;
+
+    const updateStmt = this.db.prepare(`
+      UPDATE unras_outbound_jobs
+      SET status = 'processing',
+          locked_at = ?,
+          started_at = ?,
+          attempts = attempts + 1,
+          updated_at = ?
+      WHERE id = ? AND status = ?
+    `);
+
+    const result = updateStmt.run(now, now, now, row.id, row.status);
+    if (result.changes === 0) {
+      return null;
+    }
+
+    return {
+      id: row.id,
+      protest_id: row.protest_id,
+      kode_unras: row.kode_unras,
+      id_kejadian: row.id_kejadian,
+      payload: typeof row.payload === "string" ? JSON.parse(row.payload) : row.payload,
+      status: "processing",
+      attempts: row.attempts + 1,
+      max_attempts: row.max_attempts,
+      last_error: row.last_error,
+      correlation_id: row.correlation_id,
+      created_at: row.created_at,
+      updated_at: now,
+      started_at: now,
+      processed_at: row.processed_at,
+      next_retry_at: row.next_retry_at,
+      locked_at: now
+    };
+  }
+
+  updateOutboundJobLocal(id: string, updates: Partial<UnrasOutboundJob>): void {
+    if (!this.db) return;
+    const fields: string[] = [];
+    const values: any[] = [];
+
+    if (updates.status !== undefined) { fields.push("status = ?"); values.push(updates.status); }
+    if (updates.attempts !== undefined) { fields.push("attempts = ?"); values.push(updates.attempts); }
+    if (updates.last_error !== undefined) { fields.push("last_error = ?"); values.push(updates.last_error ?? null); }
+    if (updates.processed_at !== undefined) { fields.push("processed_at = ?"); values.push(updates.processed_at ?? null); }
+    if (updates.next_retry_at !== undefined) { fields.push("next_retry_at = ?"); values.push(updates.next_retry_at ?? null); }
+    if (updates.locked_at !== undefined) { fields.push("locked_at = ?"); values.push(updates.locked_at ?? null); }
+    fields.push("updated_at = ?");
+    values.push(new Date().toISOString());
+
+    values.push(id);
+    this.db.prepare(`UPDATE unras_outbound_jobs SET ${fields.join(", ")} WHERE id = ?`).run(...values);
+  }
+
+  clearOutboundJobsLocal(): void {
+    if (this.db) {
+      this.db.exec("DELETE FROM unras_outbound_jobs;");
+    }
+  }
+
+  getLatestOutboundJobByProtestIdLocal(protestId: string): UnrasOutboundJob | null {
+    if (!this.db) return null;
+    const row = this.db.prepare(`
+      SELECT * FROM unras_outbound_jobs
+      WHERE protest_id = ?
+      ORDER BY created_at DESC
+      LIMIT 1
+    `).get(protestId) as any;
+
+    if (!row) return null;
+    return {
+      id: row.id,
+      protest_id: row.protest_id,
+      kode_unras: row.kode_unras,
+      id_kejadian: row.id_kejadian,
+      payload: typeof row.payload === "string" ? JSON.parse(row.payload) : row.payload,
+      status: row.status,
+      attempts: row.attempts,
+      max_attempts: row.max_attempts,
+      last_error: row.last_error,
+      correlation_id: row.correlation_id,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+      started_at: row.started_at,
+      processed_at: row.processed_at,
+      next_retry_at: row.next_retry_at,
+      locked_at: row.locked_at
+    };
+  }
+
+  getOutboundJobByIdLocal(jobId: string): UnrasOutboundJob | null {
+    if (!this.db) return null;
+    const row = this.db.prepare(`
+      SELECT * FROM unras_outbound_jobs
+      WHERE id = ?
+      LIMIT 1
+    `).get(jobId) as any;
+
+    if (!row) return null;
+    return {
+      id: row.id,
+      protest_id: row.protest_id,
+      kode_unras: row.kode_unras,
+      id_kejadian: row.id_kejadian,
+      payload: typeof row.payload === "string" ? JSON.parse(row.payload) : row.payload,
+      status: row.status,
+      attempts: row.attempts,
+      max_attempts: row.max_attempts,
+      last_error: row.last_error,
+      correlation_id: row.correlation_id,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+      started_at: row.started_at,
+      processed_at: row.processed_at,
+      next_retry_at: row.next_retry_at,
+      locked_at: row.locked_at
+    };
+  }
+
+  resetStaleOutboundJobLocksLocal(timeoutMs = 5 * 60 * 1000): number {
+    if (!this.db) return 0;
+    const threshold = new Date(Date.now() - timeoutMs).toISOString();
+    const result = this.db.prepare(`
+      UPDATE unras_outbound_jobs
+      SET status = 'pending',
+          locked_at = NULL,
+          updated_at = ?
+      WHERE status = 'processing' AND locked_at < ?
+    `).run(new Date().toISOString(), threshold);
+    return Number(result.changes || 0);
   }
 }
 

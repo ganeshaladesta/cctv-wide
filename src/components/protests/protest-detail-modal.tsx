@@ -21,7 +21,8 @@ import {
   Trash2,
   RefreshCw,
   Edit3,
-  Grid
+  Grid,
+  AlertCircle
 } from "lucide-react";
 import {
   ProtestEvent,
@@ -96,6 +97,20 @@ export function ProtestDetailModal({
   const [isPickerOpen, setIsPickerOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [savingSummary, setSavingSummary] = useState(false);
+
+  // Outbound sync job states & optimistic feedback
+  interface OutboundSyncInfo {
+    status: "none" | "pending" | "processing" | "success" | "failed";
+    attempts: number;
+    max_attempts: number;
+    last_error?: string | null;
+    processed_at?: string | null;
+    last_outbound_synced_at?: string | null;
+    job_id?: string | null;
+  }
+  const [syncInfo, setSyncInfo] = useState<OutboundSyncInfo | null>(null);
+  const [retryingSync, setRetryingSync] = useState(false);
+  const [saveToast, setSaveToast] = useState<string | null>(null);
 
   // Modal Navigation Stack for CCTV monitoring (UNRAS Detail -> Camera Selection -> Single Player / Multi-View)
   type UnrasPlayerMode = "none" | "single" | "multiview";
@@ -179,10 +194,49 @@ export function ProtestDetailModal({
     };
   }, [isOpen, protestId, onClose]);
 
+  const fetchSyncStatus = async (id: string) => {
+    try {
+      const res = await fetch(`/api/protests/${id}/sync-status`, { cache: "no-store" });
+      const json = await res.json();
+      if (res.ok && json.success && json.data) {
+        setSyncInfo(json.data);
+        return json.data.status;
+      }
+    } catch {}
+    return null;
+  };
+
+  const handleRetrySync = async () => {
+    if (!protestId) return;
+    setRetryingSync(true);
+    try {
+      const res = await fetch(`/api/protests/${protestId}/sync-status`, { method: "POST" });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Gagal menjadwalkan ulang sinkronisasi.");
+      setSaveToast("Sinkronisasi outbound dijadwalkan ulang.");
+      setTimeout(() => setSaveToast(null), 3000);
+      await fetchSyncStatus(protestId);
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setRetryingSync(false);
+    }
+  };
+
   useEffect(() => {
     if (isOpen && protestId) {
       setActiveTab("ringkasan");
       fetchDetail(protestId);
+      fetchSyncStatus(protestId);
+
+      const interval = setInterval(async () => {
+        const s = await fetchSyncStatus(protestId);
+        if (s === "success" || s === "failed") {
+          clearInterval(interval);
+        }
+      }, 3500);
+
+      return () => clearInterval(interval);
     }
   }, [isOpen, protestId]);
 
@@ -221,6 +275,15 @@ export function ProtestDetailModal({
   const handleTransitionStatus = async (toStatus: ProtestStatus) => {
     const effectiveReason = statusReason.trim() || `Perubahan status operasional menjadi ${toStatus.toUpperCase()}`;
     setSubmittingStatus(true);
+    setSyncInfo(prev => ({
+      status: "pending",
+      attempts: 0,
+      max_attempts: 5,
+      last_error: null,
+      created_at: new Date().toISOString(),
+      processed_at: null,
+      last_outbound_synced_at: prev?.last_outbound_synced_at || null
+    }));
     try {
       const res = await fetch(`/api/protests/${protestId}/status`, {
         method: "POST",
@@ -234,7 +297,10 @@ export function ProtestDetailModal({
       if (!res.ok) throw new Error(json.error || "Gagal mengubah status.");
 
       setStatusReason("");
+      setSaveToast(`Status berhasil diubah menjadi '${toStatus}'.`);
+      setTimeout(() => setSaveToast(null), 4000);
       await fetchDetail(protestId);
+      fetchSyncStatus(protestId);
       notifyUpdated();
     } catch (err: any) {
       alert(err.message);
@@ -314,6 +380,15 @@ export function ProtestDetailModal({
   // Save Editorial Text
   const handleSaveEditorial = async (isFinal: boolean = false) => {
     setSavingEditorial(true);
+    setSyncInfo(prev => ({
+      status: "pending",
+      attempts: 0,
+      max_attempts: 5,
+      last_error: null,
+      created_at: new Date().toISOString(),
+      processed_at: null,
+      last_outbound_synced_at: prev?.last_outbound_synced_at || null
+    }));
     try {
       const payload: Record<string, string> = isFinal
         ? { editorial_final: editorialText }
@@ -327,8 +402,10 @@ export function ProtestDetailModal({
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Gagal menyimpan teks editorial.");
 
-      alert(isFinal ? "Teks editorial berhasil difinalisasi!" : "Draft editorial berhasil disimpan.");
+      setSaveToast(isFinal ? "Teks editorial berhasil difinalisasi!" : "Draft editorial berhasil disimpan.");
+      setTimeout(() => setSaveToast(null), 4000);
       await fetchDetail(protestId);
+      fetchSyncStatus(protestId);
       notifyUpdated();
     } catch (err: any) {
       alert(err.message);
@@ -340,6 +417,15 @@ export function ProtestDetailModal({
   // Save Summary & Coordinates
   const handleSaveSummary = async () => {
     setSavingSummary(true);
+    setSyncInfo(prev => ({
+      status: "pending",
+      attempts: 0,
+      max_attempts: 5,
+      last_error: null,
+      created_at: new Date().toISOString(),
+      processed_at: null,
+      last_outbound_synced_at: prev?.last_outbound_synced_at || null
+    }));
     try {
       const res = await fetch(`/api/protests/${protestId}`, {
         method: "PATCH",
@@ -354,8 +440,10 @@ export function ProtestDetailModal({
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Gagal memperbarui ringkasan.");
 
-      alert("Pembaruan situasi operator berhasil disimpan.");
+      setSaveToast("Pembaruan situasi operator berhasil disimpan.");
+      setTimeout(() => setSaveToast(null), 4000);
       await fetchDetail(protestId);
+      fetchSyncStatus(protestId);
       notifyUpdated();
     } catch (err: any) {
       alert(err.message);
@@ -396,6 +484,14 @@ export function ProtestDetailModal({
           className="relative w-full max-w-4xl bg-[#0D121B] border border-[var(--border-default)] rounded-2xl shadow-2xl overflow-hidden flex flex-col my-auto max-h-[90vh] pointer-events-auto"
           onClick={(e) => e.stopPropagation()}
         >
+          {/* Toast Notification */}
+          {saveToast && (
+            <div className="absolute top-4 right-14 z-50 px-4 py-2 bg-emerald-600 text-white text-xs font-bold rounded-xl shadow-xl flex items-center gap-2 border border-emerald-400 animate-in fade-in slide-in-from-top-2">
+              <CheckCircle2 className="w-4 h-4" />
+              <span>{saveToast}</span>
+            </div>
+          )}
+
           {/* Modal Top Bar */}
           <div className="px-4 sm:px-5 py-3 sm:py-4 border-b border-[var(--border-subtle)] bg-[#111622] flex items-center justify-between gap-3 shrink-0">
             {/* Flexible Left Container with responsive truncation */}
@@ -420,6 +516,28 @@ export function ProtestDetailModal({
               >
                 Operator: {eventData?.status || "Loading..."}
               </span>
+
+              {/* Outbound Sync Status Badge */}
+              {syncInfo?.status === "pending" && (
+                <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1.5 shrink-0" title="Antrean pengiriman ke Excel Table3">
+                  <Clock className="w-3 h-3 animate-pulse" /> Menunggu sinkronisasi Excel
+                </span>
+              )}
+              {syncInfo?.status === "processing" && (
+                <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-500/20 text-blue-300 border border-blue-500/40 flex items-center gap-1.5 shrink-0" title="Pekerja latar belakang sedang mengirim ke Power Automate">
+                  <RefreshCw className="w-3 h-3 animate-spin" /> Sedang menyinkronkan Excel
+                </span>
+              )}
+              {syncInfo?.status === "success" && (
+                <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1.5 shrink-0" title="Excel Table3 berhasil diperbarui">
+                  <CheckCircle2 className="w-3 h-3" /> Excel berhasil diperbarui
+                </span>
+              )}
+              {syncInfo?.status === "failed" && (
+                <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/40 flex items-center gap-1.5 shrink-0" title={syncInfo.last_error || "Sinkronisasi gagal"}>
+                  <AlertCircle className="w-3 h-3" /> Sinkronisasi Excel gagal
+                </span>
+              )}
               <div className="min-w-0 flex-1">
                 <h2 id="unras-detail-title" className="text-sm sm:text-base font-bold text-white truncate">
                   {eventData?.isu_tuntutan || "Memuat Aksi Unjuk Rasa..."}
@@ -627,6 +745,79 @@ export function ProtestDetailModal({
                         <span className="text-[#98A4B8] block">Wilayah Hukum:</span>
                         <span className="text-white font-medium">{eventData.wilayah_hukum || "-"} ({eventData.provinsi})</span>
                       </div>
+                    </div>
+                  </div>
+
+                  {/* Outbound Sync Status Card */}
+                  <div className="p-4 bg-[#111622] border border-[var(--border-subtle)] rounded-xl space-y-2.5 text-xs">
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-bold text-white uppercase text-[11px] tracking-wider text-blue-400 flex items-center gap-1.5">
+                        <RefreshCw className={`w-3.5 h-3.5 ${syncInfo?.status === "processing" ? "animate-spin" : ""}`} />
+                        Sinkronisasi Outbound Excel (Table3)
+                      </h3>
+                      {syncInfo?.status === "failed" && (
+                        <button
+                          type="button"
+                          onClick={handleRetrySync}
+                          disabled={retryingSync}
+                          className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/30 hover:bg-rose-500/30 flex items-center gap-1 cursor-pointer transition-colors"
+                        >
+                          <RefreshCw className={`w-3 h-3 ${retryingSync ? "animate-spin" : ""}`} />
+                          {retryingSync ? "Menjadwalkan..." : "Coba Sinkronkan Ulang"}
+                        </button>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-2 gap-x-4">
+                      <div>
+                        <span className="text-[#98A4B8] block">Status Sinkronisasi:</span>
+                        <div className="mt-1 flex items-center gap-1.5">
+                          {syncInfo?.status === "pending" && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                              <Clock className="w-3 h-3 animate-pulse" /> Menunggu sinkronisasi Excel
+                            </span>
+                          )}
+                          {syncInfo?.status === "processing" && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                              <RefreshCw className="w-3 h-3 animate-spin" /> Sedang menyinkronkan Excel
+                            </span>
+                          )}
+                          {syncInfo?.status === "success" && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                              <CheckCircle2 className="w-3 h-3" /> Excel berhasil diperbarui
+                            </span>
+                          )}
+                          {syncInfo?.status === "failed" && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                              <AlertCircle className="w-3 h-3" /> Sinkronisasi Excel gagal
+                            </span>
+                          )}
+                          {(!syncInfo || syncInfo.status === "none") && (
+                            <span className="text-[#98A4B8] italic">Belum ada perubahan yang disinkronkan</span>
+                          )}
+                        </div>
+                      </div>
+                      <div>
+                        <span className="text-[#98A4B8] block">Waktu Terakhir Disinkronkan:</span>
+                        <span className="text-white font-medium">
+                          {syncInfo?.last_outbound_synced_at || syncInfo?.processed_at
+                            ? new Date(syncInfo.last_outbound_synced_at || syncInfo.processed_at!).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" }) + " WIB"
+                            : "-"}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[#98A4B8] block">Percobaan Pengiriman:</span>
+                        <span className="text-white font-medium">
+                          {syncInfo ? `${syncInfo.attempts} / ${syncInfo.max_attempts} kali` : "-"}
+                        </span>
+                      </div>
+                      {syncInfo?.last_error && (
+                        <div className="col-span-1 sm:col-span-2">
+                          <span className="text-rose-400 block font-semibold">Penyebab Kegagalan:</span>
+                          <span className="text-rose-300 font-mono text-[11px] block mt-0.5 p-2 bg-rose-950/30 border border-rose-500/20 rounded-lg break-all">
+                            {syncInfo.last_error}
+                          </span>
+                        </div>
+                      )}
                     </div>
                   </div>
 

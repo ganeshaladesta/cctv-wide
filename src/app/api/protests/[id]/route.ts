@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { protestStore } from '@/lib/protest-store';
 import { resolveCurrentUser, canEditProtest, canDeleteProtest } from '@/lib/auth-roles';
 import { masterDataService } from '@/lib/master-data-service';
-import { dispatchOutboundSync } from '@/lib/unras-outbound-sync';
+import { enqueueOutboundSync } from '@/lib/unras-outbound-queue';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -165,12 +165,13 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       redaksi: body.redaksi
     }, user);
 
-    let outboundSync = null;
+    let outboundJob = null;
     if (updated) {
       try {
-        outboundSync = await dispatchOutboundSync(updated, { origin: "scc", route: "PATCH /api/protests/[id]" });
+        const queueRes = await enqueueOutboundSync(updated, { origin: "scc", route: "PATCH /api/protests/[id]" });
+        outboundJob = queueRes.job || null;
       } catch (err: any) {
-        console.warn("[Outbound Sync Warning]:", err?.message || err);
+        console.warn("[Outbound Queue Warning]:", err?.message || err);
       }
     }
 
@@ -178,7 +179,12 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       success: true,
       message: 'Data unjuk rasa berhasil diperbarui.',
       data: updated,
-      outbound_sync: outboundSync
+      outbound_sync: outboundJob ? {
+        status: outboundJob.status,
+        job_id: outboundJob.id,
+        attempts: outboundJob.attempts,
+        queued: true
+      } : null
     });
   } catch (error: any) {
     return NextResponse.json(

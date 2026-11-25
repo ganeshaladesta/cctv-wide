@@ -529,3 +529,27 @@ export interface ReviewQueueItem {
   reviewed_at?: string | null;
   reviewed_by?: string | null;
 }
+
+/**
+ * Outbound Synchronization Queue Types
+ */
+export type OutboundJobStatus = "pending" | "processing" | "success" | "failed";
+
+export interface UnrasOutboundJob {
+  id: string;
+  protest_id: string;
+  kode_unras: string;
+  id_kejadian?: string | null;
+  payload: Record<string, any>;
+  status: OutboundJobStatus;
+  attempts: number;
+  max_attempts: number;
+  last_error?: string | null;
+  correlation_id?: string | null;
+  created_at: string;
+  updated_at: string;
+  started_at?: string | null;
+  processed_at?: string | null;
+  next_retry_at?: string | null;
+  locked_at?: string | null;
+}

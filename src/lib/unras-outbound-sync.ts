@@ -527,6 +527,16 @@ export async function dispatchOutboundSync(
   };
 }
 
+// Re-export asynchronous queue operations for seamless backward compatibility
+export {
+  enqueueOutboundSync,
+  claimPendingOutboundJob,
+  processOutboundJob,
+  runOutboundSyncWorker,
+  getLatestOutboundJobByProtestId,
+  retryOutboundJob
+} from "./unras-outbound-queue";
+
 /**
  * Audit log recording for outbound synchronization operations.
  */
