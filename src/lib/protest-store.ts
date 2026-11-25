@@ -423,7 +423,12 @@ class ProtestDataStore {
         { name: "tindak_lanjut", def: "TEXT" },
         { name: "progres_asistensi", def: "TEXT" },
         { name: "realisasi", def: "TEXT" },
-        { name: "status_sumber", def: "TEXT" }
+        { name: "status_sumber", def: "TEXT" },
+        { name: "tujuan", def: "TEXT" },
+        { name: "jarak_lokasi_unras", def: "TEXT" },
+        { name: "redaksi", def: "TEXT" },
+        { name: "last_outbound_synced_at", def: "TEXT" },
+        { name: "outbound_sync_status", def: "TEXT DEFAULT 'none'" }
       ];
       for (const col of cAcFields) {
         if (!protestCols.includes(col.name)) {
@@ -1102,7 +1107,12 @@ class ProtestDataStore {
       info_awal: input.info_awal || null,
       tindak_lanjut: input.tindak_lanjut || null,
       progres_asistensi: input.progres_asistensi || null,
-      realisasi: input.realisasi || null
+      realisasi: input.realisasi || null,
+      tujuan: input.tujuan || null,
+      jarak_lokasi_unras: input.jarak_lokasi_unras || null,
+      redaksi: input.redaksi || null,
+      last_outbound_synced_at: input.last_outbound_synced_at || null,
+      outbound_sync_status: input.outbound_sync_status || 'none'
     };
 
     if (this.db) {
@@ -1119,7 +1129,8 @@ class ProtestDataStore {
           validated_by_id, validated_by_name, created_at, updated_at, deleted_at, last_synced_at,
           urutan_bulan, tahun, bulan, kategori_kejadian, kp_kpw, regional,
           kategori_isu, dampak, keterangan_dampak, nama_pelapor, info_awal, tindak_lanjut,
-          progres_asistensi, realisasi
+          progres_asistensi, realisasi,
+          tujuan, jarak_lokasi_unras, redaksi, last_outbound_synced_at, outbound_sync_status
         ) VALUES (
           ?, ?, ?, ?, ?, ?, ?,
           ?, ?, ?, ?, ?,
@@ -1132,7 +1143,8 @@ class ProtestDataStore {
           ?, ?, ?, ?, ?, ?,
           ?, ?, ?, ?, ?, ?,
           ?, ?, ?, ?, ?, ?,
-          ?, ?
+          ?, ?,
+          ?, ?, ?, ?, ?
         )
       `);
 
@@ -1198,7 +1210,12 @@ class ProtestDataStore {
         newEvent.info_awal ?? null,
         newEvent.tindak_lanjut ?? null,
         newEvent.progres_asistensi ?? null,
-        newEvent.realisasi ?? null
+        newEvent.realisasi ?? null,
+        newEvent.tujuan ?? null,
+        newEvent.jarak_lokasi_unras ?? null,
+        newEvent.redaksi ?? null,
+        newEvent.last_outbound_synced_at ?? null,
+        newEvent.outbound_sync_status ?? 'none'
       );
     } else {
       this.memoryEvents.set(newEvent.id, newEvent);
@@ -1277,6 +1294,12 @@ class ProtestDataStore {
       tindak_lanjut: updates.tindak_lanjut !== undefined ? updates.tindak_lanjut : existing.tindak_lanjut,
       progres_asistensi: updates.progres_asistensi !== undefined ? updates.progres_asistensi : existing.progres_asistensi,
       realisasi: updates.realisasi !== undefined ? updates.realisasi : existing.realisasi,
+      status_sumber: updates.status_sumber !== undefined ? updates.status_sumber : existing.status_sumber,
+      tujuan: updates.tujuan !== undefined ? updates.tujuan : existing.tujuan,
+      jarak_lokasi_unras: updates.jarak_lokasi_unras !== undefined ? updates.jarak_lokasi_unras : existing.jarak_lokasi_unras,
+      redaksi: updates.redaksi !== undefined ? updates.redaksi : existing.redaksi,
+      last_outbound_synced_at: updates.last_outbound_synced_at !== undefined ? updates.last_outbound_synced_at : existing.last_outbound_synced_at,
+      outbound_sync_status: updates.outbound_sync_status !== undefined ? updates.outbound_sync_status : existing.outbound_sync_status,
       validated_lat: updatedLat,
       validated_lng: updatedLng,
       has_coordinates: hasCoords,
@@ -1295,6 +1318,7 @@ class ProtestDataStore {
           titik_kumpul = ?,
           sasaran_aksi = ?,
           isu_tuntutan = ?,
+          estimasi_massa_source = ?,
           organisasi_kelompok = ?,
           korlap_pimpinan = ?,
           wilayah_hukum = ?,
@@ -1338,6 +1362,12 @@ class ProtestDataStore {
           tindak_lanjut = ?,
           progres_asistensi = ?,
           realisasi = ?,
+          status_sumber = ?,
+          tujuan = ?,
+          jarak_lokasi_unras = ?,
+          redaksi = ?,
+          last_outbound_synced_at = ?,
+          outbound_sync_status = ?,
           updated_at = ?
         WHERE id = ?
       `).run(
@@ -1349,6 +1379,7 @@ class ProtestDataStore {
         updatedEvent.titik_kumpul,
         updatedEvent.sasaran_aksi,
         updatedEvent.isu_tuntutan,
+        updatedEvent.estimasi_massa_source,
         updatedEvent.organisasi_kelompok,
         updatedEvent.korlap_pimpinan,
         updatedEvent.wilayah_hukum,
@@ -1392,6 +1423,12 @@ class ProtestDataStore {
         updatedEvent.tindak_lanjut ?? null,
         updatedEvent.progres_asistensi ?? null,
         updatedEvent.realisasi ?? null,
+        updatedEvent.status_sumber ?? null,
+        updatedEvent.tujuan ?? null,
+        updatedEvent.jarak_lokasi_unras ?? null,
+        updatedEvent.redaksi ?? null,
+        updatedEvent.last_outbound_synced_at ?? null,
+        updatedEvent.outbound_sync_status ?? 'none',
         now,
         existing.id
       );
@@ -2119,7 +2156,7 @@ class ProtestDataStore {
         return {
           processed: res.inserted + res.updated + res.skipped + (res.failed || 0),
           created: res.inserted,
-          updated: 0,
+          updated: res.updated,
           skipped: res.skipped,
           failed: res.failed,
           error: res.error
@@ -2175,8 +2212,19 @@ class ProtestDataStore {
       const existing = this.getProtestByIdLocal(rec.id_kejadian);
 
       if (existing) {
-        // SKIP EXISTING RECORD — NEVER OVERWRITE OR UPDATE OPERATOR FIELDS
-        skipped++;
+        // FULL OVERWRITE FOR MATCHED RECORD
+        const updates: Partial<ProtestEvent> = {
+          ...rec,
+          id: existing.id,
+          id_kejadian: existing.id_kejadian,
+          kode_unras: existing.kode_unras
+        };
+        if ((rec as any).redaksi !== undefined) {
+          updates.redaksi = (rec as any).redaksi;
+          updates.editorial_draft = (rec as any).redaksi;
+        }
+        this.updateProtestLocal(existing.id, updates, { id: 'system-excel-sync', name: 'Excel Inbound Sync', email: 'system@scc.go.id', role: 'admin' });
+        updated++;
         continue;
       }
 
@@ -2212,7 +2260,7 @@ class ProtestDataStore {
         has_coordinates: false,
         actual_crowd_size: null,
         situation_summary: null,
-        editorial_draft: null,
+        editorial_draft: (rec as any).redaksi || null,
         editorial_final: null,
         is_archived: false,
         completed_at: null,
@@ -2221,7 +2269,17 @@ class ProtestDataStore {
         created_at: now,
         updated_at: now,
         deleted_at: null,
-        last_synced_at: now
+        last_synced_at: now,
+        keterangan_dampak: (rec as any).keterangan_dampak || null,
+        nama_pelapor: (rec as any).nama_pelapor || null,
+        info_awal: (rec as any).info_awal || null,
+        tindak_lanjut: (rec as any).tindak_lanjut || null,
+        progres_asistensi: (rec as any).progres_asistensi || null,
+        realisasi: (rec as any).realisasi || null,
+        tujuan: (rec as any).tujuan || null,
+        jarak_lokasi_unras: (rec as any).jarak_lokasi_unras || null,
+        redaksi: (rec as any).redaksi || null,
+        kp_kpw: (rec as any).kp_kpw || null
       };
 
       if (this.db) {
@@ -2235,7 +2293,9 @@ class ProtestDataStore {
               validated_lat, validated_lng, has_coordinates, actual_crowd_size, situation_summary,
               editorial_draft, editorial_final, is_archived, completed_at, completed_by_id,
               completed_by_name, created_at, updated_at, deleted_at, last_synced_at,
-              regional, kategori_isu, dampak, status_sumber
+              regional, kategori_isu, dampak, status_sumber,
+              keterangan_dampak, nama_pelapor, info_awal, tindak_lanjut, progres_asistensi, realisasi,
+              tujuan, jarak_lokasi_unras, redaksi, kp_kpw
             ) VALUES (
               ?, ?, ?, ?, ?, ?, ?,
               ?, ?, ?, ?, ?,
@@ -2244,6 +2304,8 @@ class ProtestDataStore {
               ?, ?, ?, ?, ?,
               ?, ?, ?, ?, ?,
               ?, ?, ?, ?, ?,
+              ?, ?, ?, ?,
+              ?, ?, ?, ?, ?, ?,
               ?, ?, ?, ?
             )
           `).run(
@@ -2287,7 +2349,17 @@ class ProtestDataStore {
             (rec as any).regional ?? null,
             (rec as any).kategori_isu ?? null,
             (rec as any).dampak ?? null,
-            newEvent.status_sumber ?? null
+            newEvent.status_sumber ?? null,
+            (rec as any).keterangan_dampak ?? null,
+            (rec as any).nama_pelapor ?? null,
+            (rec as any).info_awal ?? null,
+            (rec as any).tindak_lanjut ?? null,
+            (rec as any).progres_asistensi ?? null,
+            (rec as any).realisasi ?? null,
+            (rec as any).tujuan ?? null,
+            (rec as any).jarak_lokasi_unras ?? null,
+            (rec as any).redaksi ?? null,
+            (rec as any).kp_kpw ?? null
           );
           created++;
           const tgl = rec.tanggal || (rec.event_datetime ? rec.event_datetime.slice(0, 10) : "unknown");
@@ -2350,7 +2422,28 @@ class ProtestDataStore {
         } catch (insertErr: any) {
           const msg = String(insertErr?.message || "");
           if (msg.includes("UNIQUE constraint failed") || msg.includes("duplicate") || msg.includes("conflict")) {
-            skipped++;
+            try {
+              const existingRow = this.db.prepare(
+                `SELECT id, kode_unras FROM protests WHERE id_kejadian = ? OR (kode_unras IS NOT NULL AND kode_unras = ?) LIMIT 1`
+              ).get(rec.id_kejadian, rec.kode_unras) as any;
+              if (existingRow && existingRow.id) {
+                const updates: Partial<ProtestEvent> = {
+                  ...rec,
+                  id: existingRow.id,
+                  kode_unras: existingRow.kode_unras
+                };
+                if ((rec as any).redaksi !== undefined) {
+                  updates.redaksi = (rec as any).redaksi;
+                  updates.editorial_draft = (rec as any).redaksi;
+                }
+                this.updateProtestLocal(existingRow.id, updates, { id: 'system-excel-sync', name: 'Excel Inbound Sync', email: 'system@scc.go.id', role: 'admin' });
+                updated++;
+              } else {
+                skipped++;
+              }
+            } catch {
+              skipped++;
+            }
           } else {
             throw insertErr;
           }
@@ -2407,7 +2500,7 @@ class ProtestDataStore {
     return {
       processed: records.length,
       created,
-      updated: 0,
+      updated,
       skipped,
       insertedByDate
     };
@@ -3687,7 +3780,12 @@ class ProtestDataStore {
       tindak_lanjut: r.tindak_lanjut ? String(r.tindak_lanjut) : null,
       progres_asistensi: r.progres_asistensi ? String(r.progres_asistensi) : null,
       realisasi: r.realisasi ? String(r.realisasi) : null,
-      status_sumber: (r.status_sumber as SourceStatusCategory) || null
+      status_sumber: (r.status_sumber as SourceStatusCategory) || null,
+      tujuan: r.tujuan ? String(r.tujuan) : null,
+      jarak_lokasi_unras: r.jarak_lokasi_unras ? String(r.jarak_lokasi_unras) : null,
+      redaksi: r.redaksi ? String(r.redaksi) : null,
+      last_outbound_synced_at: r.last_outbound_synced_at ? String(r.last_outbound_synced_at) : null,
+      outbound_sync_status: (r.outbound_sync_status as any) || 'none'
     };
   }
 }

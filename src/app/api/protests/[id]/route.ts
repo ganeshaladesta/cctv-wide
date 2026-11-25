@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { protestStore } from '@/lib/protest-store';
 import { resolveCurrentUser, canEditProtest, canDeleteProtest } from '@/lib/auth-roles';
 import { masterDataService } from '@/lib/master-data-service';
+import { dispatchOutboundSync } from '@/lib/unras-outbound-sync';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -158,8 +159,17 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       info_awal: body.info_awal,
       tindak_lanjut: body.tindak_lanjut,
       progres_asistensi: body.progres_asistensi,
-      realisasi: body.realisasi
+      realisasi: body.realisasi,
+      tujuan: body.tujuan,
+      jarak_lokasi_unras: body.jarak_lokasi_unras,
+      redaksi: body.redaksi
     }, user);
+
+    if (updated) {
+      dispatchOutboundSync(updated, { origin: "scc" }).catch((err) => {
+        console.warn("[Outbound Sync Background Warning]:", err);
+      });
+    }
 
     return NextResponse.json({
       success: true,

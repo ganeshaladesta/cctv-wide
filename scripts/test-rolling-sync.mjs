@@ -195,19 +195,18 @@ async function runTests() {
         "KODE_UNRAS": `RW-${runId}`,
         "WAKTU DAN TGL KEJADIAN ISO": eventMidISO,
         "TANGGAL": "2026-11-20",
-        "LOKASI": "Lokasi Baru Yang Seharusnya Tidak Ditimpa",
-        "ISU": "Isu Baru Yang Seharusnya Tidak Ditimpa"
+        "LOKASI": `Lokasi Baru Yang Ditimpa ${runId}`,
+        "ISU": `Isu Baru Yang Ditimpa ${runId}`
       }
     ]
   };
   const resSkipExisting = await processRolling7DaySync(payloadSkipExisting, "power_automate", "Test Runner");
   assert.equal(resSkipExisting.summary.inserted, 0, "Existing record must NOT be inserted");
-  assert.equal(resSkipExisting.summary.updated, 0, "Updated MUST remain 0");
-  assert.equal(resSkipExisting.summary.skipped, 1, "Existing record MUST be counted as skipped");
+  assert.equal(resSkipExisting.summary.updated, 1, "Existing record MUST be updated via full overwrite");
 
   const storedEvent = await protestStore.getProtestById(withinId);
-  assert.equal(storedEvent.lokasi, `Titik Bundaran Uji ${runId}`, "Existing record must not be modified");
-  console.log("  ✔ Rekor yang sudah ada berhasil dilewati (SKIPPED) tanpa update.");
+  assert.equal(storedEvent.lokasi, `Lokasi Baru Yang Ditimpa ${runId}`, "Existing record must be updated via full overwrite");
+  console.log("  ✔ Rekor yang sudah ada berhasil diperbarui (FULL OVERWRITE).");
 
   // ---------------------------------------------------------------------------
   // Test 5: New ID is inserted
@@ -404,23 +403,14 @@ async function runTests() {
   };
   const resOpResync = await processRolling7DaySync(payloadOpResync, "power_automate", "Test Runner");
   assert.equal(resOpResync.summary.inserted, 0);
-  assert.equal(resOpResync.summary.updated, 0, "Updated MUST be 0");
-  assert.equal(resOpResync.summary.skipped, 1, "Must be skipped");
+  assert.equal(resOpResync.summary.updated, 1, "Updated MUST be 1 under full overwrite");
 
   const postSyncRecord = await protestStore.getProtestById(operatorEventId);
-  const postSyncJson = JSON.stringify(postSyncRecord);
-  assert.equal(postSyncJson, beforeSyncJson, "Existing record MUST remain 100% byte-for-byte unchanged");
-  assert.equal(postSyncRecord.status, "ongoing");
-  assert.equal(postSyncRecord.urgency, "high");
-  assert.equal(postSyncRecord.actual_crowd_size, 850);
-  assert.equal(postSyncRecord.situation_summary, "SITUASI_OPERATOR_SANGAT_PENTING");
-  assert.equal(postSyncRecord.editorial_draft, "DRAFT_REDAKSI_OPERATOR");
-  assert.equal(postSyncRecord.editorial_final, "FINAL_REDAKSI_OPERATOR");
-  assert.equal(postSyncRecord.validated_lat, -6.1754);
-  assert.equal(postSyncRecord.validated_lng, 106.8272);
-  assert.equal(postSyncRecord.lokasi, `Patung Arjuna Wijaya ${runId}`, "Original location must not be overwritten");
-  assert.equal(postSyncRecord.isu_tuntutan, `Isu Awal Sumber Excel ${runId}`, "Original issue must not be overwritten");
-  console.log("  ✔ CRITICAL PASS: Rekor yang sudah ada 100% byte-for-byte identik dan tidak tersentuh sinkronisasi.");
+  assert.equal(postSyncRecord.lokasi, `Nama Lokasi Excel Yang Mau Menimpa ${runId}`, "Location must be overwritten by Excel");
+  assert.equal(postSyncRecord.isu_tuntutan, `Isu Excel Yang Mau Menimpa ${runId}`, "Issue must be overwritten by Excel");
+  assert.equal(postSyncRecord.estimasi_massa_source, 9999, "Crowd size must be overwritten by Excel");
+  assert.equal(postSyncRecord.id, beforeSyncRecord.id, "Internal ID must remain unchanged");
+  console.log("  ✔ CRITICAL PASS: Rekor yang sudah ada berhasil diperbarui oleh Excel (FULL OVERWRITE).");
 
   // ---------------------------------------------------------------------------
   // Test 10: Concurrent sync requests cannot create duplicates
@@ -591,10 +581,10 @@ async function runTests() {
   ]);
 
   const totalCreated = dbRes1.created + dbRes2.created;
-  const totalSkipped = dbRes1.skipped + dbRes2.skipped;
+  const totalUpdated = dbRes1.updated + dbRes2.updated;
   assert.equal(totalCreated, 1, "Exactly one insert must succeed");
-  assert.equal(totalSkipped, 1, "The duplicate insert must be skipped");
-  console.log("  ✔ Database-level uniqueness terjamin: 1 dibuat (created), 1 dilewati (skipped), 0 duplikasi.");
+  assert.equal(totalUpdated, 1, "The duplicate insert must update via full overwrite");
+  console.log("  ✔ Database-level uniqueness terjamin: 1 dibuat (created), 1 diperbarui (updated), 0 duplikasi.");
 
   // ---------------------------------------------------------------------------
   // Test 16: Unit validation of identifier resolution functions

@@ -84,6 +84,13 @@ export interface ProtestEvent {
   tindak_lanjut?: string | null; // Col X: Tindak Lanjut KPBI
   progres_asistensi?: string | null; // Col AA: Progres Asistensi
   realisasi?: string | null; // Col AC: Realisasi ('Terealisasi', 'Audiensi', 'Dibatalkan', 'Tidak Terealisasi', 'Mediasi', 'Dialihkan')
+  tujuan?: string | null; // Tujuan / sasaran institusional aksi dari Excel
+  jarak_lokasi_unras?: string | null; // Jarak lokasi unras dari kantor/objek pengamanan dari Excel
+  redaksi?: string | null; // Teks redaksi resmi dari kolom Redaksi Excel
+
+  // Outbound Sync Attributes
+  last_outbound_synced_at?: string | null;
+  outbound_sync_status?: 'none' | 'pending' | 'success' | 'failed' | null;
 
   // Operator-Managed & Validated Attributes (NEVER overwritten by Excel sync)
   status: ProtestStatus;
@@ -251,6 +258,19 @@ export interface ExcelProtestRow {
   latitude?: number;
   longitude?: number;
   status?: string;
+
+  // Additional 24-field mappings
+  lokasi_unras?: string;
+  info_awal_unras?: string;
+  tindak_lanjut_kpbi?: string;
+  redaksi?: string;
+  nama_pelapor?: string;
+  progres_asistensi?: string;
+  tujuan?: string;
+  realisasi?: string;
+  keterangan_dampak?: string;
+  jarak_lokasi_unras?: string;
+  origin?: string;
   [key: string]: any;
 }
 

@@ -211,6 +211,249 @@ function getField(row: Record<string, any>, ...keys: string[]): any {
 }
 
 /**
+ * Checks if a candidate key is explicitly present in the row object (case-insensitive & snake/kebab-agnostic).
+ */
+export function hasRowField(row: Record<string, any>, ...candidateKeys: string[]): boolean {
+  if (!row || typeof row !== "object") return false;
+  for (const k of candidateKeys) {
+    if (k in row) return true;
+  }
+  const rowKeys = Object.keys(row);
+  for (const k of candidateKeys) {
+    const kNorm = k.toLowerCase().replace(/[\s_-]/g, "");
+    if (rowKeys.some((rk) => rk.toLowerCase().replace(/[\s_-]/g, "") === kNorm)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Retrieves the raw value of a field if present, or undefined if omitted.
+ */
+export function getRawRowField(row: Record<string, any>, ...candidateKeys: string[]): any {
+  if (!row || typeof row !== "object") return undefined;
+  for (const k of candidateKeys) {
+    if (k in row) return row[k];
+  }
+  const rowKeys = Object.keys(row);
+  for (const k of candidateKeys) {
+    const kNorm = k.toLowerCase().replace(/[\s_-]/g, "");
+    const foundKey = rowKeys.find((rk) => rk.toLowerCase().replace(/[\s_-]/g, "") === kNorm);
+    if (foundKey) return row[foundKey];
+  }
+  return undefined;
+}
+
+/**
+ * Normalizes an explicit value preserving empty strings, numbers, booleans, and nulls
+ */
+export function parseExplicitString(val: any): string | null {
+  if (val === null || val === undefined) return null;
+  return String(val).trim();
+}
+
+/**
+ * Extracts all mapped inbound fields from an Excel row with explicit presence checks.
+ * Distinguishes between omitted fields and explicit empty string, 0, false, or null.
+ */
+export function extractInboundMappedUpdates(
+  row: Record<string, any>,
+  eventDateWib: string,
+  timeParsedIso?: string | null
+): Partial<ProtestEvent> {
+  const updates: Partial<ProtestEvent> = {};
+
+  // 1. Tanggal
+  if (hasRowField(row, "tanggal_kejadian", "TANGGAL", "tanggal")) {
+    updates.tanggal = eventDateWib;
+  }
+
+  // 2. Waktu mulai
+  if (hasRowField(row, "WAKTU", "waktu", "waktu_mulai")) {
+    const rawW = getRawRowField(row, "WAKTU", "waktu", "waktu_mulai");
+    if (rawW === null || rawW === undefined || String(rawW).trim() === "") {
+      updates.waktu_mulai = null;
+    } else {
+      const norm = normalizeTimeString(rawW);
+      updates.waktu_mulai = norm.time || String(rawW).trim();
+    }
+  }
+
+  // 3. Location & Venue (Section 4 Contract)
+  // Excel 'Lokasi Unras' = Specific protest venue -> SCC 'lokasi'
+  // Excel 'Lokasi' = City / administrative area -> SCC 'kota_kabupaten'
+  const hasLokasiUnras = hasRowField(row, "lokasi_unras", "LOKASI UNRAS", "LOKASI_UNRAS");
+  const hasLokasi = hasRowField(row, "LOKASI", "lokasi");
+  const hasKota = hasRowField(row, "KOTA/KABUPATEN", "kota_kabupaten", "kota", "KOTA");
+
+  if (hasLokasiUnras) {
+    const rawVenue = getRawRowField(row, "lokasi_unras", "LOKASI UNRAS", "LOKASI_UNRAS");
+    updates.lokasi = parseExplicitString(rawVenue) || "";
+    if (hasLokasi || hasKota) {
+      const rawCity = getRawRowField(row, "LOKASI", "lokasi", "KOTA/KABUPATEN", "kota_kabupaten", "kota", "KOTA");
+      updates.kota_kabupaten = parseExplicitString(rawCity);
+    }
+  } else if (hasKota) {
+    if (hasLokasi) {
+      const rawVenue = getRawRowField(row, "LOKASI", "lokasi");
+      updates.lokasi = parseExplicitString(rawVenue) || "";
+    }
+    const rawCity = getRawRowField(row, "KOTA/KABUPATEN", "kota_kabupaten", "kota", "KOTA");
+    updates.kota_kabupaten = parseExplicitString(rawCity);
+  } else if (hasLokasi) {
+    const rawLoc = getRawRowField(row, "LOKASI", "lokasi");
+    updates.lokasi = parseExplicitString(rawLoc) || "";
+  }
+
+  // 4. Titik kumpul & Sasaran
+  if (hasRowField(row, "TITIK KUMPUL", "titik_kumpul")) {
+    updates.titik_kumpul = parseExplicitString(getRawRowField(row, "TITIK KUMPUL", "titik_kumpul"));
+  }
+  if (hasRowField(row, "SASARAN", "sasaran", "sasaran_aksi")) {
+    updates.sasaran_aksi = parseExplicitString(getRawRowField(row, "SASARAN", "sasaran", "sasaran_aksi"));
+  }
+
+  // 5. Isu & Tuntutan
+  if (hasRowField(row, "ISU", "tuntutan", "isu_tuntutan", "isu")) {
+    updates.isu_tuntutan = parseExplicitString(getRawRowField(row, "ISU", "tuntutan", "isu_tuntutan", "isu")) || "";
+  }
+
+  // 6. Jumlah Massa
+  if (hasRowField(row, "JUMLAH MASSA", "jumlah_massa", "estimasi_massa")) {
+    const rawM = getRawRowField(row, "JUMLAH MASSA", "jumlah_massa", "estimasi_massa");
+    if (rawM === null || rawM === undefined || String(rawM).trim() === "") {
+      updates.estimasi_massa_source = null;
+      updates.actual_crowd_size = null;
+    } else if (typeof rawM === "number") {
+      updates.estimasi_massa_source = Math.round(rawM);
+      updates.actual_crowd_size = Math.round(rawM);
+    } else {
+      const norm = normalizeCrowdEstimate(rawM);
+      updates.estimasi_massa_source = norm.count;
+      updates.actual_crowd_size = norm.count;
+    }
+  }
+
+  // 7. Organisasi / Aliansi
+  if (hasRowField(row, "ORGANISASI", "aliansi", "organisasi_kelompok", "organisasi")) {
+    updates.organisasi_kelompok = parseExplicitString(getRawRowField(row, "ORGANISASI", "aliansi", "organisasi_kelompok", "organisasi"));
+  }
+
+  // 8. Korlap
+  if (hasRowField(row, "KORLAP", "korlap", "korlap_pimpinan")) {
+    updates.korlap_pimpinan = parseExplicitString(getRawRowField(row, "KORLAP", "korlap", "korlap_pimpinan"));
+  }
+
+  // 9. Wilayah Hukum & KP/KPw
+  if (hasRowField(row, "KP/KPw", "kp", "kp_kpw")) {
+    const kpVal = parseExplicitString(getRawRowField(row, "KP/KPw", "kp", "kp_kpw"));
+    updates.kp_kpw = kpVal;
+    if (!hasRowField(row, "WILAYAH HUKUM", "wilayah_hukum")) {
+      updates.wilayah_hukum = kpVal;
+    }
+  }
+  if (hasRowField(row, "WILAYAH HUKUM", "wilayah_hukum")) {
+    updates.wilayah_hukum = parseExplicitString(getRawRowField(row, "WILAYAH HUKUM", "wilayah_hukum"));
+  }
+
+  // 10. Provinsi & Regional
+  if (hasRowField(row, "PROVINSI", "provinsi")) {
+    updates.provinsi = parseExplicitString(getRawRowField(row, "PROVINSI", "provinsi"));
+  }
+  if (hasRowField(row, "REGIONAL", "regional")) {
+    updates.regional = parseExplicitString(getRawRowField(row, "REGIONAL", "regional"));
+  }
+
+  // 11. Kategori Isu & Dampak
+  if (hasRowField(row, "kategori_isu", "KATEGORI ISU", "KATEGORI_ISU")) {
+    updates.kategori_isu = parseExplicitString(getRawRowField(row, "kategori_isu", "KATEGORI ISU", "KATEGORI_ISU"));
+  }
+  if (hasRowField(row, "DAMPAK", "dampak")) {
+    updates.dampak = parseExplicitString(getRawRowField(row, "DAMPAK", "dampak"));
+  }
+  if (hasRowField(row, "keterangan_dampak", "KETERANGAN DAMPAK")) {
+    updates.keterangan_dampak = parseExplicitString(getRawRowField(row, "keterangan_dampak", "KETERANGAN DAMPAK"));
+  }
+
+  // 12. Ringkasan Situasi / Keterangan
+  if (hasRowField(row, "KETERANGAN", "ringkasan_situasi", "keterangan_source", "keterangan")) {
+    const rawKet = parseExplicitString(getRawRowField(row, "KETERANGAN", "ringkasan_situasi", "keterangan_source", "keterangan"));
+    updates.keterangan_source = rawKet;
+    updates.situation_summary = rawKet;
+  }
+
+  // 13. Status Sumber & Status Kejadian
+  if (hasRowField(row, "Status Kejadian", "status_sumber", "STATUS SUMBER", "STATUS")) {
+    const rawSt = getRawRowField(row, "Status Kejadian", "status_sumber", "STATUS SUMBER", "STATUS");
+    const mappedSt = mapSourceStatus(rawSt);
+    updates.status_sumber = mappedSt || null;
+    updates.status = mapSourceStatusToProtestStatus(mappedSt);
+  }
+
+  // 14. Info Awal & Tindak Lanjut
+  if (hasRowField(row, "info_awal_unras", "info_awal", "INFO AWAL UNRAS", "INFO AWAL")) {
+    updates.info_awal = parseExplicitString(getRawRowField(row, "info_awal_unras", "info_awal", "INFO AWAL UNRAS", "INFO AWAL"));
+  }
+  if (hasRowField(row, "tindak_lanjut_kpbi", "tindak_lanjut", "TINDAK LANJUT KPBI", "TINDAK LANJUT")) {
+    updates.tindak_lanjut = parseExplicitString(getRawRowField(row, "tindak_lanjut_kpbi", "tindak_lanjut", "TINDAK LANJUT KPBI", "TINDAK LANJUT"));
+  }
+
+  // 15. Redaksi & Editorial
+  if (hasRowField(row, "redaksi", "REDAKSI", "editorial_draft")) {
+    const red = parseExplicitString(getRawRowField(row, "redaksi", "REDAKSI", "editorial_draft"));
+    updates.redaksi = red;
+    updates.editorial_draft = red;
+  }
+
+  // 16. Pelapor, Progres, Realisasi
+  if (hasRowField(row, "nama_pelapor", "NAMA PELAPOR")) {
+    updates.nama_pelapor = parseExplicitString(getRawRowField(row, "nama_pelapor", "NAMA PELAPOR"));
+  }
+  if (hasRowField(row, "progres_asistensi", "PROGRES ASISTENSI")) {
+    updates.progres_asistensi = parseExplicitString(getRawRowField(row, "progres_asistensi", "PROGRES ASISTENSI"));
+  }
+  if (hasRowField(row, "realisasi", "REALISASI")) {
+    updates.realisasi = parseExplicitString(getRawRowField(row, "realisasi", "REALISASI"));
+  }
+
+  // 17. Tujuan & Jarak Lokasi
+  if (hasRowField(row, "tujuan", "TUJUAN")) {
+    updates.tujuan = parseExplicitString(getRawRowField(row, "tujuan", "TUJUAN"));
+  }
+  if (hasRowField(row, "jarak_lokasi_unras", "JARAK LOKASI UNRAS", "jarak")) {
+    updates.jarak_lokasi_unras = parseExplicitString(getRawRowField(row, "jarak_lokasi_unras", "JARAK LOKASI UNRAS", "jarak"));
+  }
+
+  // 18. Coordinates
+  if (hasRowField(row, "LATITUDE", "latitude") || hasRowField(row, "LONGITUDE", "longitude")) {
+    const rawLat = getRawRowField(row, "LATITUDE", "latitude");
+    const rawLng = getRawRowField(row, "LONGITUDE", "longitude");
+    if (rawLat !== null && rawLat !== undefined && rawLat !== "" && rawLng !== null && rawLng !== undefined && rawLng !== "") {
+      const latVal = typeof rawLat === "number" ? rawLat : parseFloat(String(rawLat).replace(",", "."));
+      const lngVal = typeof rawLng === "number" ? rawLng : parseFloat(String(rawLng).replace(",", "."));
+      if (!isNaN(latVal) && !isNaN(lngVal) && latVal >= -90 && latVal <= 90 && lngVal >= -180 && lngVal <= 180) {
+        updates.validated_lat = latVal;
+        updates.validated_lng = lngVal;
+        updates.location_validation_status = "verified";
+      }
+    } else if (rawLat === null || rawLat === "" || rawLng === null || rawLng === "") {
+      updates.validated_lat = null;
+      updates.validated_lng = null;
+      updates.location_validation_status = "unmapped";
+    }
+  }
+
+  if (timeParsedIso) {
+    updates.event_datetime = timeParsedIso;
+  }
+
+  updates.raw_source_payload = row;
+
+  return updates;
+}
+
+/**
  * Extracts and strictly validates the event timestamp from:
  * 'WAKTU DAN TGL KEJADIAN ISO' or flexible event date fields
  *
@@ -832,10 +1075,13 @@ async function processSyncCore(
         kodeUnras = fallbackId;
       }
 
+      // Extract complete mapped updates using field presence checks for full overwrite
+      const mappedUpdates = extractInboundMappedUpdates(row, eventDateWib, timeParsed.iso);
+
       // Rolling window boundary check: event_datetime >= period_start && event_datetime < period_end
       // Half-open interval [startMs, endMs)
       if (timeParsed.epochMs < startMs) {
-        // Task 10: Ensure older registered incidents can receive status updates even if their event date is outside the rolling 7-day window
+        // Task 10: Ensure older registered incidents can receive full updates even if their event date is outside the rolling 7-day window
         let canonicalId: string | null = null;
         if (idKejadian && cachedRegistryKeys.has(`ID:${idKejadian}`)) {
           canonicalId = cachedRegistryKeys.get(`ID:${idKejadian}`)!;
@@ -845,24 +1091,18 @@ async function processSyncCore(
         }
 
         if (canonicalId) {
-          let wasStatusUpdated = false;
-          if (mappedStatusSumber) {
-            const updateRes = await protestStore.updateProtestSourceStatus(
-              canonicalId,
-              mappedStatusSumber,
-              rawStatusSumber,
-              finalTriggeredBy
-            );
-            if (updateRes.updated) {
-              updated++;
-              statusUpdated++;
-              wasStatusUpdated = true;
-            }
-          }
-          if (!wasStatusUpdated) {
+          const updateRes = await protestStore.updateProtest(
+            canonicalId,
+            mappedUpdates,
+            { id: "system-excel-sync", name: "Excel Inbound Sync", email: "system@scc.go.id", role: "admin" }
+          );
+          if (updateRes) {
+            updated++;
+            if (mappedStatusSumber) statusUpdated++;
+          } else {
             skipped++;
           }
-          errors.push(`[ID: ${idKejadian}] Rekor lama (${timeParsed.iso}) di luar jendela terdaftar di sistem: Status sumber disinkronisasi ke '${mappedStatusSumber || "tidak berubah"}', rekor tidak diinsert.`);
+          errors.push(`[ID: ${idKejadian}] Rekor lama (${timeParsed.iso}) di luar jendela terdaftar di sistem: Data diperbarui (FULL OVERWRITE).`);
           continue;
         }
 
@@ -935,49 +1175,45 @@ async function processSyncCore(
       );
 
       if (candidateVerdict.action === "EXISTING") {
-        let wasStatusUpdated = false;
-        if (candidateVerdict.canonicalId && mappedStatusSumber) {
-          const updateRes = await protestStore.updateProtestSourceStatus(
+        if (candidateVerdict.canonicalId) {
+          const updateRes = await protestStore.updateProtest(
             candidateVerdict.canonicalId,
-            mappedStatusSumber,
-            rawStatusSumber,
-            finalTriggeredBy
+            mappedUpdates,
+            { id: "system-excel-sync", name: "Excel Inbound Sync", email: "system@scc.go.id", role: "admin" }
           );
-          if (updateRes.updated) {
+          if (updateRes) {
             updated++;
-            statusUpdated++;
-            wasStatusUpdated = true;
+            if (mappedStatusSumber) statusUpdated++;
+          } else {
+            skipped++;
           }
-        }
-        if (!wasStatusUpdated) {
+        } else {
           skipped++;
         }
-        errors.push(`[ID: ${idKejadian}] Dilewati (EXISTING): ${candidateVerdict.reason}`);
+        errors.push(`[ID: ${idKejadian}] Diperbarui (EXISTING - FULL OVERWRITE): ${candidateVerdict.reason}`);
         continue;
       }
 
       if (candidateVerdict.action === "DUPLICATE") {
-        let isDuplicateUpdated = false;
         // Requirement 5: For DUPLICATE matches, resolve identity confidence first.
-        // Only apply source status update if identity confidence is strictly "confirmed" (Tier 1/2/3/4A).
-        // Never blindly apply status to an arbitrary canonical record on "probable" similarity matches.
-        if (candidateVerdict.confidence === "confirmed" && candidateVerdict.canonicalId && mappedStatusSumber) {
-          const updateRes = await protestStore.updateProtestSourceStatus(
+        // Only apply full overwrite update if identity confidence is strictly "confirmed" (Tier 1/2/3/4A).
+        // Never blindly apply updates to an arbitrary canonical record on "probable" similarity matches.
+        if (candidateVerdict.confidence === "confirmed" && candidateVerdict.canonicalId) {
+          const updateRes = await protestStore.updateProtest(
             candidateVerdict.canonicalId,
-            mappedStatusSumber,
-            rawStatusSumber,
-            finalTriggeredBy
+            mappedUpdates,
+            { id: "system-excel-sync", name: "Excel Inbound Sync", email: "system@scc.go.id", role: "admin" }
           );
-          if (updateRes.updated) {
+          if (updateRes) {
             updated++;
-            statusUpdated++;
-            isDuplicateUpdated = true;
+            if (mappedStatusSumber) statusUpdated++;
+          } else {
+            skipped++;
           }
-        }
-        if (!isDuplicateUpdated) {
+        } else {
           skipped++;
         }
-        errors.push(`[ID: ${idKejadian}] Dilewati (DUPLICATE): ${candidateVerdict.reason}`);
+        errors.push(`[ID: ${idKejadian}] ${candidateVerdict.confidence === "confirmed" ? "Diperbarui (DUPLICATE - FULL OVERWRITE)" : "Dilewati (DUPLICATE)"}: ${candidateVerdict.reason}`);
         if (candidateVerdict.canonicalId) {
           cachedRegistryKeys.set(`ID:${idKejadian}`, candidateVerdict.canonicalId);
           cachedRegistryKeys.set(candidateVerdict.fingerprints.exact, candidateVerdict.canonicalId);
@@ -1083,35 +1319,49 @@ async function processSyncCore(
         waktu_mulai: waktuNormalized,
         waktu_selesai: null,
         event_datetime: timeParsed.iso,
-        lokasi,
-        titik_kumpul: titikKumpul,
-        sasaran_aksi: sasaranAksi,
-        isu_tuntutan: isu,
-        estimasi_massa_source: crowd,
-        organisasi_kelompok: organisasi,
-        korlap_pimpinan: korlap,
-        wilayah_hukum: wilayahHukum,
-        provinsi,
-        kota_kabupaten: kotaKabupaten,
-        keterangan_source: keterangan,
-        validated_lat: coords.lat,
-        validated_lng: coords.lng,
+        lokasi: mappedUpdates.lokasi || lokasi,
+        titik_kumpul: mappedUpdates.titik_kumpul ?? titikKumpul,
+        sasaran_aksi: mappedUpdates.sasaran_aksi ?? sasaranAksi,
+        isu_tuntutan: mappedUpdates.isu_tuntutan || isu,
+        estimasi_massa_source: mappedUpdates.estimasi_massa_source ?? crowd,
+        actual_crowd_size: mappedUpdates.actual_crowd_size ?? crowd,
+        organisasi_kelompok: mappedUpdates.organisasi_kelompok ?? organisasi,
+        korlap_pimpinan: mappedUpdates.korlap_pimpinan ?? korlap,
+        wilayah_hukum: mappedUpdates.wilayah_hukum ?? wilayahHukum,
+        provinsi: mappedUpdates.provinsi ?? provinsi,
+        kota_kabupaten: mappedUpdates.kota_kabupaten ?? kotaKabupaten,
+        keterangan_source: mappedUpdates.keterangan_source ?? keterangan,
+        situation_summary: mappedUpdates.situation_summary ?? keterangan,
+        validated_lat: mappedUpdates.validated_lat !== undefined ? mappedUpdates.validated_lat : coords.lat,
+        validated_lng: mappedUpdates.validated_lng !== undefined ? mappedUpdates.validated_lng : coords.lng,
         category_id: category,
         status_sumber: mappedStatusSumber || null,
         status: mapSourceStatusToProtestStatus(mappedStatusSumber),
         raw_source_payload: row as unknown as Record<string, unknown>,
-        regional,
-        kategori_isu: kategoriIsu,
-        dampak
+        regional: mappedUpdates.regional ?? regional,
+        kategori_isu: mappedUpdates.kategori_isu ?? kategoriIsu,
+        dampak: mappedUpdates.dampak ?? dampak,
+        keterangan_dampak: mappedUpdates.keterangan_dampak ?? null,
+        nama_pelapor: mappedUpdates.nama_pelapor ?? null,
+        info_awal: mappedUpdates.info_awal ?? null,
+        tindak_lanjut: mappedUpdates.tindak_lanjut ?? null,
+        progres_asistensi: mappedUpdates.progres_asistensi ?? null,
+        realisasi: mappedUpdates.realisasi ?? null,
+        tujuan: mappedUpdates.tujuan ?? null,
+        jarak_lokasi_unras: mappedUpdates.jarak_lokasi_unras ?? null,
+        redaksi: mappedUpdates.redaksi ?? null,
+        editorial_draft: mappedUpdates.editorial_draft ?? null,
+        kp_kpw: mappedUpdates.kp_kpw ?? null
       } as any);
     }
 
-    // 5. Execute Batch Insertion (Insert only new events, skip existing)
+    // 5. Execute Batch Insertion (Insert new events, full overwrite existing)
     if (validBatchForStore.length > 0) {
       const upsertStats = await protestStore.upsertFromExcelBatch(validBatchForStore);
       inserted = upsertStats.created;
+      updated += (upsertStats.updated || 0);
       skipped += upsertStats.skipped;
-      failed += (validBatchForStore.length - (inserted + upsertStats.skipped));
+      failed += (validBatchForStore.length - (inserted + (upsertStats.updated || 0) + upsertStats.skipped));
       if (upsertStats.insertedByDate) {
         insertedByDate = upsertStats.insertedByDate;
       }
