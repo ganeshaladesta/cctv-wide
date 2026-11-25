@@ -56,6 +56,39 @@ export interface DispatchOutboundOptions {
   origin?: "scc" | "excel";
   triggeredBy?: string;
   forceSync?: boolean;
+  route?: string;
+}
+
+/**
+ * Emits safe server-side structured diagnostic logs without exposing secrets,
+ * webhook URLs, or query-string tokens.
+ */
+function logOutboundDiagnostic(info: {
+  correlation_id: string;
+  event: string;
+  route?: string;
+  protest_id: string;
+  id_unras?: string | null;
+  has_outbound_url: boolean;
+  has_kode_unras: boolean;
+  result: "started" | "skipped" | "success" | "failed";
+  http_status?: number | null;
+  duration_ms: number;
+  error?: string | null;
+}) {
+  const sanitized = {
+    correlation_id: info.correlation_id,
+    event: info.event,
+    route: info.route || "unknown",
+    protest_id: info.protest_id,
+    has_outbound_url: info.has_outbound_url,
+    has_kode_unras: info.has_kode_unras,
+    result: info.result,
+    http_status: info.http_status ?? null,
+    duration_ms: info.duration_ms,
+    error: info.error ? String(info.error).slice(0, 200) : null
+  };
+  console.log(`[UNRAS Outbound Sync]`, JSON.stringify(sanitized));
 }
 
 /**
@@ -195,9 +228,21 @@ export async function dispatchOutboundSync(
   options: DispatchOutboundOptions = {}
 ): Promise<OutboundSyncResult> {
   const startTime = Date.now();
+  const correlationId = `outbound-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
   // 1. Loop Prevention check (Rule 1 & Rule 2)
   if (options.origin === "excel") {
+    logOutboundDiagnostic({
+      correlation_id: correlationId,
+      event: "unras.updated",
+      route: options.route,
+      protest_id: event.id,
+      has_outbound_url: Boolean(process.env.POWER_AUTOMATE_OUTBOUND_URL || process.env.UNRAS_OUTBOUND_WEBHOOK_URL),
+      has_kode_unras: Boolean(event.kode_unras),
+      result: "skipped",
+      duration_ms: Date.now() - startTime,
+      error: "Loop prevention: origin is excel"
+    });
     return {
       success: true,
       status: "skipped",
@@ -209,6 +254,17 @@ export async function dispatchOutboundSync(
   const payload = buildOutboundPayload(event);
 
   if (!payload.id_unras || payload.id_unras.trim() === "") {
+    logOutboundDiagnostic({
+      correlation_id: correlationId,
+      event: "unras.updated",
+      route: options.route,
+      protest_id: event.id,
+      has_outbound_url: Boolean(process.env.POWER_AUTOMATE_OUTBOUND_URL || process.env.UNRAS_OUTBOUND_WEBHOOK_URL),
+      has_kode_unras: false,
+      result: "failed",
+      duration_ms: Date.now() - startTime,
+      error: "Event missing id_unras (ID UNRAS) required for Excel row lookup."
+    });
     return {
       success: false,
       status: "failed",
@@ -221,6 +277,18 @@ export async function dispatchOutboundSync(
   // 3. Outbound URL resolution
   const outboundUrl = process.env.POWER_AUTOMATE_OUTBOUND_URL || process.env.UNRAS_OUTBOUND_WEBHOOK_URL;
   if (!outboundUrl || outboundUrl.trim() === "") {
+    logOutboundDiagnostic({
+      correlation_id: correlationId,
+      event: "unras.updated",
+      route: options.route,
+      protest_id: event.id,
+      id_unras: payload.id_unras,
+      has_outbound_url: false,
+      has_kode_unras: true,
+      result: "skipped",
+      duration_ms: Date.now() - startTime,
+      error: "Power Automate outbound webhook URL is not configured (POWER_AUTOMATE_OUTBOUND_URL)."
+    });
     // If webhook URL is not configured, do not throw or fail the operator mutation
     return {
       success: true,
@@ -230,6 +298,18 @@ export async function dispatchOutboundSync(
       payload
     };
   }
+
+  logOutboundDiagnostic({
+    correlation_id: correlationId,
+    event: "unras.updated",
+    route: options.route,
+    protest_id: event.id,
+    id_unras: payload.id_unras,
+    has_outbound_url: true,
+    has_kode_unras: true,
+    result: "started",
+    duration_ms: Date.now() - startTime
+  });
 
   const maxRetries = 2;
   let lastError: string | null = null;
@@ -278,6 +358,19 @@ export async function dispatchOutboundSync(
           });
         } catch {}
 
+        logOutboundDiagnostic({
+          correlation_id: correlationId,
+          event: "unras.updated",
+          route: options.route,
+          protest_id: event.id,
+          id_unras: payload.id_unras,
+          has_outbound_url: true,
+          has_kode_unras: true,
+          result: "success",
+          http_status: response.status,
+          duration_ms: durationMs
+        });
+
         return {
           success: true,
           status: "success",
@@ -297,6 +390,20 @@ export async function dispatchOutboundSync(
             outbound_sync_status: "failed"
           }, { id: "system-outbound-sync", name: "Outbound Sync Service", email: "system@scc.go.id", role: "admin" });
         } catch {}
+
+        logOutboundDiagnostic({
+          correlation_id: correlationId,
+          event: "unras.updated",
+          route: options.route,
+          protest_id: event.id,
+          id_unras: payload.id_unras,
+          has_outbound_url: true,
+          has_kode_unras: true,
+          result: "failed",
+          http_status: 404,
+          duration_ms: durationMs,
+          error: lastError
+        });
 
         return {
           success: false,
@@ -318,6 +425,20 @@ export async function dispatchOutboundSync(
             outbound_sync_status: "failed"
           }, { id: "system-outbound-sync", name: "Outbound Sync Service", email: "system@scc.go.id", role: "admin" });
         } catch {}
+
+        logOutboundDiagnostic({
+          correlation_id: correlationId,
+          event: "unras.updated",
+          route: options.route,
+          protest_id: event.id,
+          id_unras: payload.id_unras,
+          has_outbound_url: true,
+          has_kode_unras: true,
+          result: "failed",
+          http_status: 409,
+          duration_ms: durationMs,
+          error: lastError
+        });
 
         return {
           success: false,
@@ -374,6 +495,20 @@ export async function dispatchOutboundSync(
       error_details: lastError
     });
   } catch {}
+
+  logOutboundDiagnostic({
+    correlation_id: correlationId,
+    event: "unras.updated",
+    route: options.route,
+    protest_id: event.id,
+    id_unras: payload.id_unras,
+    has_outbound_url: true,
+    has_kode_unras: true,
+    result: "failed",
+    http_status: responseStatus || 500,
+    duration_ms: durationMs,
+    error: lastError
+  });
 
   return {
     success: false,

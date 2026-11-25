@@ -470,3 +470,55 @@ test("10. Inbound Excel Updates Subsequently Overwrite All Three Operator Fields
   assert.equal(overwritten.redaksi, "Update situasi dari koordinator lapangan di Excel");
   assert.equal(overwritten.editorial_draft, "Update situasi dari koordinator lapangan di Excel");
 });
+
+test("11. Operator Save Dispatch Invocation with Mock Webhook", async () => {
+  let requestReceived = null;
+  const mockServer = http.createServer((req, res) => {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", () => {
+      requestReceived = {
+        method: req.method,
+        headers: req.headers,
+        body: JSON.parse(body)
+      };
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ status: "success" }));
+    });
+  });
+
+  await new Promise((resolve) => mockServer.listen(0, "127.0.0.1", resolve));
+  const mockPort = mockServer.address().port;
+  process.env.POWER_AUTOMATE_OUTBOUND_URL = `http://127.0.0.1:${mockPort}/operator-save`;
+
+  try {
+    const testEvent = {
+      id: "evt-op-save-test",
+      id_kejadian: "KEJ-OPSAVE-001",
+      kode_unras: "U-OPSAVE-01",
+      tanggal: "2026-11-25",
+      lokasi: "Kawasan BI",
+      kota_kabupaten: "Jakarta Pusat",
+      isu_tuntutan: "Aspirasi Pekerja",
+      status: "ongoing",
+      actual_crowd_size: 400
+    };
+
+    // Simulate operator saving changes via PATCH /api/protests/[id]
+    const dispatchResult = await dispatchOutboundSync(testEvent, {
+      origin: "scc",
+      route: "PATCH /api/protests/[id]"
+    });
+
+    assert.equal(dispatchResult.success, true);
+    assert.equal(dispatchResult.status, "success");
+    assert.ok(requestReceived, "Mock Power Automate endpoint must receive HTTP request on operator Save");
+    assert.equal(requestReceived.body.origin, "scc");
+    assert.equal(requestReceived.body.id_unras, "U-OPSAVE-01");
+    assert.equal(requestReceived.body.fields["STATUS KEJADIAN"], "Sedang Berlangsung");
+    assert.equal(requestReceived.body.fields["ESTIMASI JUMLAH MASSA"], 400);
+  } finally {
+    delete process.env.POWER_AUTOMATE_OUTBOUND_URL;
+    mockServer.close();
+  }
+});

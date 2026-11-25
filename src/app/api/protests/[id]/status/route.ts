@@ -57,9 +57,11 @@ export async function POST(request: NextRequest, { params }: Params) {
     );
 
     if (updated) {
-      dispatchOutboundSync(updated, { origin: "scc" }).catch((err) => {
-        console.warn("[Outbound Sync Background Warning]:", err);
-      });
+      try {
+        await dispatchOutboundSync(updated, { origin: "scc", route: "POST /api/protests/[id]/status" });
+      } catch (err: any) {
+        console.warn("[Outbound Sync Warning]:", err?.message || err);
+      }
     }
 
     return NextResponse.json({

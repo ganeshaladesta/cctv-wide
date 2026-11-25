@@ -166,9 +166,11 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     }, user);
 
     if (updated) {
-      dispatchOutboundSync(updated, { origin: "scc" }).catch((err) => {
-        console.warn("[Outbound Sync Background Warning]:", err);
-      });
+      try {
+        await dispatchOutboundSync(updated, { origin: "scc", route: "PATCH /api/protests/[id]" });
+      } catch (err: any) {
+        console.warn("[Outbound Sync Warning]:", err?.message || err);
+      }
     }
 
     return NextResponse.json({
