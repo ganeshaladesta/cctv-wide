@@ -194,6 +194,33 @@ test("5. Outbound Validation: Missing ID UNRAS Rejection", async () => {
   assert.match(missingResult.error, /id_unras/);
 });
 
+test("5B. Outbound Handling: Missing POWER_AUTOMATE_OUTBOUND_URL Graceful Skip", async () => {
+  const savedUrl = process.env.POWER_AUTOMATE_OUTBOUND_URL;
+  const savedWebhook = process.env.UNRAS_OUTBOUND_WEBHOOK_URL;
+  delete process.env.POWER_AUTOMATE_OUTBOUND_URL;
+  delete process.env.UNRAS_OUTBOUND_WEBHOOK_URL;
+
+  try {
+    const testEvent = {
+      id: "evt-no-url",
+      id_kejadian: "KEJ-NO-URL",
+      kode_unras: "U-NO-URL",
+      tanggal: "2026-11-25",
+      lokasi: "Monas",
+      isu_tuntutan: "Test Missing URL",
+      status: "scheduled"
+    };
+
+    const res = await dispatchOutboundSync(testEvent, { origin: "scc" });
+    assert.equal(res.success, true);
+    assert.equal(res.status, "skipped");
+    assert.match(res.error, /POWER_AUTOMATE_OUTBOUND_URL/);
+  } finally {
+    if (savedUrl) process.env.POWER_AUTOMATE_OUTBOUND_URL = savedUrl;
+    if (savedWebhook) process.env.UNRAS_OUTBOUND_WEBHOOK_URL = savedWebhook;
+  }
+});
+
 test("6. Outbound HTTP Dispatch with Mock Power Automate Server (200, 404, 409)", async () => {
   let mockStatusCode = 200;
   let receivedRequests = [];
