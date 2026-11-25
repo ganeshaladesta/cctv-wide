@@ -522,3 +522,46 @@ test("11. Operator Save Dispatch Invocation with Mock Webhook", async () => {
     mockServer.close();
   }
 });
+
+test("12. Outbound HTTP 401 Handling (DirectApiAuthorizationRequired / Missing SAS Signature)", async () => {
+  const mockServer = http.createServer((req, res) => {
+    res.writeHead(401, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({
+      error: {
+        code: "DirectApiAuthorizationRequired",
+        message: "The request must be authenticated only by Shared Access scheme.",
+        messageTemplate: "DirectApiAuthorizationRequired"
+      }
+    }));
+  });
+
+  await new Promise((resolve) => mockServer.listen(0, "127.0.0.1", resolve));
+  const mockPort = mockServer.address().port;
+  process.env.POWER_AUTOMATE_OUTBOUND_URL = `http://127.0.0.1:${mockPort}/mock-401`;
+
+  try {
+    const testEvent = {
+      id: "evt-op-401-test",
+      id_kejadian: "KEJ-401-001",
+      kode_unras: "U-401-01",
+      tanggal: "2026-11-25",
+      lokasi: "Gedung Bank Indonesia",
+      kota_kabupaten: "Jakarta Pusat",
+      status: "ongoing"
+    };
+
+    const dispatchResult = await dispatchOutboundSync(testEvent, {
+      origin: "scc",
+      route: "PATCH /api/protests/[id]"
+    });
+
+    assert.equal(dispatchResult.success, false);
+    assert.equal(dispatchResult.status, "failed");
+    assert.equal(dispatchResult.http_status, 401);
+    assert.match(dispatchResult.error, /DirectApiAuthorizationRequired/);
+    assert.match(dispatchResult.error, /Shared Access Signature/);
+  } finally {
+    delete process.env.POWER_AUTOMATE_OUTBOUND_URL;
+    mockServer.close();
+  }
+});

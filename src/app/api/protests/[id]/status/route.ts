@@ -56,9 +56,10 @@ export async function POST(request: NextRequest, { params }: Params) {
       user
     );
 
+    let outboundSync = null;
     if (updated) {
       try {
-        await dispatchOutboundSync(updated, { origin: "scc", route: "POST /api/protests/[id]/status" });
+        outboundSync = await dispatchOutboundSync(updated, { origin: "scc", route: "POST /api/protests/[id]/status" });
       } catch (err: any) {
         console.warn("[Outbound Sync Warning]:", err?.message || err);
       }
@@ -67,7 +68,8 @@ export async function POST(request: NextRequest, { params }: Params) {
     return NextResponse.json({
       success: true,
       message: `Status berhasil diubah menjadi '${toStatus}'.`,
-      data: updated
+      data: updated,
+      outbound_sync: outboundSync
     });
   } catch (error: any) {
     return NextResponse.json(

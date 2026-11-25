@@ -165,9 +165,10 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       redaksi: body.redaksi
     }, user);
 
+    let outboundSync = null;
     if (updated) {
       try {
-        await dispatchOutboundSync(updated, { origin: "scc", route: "PATCH /api/protests/[id]" });
+        outboundSync = await dispatchOutboundSync(updated, { origin: "scc", route: "PATCH /api/protests/[id]" });
       } catch (err: any) {
         console.warn("[Outbound Sync Warning]:", err?.message || err);
       }
@@ -176,7 +177,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     return NextResponse.json({
       success: true,
       message: 'Data unjuk rasa berhasil diperbarui.',
-      data: updated
+      data: updated,
+      outbound_sync: outboundSync
     });
   } catch (error: any) {
     return NextResponse.json(

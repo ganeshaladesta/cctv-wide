@@ -151,9 +151,10 @@ export async function POST(request: NextRequest, { params }: Params) {
       editorial_draft: generatedDraft
     }, user);
 
+    let outboundSync = null;
     if (updated) {
       try {
-        await dispatchOutboundSync(updated, { origin: "scc", route: "POST /api/protests/[id]/editorial" });
+        outboundSync = await dispatchOutboundSync(updated, { origin: "scc", route: "POST /api/protests/[id]/editorial" });
       } catch (err: any) {
         console.warn("[Outbound Sync Warning]:", err?.message || err);
       }
@@ -163,7 +164,8 @@ export async function POST(request: NextRequest, { params }: Params) {
       success: true,
       message: 'Draft teks editorial berhasil digenerate.',
       draft: generatedDraft,
-      data: updated
+      data: updated,
+      outbound_sync: outboundSync
     });
   } catch (error: any) {
     return NextResponse.json(

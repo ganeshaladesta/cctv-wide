@@ -457,6 +457,13 @@ export async function dispatchOutboundSync(
         continue;
       }
 
+      // 401 Unauthorized: DirectApiAuthorizationRequired / Missing SAS signature
+      if (response.status === 401) {
+        const errorText = await response.text().catch(() => "");
+        lastError = `Power Automate 401 Unauthorized (DirectApiAuthorizationRequired): URL webhook di POWER_AUTOMATE_OUTBOUND_URL tidak menyertakan tanda tangan Shared Access Signature (sp, sv, sig). ${errorText}`.trim();
+        break;
+      }
+
       // Other 4xx client errors: non-retryable
       const errorText = await response.text().catch(() => "");
       lastError = `Power Automate merespons HTTP ${response.status}: ${errorText || "Permintaan tidak dapat diproses"}`;
