@@ -156,19 +156,11 @@ export function generateSemanticFingerprint(
  * Generates a stable source key from raw ID UNRAS / KODE_UNRAS if available.
  * If specific location is available, scopes the source key to the incident point.
  */
-export function generateSourceKey(rawKode: unknown, lokasi?: unknown): string | null {
+export function generateSourceKey(rawKode: unknown, _lokasi?: unknown): string | null {
   if (rawKode === undefined || rawKode === null) return null;
   const str = String(rawKode).trim().toUpperCase();
   const clean = str.replace(/[^A-Z0-9]/g, "");
   if (!clean || clean === "-" || clean === "--") return null;
-
-  if (lokasi) {
-    const normLoc = normalizeEntityString(lokasi);
-    if (normLoc && !isGenericLocation(normLoc)) {
-      const hashLoc = crypto.createHash("sha256").update(normLoc, "utf8").digest("hex").slice(0, 8).toUpperCase();
-      return `SRC:${clean}:${hashLoc}`;
-    }
-  }
   return `SRC:${clean}`;
 }
 
@@ -232,173 +224,94 @@ export function classifyCandidate(
   };
 
   // ---------------------------------------------------------------------------
-  // Tier 1: Exact stable identifiers in Registry
+  // Strict ID-Based Resolution:
+  // Excel ID UNRAS is the ONLY identity key for inbound synchronization.
+  // Fuzzy heuristics (organization similarity, issue similarity, generic location)
+  // are permanently disabled per business rules.
   // ---------------------------------------------------------------------------
-  const exactIdKey = `ID:${candidate.id_kejadian}`;
-  if (existingRegistryKeys.has(exactIdKey)) {
+  const rawKode = candidate.kode_unras ? String(candidate.kode_unras).trim() : "";
+  const cleanKode = rawKode.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const unrasKey = cleanKode ? `UNRAS:${cleanKode}` : null;
+  const srcKey = cleanKode ? `SRC:${cleanKode}` : null;
+  const exactIdKey = candidate.id_kejadian ? `ID:${candidate.id_kejadian}` : null;
+
+  // 1. Check exact ID in registry
+  if (exactIdKey && existingRegistryKeys.has(exactIdKey)) {
+    const canonicalId = existingRegistryKeys.get(exactIdKey)!;
     return {
       action: "EXISTING",
       confidence: "confirmed",
-      canonicalId: existingRegistryKeys.get(exactIdKey)!,
-      reason: `Identifier '${candidate.id_kejadian}' sudah tercatat di sistem registry identitas`,
-      fingerprints
-    };
-  }
-
-  if (sourceKey && existingRegistryKeys.has(sourceKey)) {
-    const canonicalId = existingRegistryKeys.get(sourceKey)!;
-    return {
-      action: "DUPLICATE",
-      confidence: "confirmed",
       canonicalId,
-      reason: `Kunci sumber '${sourceKey}' telah dipetakan ke rekor kanonikal ${canonicalId}`,
+      reason: `ID Kejadian '${candidate.id_kejadian}' sudah tercatat di sistem registry identitas`,
       fingerprints
     };
   }
 
-  // ---------------------------------------------------------------------------
-  // Tier 2: Exact Normalized Fingerprint in Registry
-  // ---------------------------------------------------------------------------
-  if (existingRegistryKeys.has(fpExact)) {
-    const canonicalId = existingRegistryKeys.get(fpExact)!;
-    return {
-      action: "DUPLICATE",
-      confidence: "confirmed",
-      canonicalId,
-      reason: `Fingerprint eksak cocok dengan kejadian ${canonicalId}`,
-      fingerprints
-    };
-  }
-
-  // ---------------------------------------------------------------------------
-  // Tier 3: Semantic Order-Invariant Fingerprint in Registry
-  // ---------------------------------------------------------------------------
-  if (fpSem && existingRegistryKeys.has(fpSem)) {
-    const canonicalId = existingRegistryKeys.get(fpSem)!;
-    const candLocGeneric = isGenericLocation(candidate.lokasi);
-    const existingMatch = existingProtestsOnDate.find((p) => p.id_kejadian === canonicalId);
-    const existLocGeneric = existingMatch ? isGenericLocation(existingMatch.lokasi) : false;
-    const locMatch = existingMatch ? isMatchingLocation(candidate.lokasi, existingMatch.lokasi) : false;
-
-    // Only auto-deduplicate via semantic fingerprint if at least one location is generic,
-    // or locations match, or there is no existing protest object to compare locations.
-    if (!existingMatch || candLocGeneric || existLocGeneric || locMatch) {
-      return {
-        action: "DUPLICATE",
-        confidence: "confirmed",
-        canonicalId,
-        reason: `Fingerprint semantik kelompok & tuntutan cocok dengan kejadian ${canonicalId}`,
-        fingerprints
-      };
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Tier 4: Cross-check against all existing protests on the same date
-  // ---------------------------------------------------------------------------
-  const candIsuTokens = extractKeywords(candidate.isu_tuntutan);
-  const candOrgTokens = extractKeywords(candidate.organisasi_kelompok);
-  const candLocGeneric = isGenericLocation(candidate.lokasi);
-
+  // 2. Cross-check against all existing protests on same date or passed-in list
   for (const existing of existingProtestsOnDate) {
     if (existing.id_kejadian === candidate.id_kejadian) {
       return {
         action: "EXISTING",
         confidence: "confirmed",
         canonicalId: existing.id_kejadian,
-        reason: `id_kejadian identik dengan rekor yang sudah tersimpan di database`,
+        reason: `id_kejadian '${candidate.id_kejadian}' identik dengan rekor yang sudah tersimpan di database`,
         fingerprints
       };
     }
+  }
 
-    const existIsuTokens = extractKeywords(existing.isu_tuntutan);
-    const existOrgTokens = extractKeywords(existing.organisasi_kelompok);
-    const existLocGeneric = isGenericLocation(existing.lokasi);
+  // 3. Check immutable ID UNRAS in registry
+  // If an existing protest on the same date already has the same kode_unras with a DIFFERENT id_kejadian,
+  // this is a multi-point protest where each point is stored as a distinct record.
+  const hasSiblingPoint = existingProtestsOnDate.some(
+    (p) => p.kode_unras && cleanKode &&
+      String(p.kode_unras).trim().toUpperCase().replace(/[^A-Z0-9]/g, "") === cleanKode &&
+      p.id_kejadian !== candidate.id_kejadian
+  );
 
-    const isuSim = calculateJaccardSimilarity(candIsuTokens, existIsuTokens);
-    const orgSim = calculateJaccardSimilarity(candOrgTokens, existOrgTokens);
-    const locMatch = isMatchingLocation(candidate.lokasi, existing.lokasi);
-
-    // Rule A: Very high organization AND high issue overlap on same date -> Confirmed Duplicate
-    if (orgSim >= 0.7 && isuSim >= 0.6) {
+  if (!hasSiblingPoint) {
+    if (unrasKey && existingRegistryKeys.has(unrasKey)) {
+      const canonicalId = existingRegistryKeys.get(unrasKey)!;
       return {
-        action: "DUPLICATE",
+        action: "EXISTING",
         confidence: "confirmed",
-        canonicalId: existing.id_kejadian,
-        similarityScore: Math.max(orgSim, isuSim),
-        reason: `Kesamaan organisasi (${(orgSim * 100).toFixed(0)}%) dan tuntutan isu (${(isuSim * 100).toFixed(0)}%) pada tanggal ${candidate.tanggal} menunjukkan kejadian yang sama`,
+        canonicalId,
+        reason: `ID UNRAS '${candidate.kode_unras}' sudah tercatat di sistem registry identitas`,
         fingerprints
       };
     }
-
-    // Rule B: Matching physical location AND strong organization OR issue overlap -> Probable Duplicate
-    if (locMatch && (orgSim >= 0.5 || isuSim >= 0.5)) {
+    if (srcKey && existingRegistryKeys.has(srcKey)) {
+      const canonicalId = existingRegistryKeys.get(srcKey)!;
       return {
-        action: "DUPLICATE",
-        confidence: "probable",
-        canonicalId: existing.id_kejadian,
-        similarityScore: Math.max(orgSim, isuSim),
-        reason: `Lokasi sama ('${existing.lokasi}') dengan kesamaan organisasi/isu (${(Math.max(orgSim, isuSim) * 100).toFixed(0)}%) pada tanggal ${candidate.tanggal}`,
+        action: "EXISTING",
+        confidence: "confirmed",
+        canonicalId,
+        reason: `Kunci sumber '${srcKey}' sudah tercatat di sistem registry identitas`,
         fingerprints
       };
     }
-
-    // Rule C: High organization match when one record has generic jurisdiction location (e.g. 'LUAR KOPERBI')
-    if (orgSim >= 0.6 && (candLocGeneric || existLocGeneric)) {
-      return {
-        action: "DUPLICATE",
-        confidence: "probable",
-        canonicalId: existing.id_kejadian,
-        similarityScore: orgSim,
-        reason: `Organisasi identik/mirip (${(orgSim * 100).toFixed(0)}%) pada tanggal ${candidate.tanggal} dengan salah satu lokasi merupakan yurisdiksi umum ('${candLocGeneric ? candidate.lokasi : existing.lokasi}')`,
-        fingerprints
-      };
-    }
-
-    // Rule D: High issue overlap (>= 70%) on same date with generic location -> Probable Duplicate
-    if (isuSim >= 0.7 && (candLocGeneric || existLocGeneric)) {
-      return {
-        action: "DUPLICATE",
-        confidence: "probable",
-        canonicalId: existing.id_kejadian,
-        similarityScore: isuSim,
-        reason: `Isu tuntutan sangat mirip (${(isuSim * 100).toFixed(0)}%) pada tanggal ${candidate.tanggal} dengan salah satu lokasi merupakan yurisdiksi umum`,
-        fingerprints
-      };
-    }
-
-    // Rule E: Ambiguous Overlap -> Quarantine in Review Queue
-    // Partial similarity where we cannot be 100% sure if it's a separate protest or the same one
-    if ((isuSim >= 0.35 && orgSim >= 0.35) || (locMatch && (isuSim >= 0.3 || orgSim >= 0.3))) {
-      return {
-        action: "AMBIGUOUS",
-        confidence: "ambiguous",
-        canonicalId: existing.id_kejadian,
-        similarityScore: Math.max(orgSim, isuSim),
-        reason: `Kemiripan parsial dengan kejadian ${existing.id_kejadian} pada ${candidate.tanggal} (org: ${(orgSim * 100).toFixed(0)}%, isu: ${(isuSim * 100).toFixed(0)}%). Ditahan untuk verifikasi operator.`,
-        fingerprints
-      };
+    for (const existing of existingProtestsOnDate) {
+      if (cleanKode && existing.kode_unras) {
+        const existCleanKode = String(existing.kode_unras).trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+        if (existCleanKode && existCleanKode === cleanKode) {
+          return {
+            action: "EXISTING",
+            confidence: "confirmed",
+            canonicalId: existing.id_kejadian,
+            reason: `ID UNRAS '${candidate.kode_unras}' identik dengan rekor yang sudah tersimpan di database (${existing.id_kejadian})`,
+            fingerprints
+          };
+        }
+      }
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Check Essential Fields Sufficiency
-  // ---------------------------------------------------------------------------
-  const isIsuEmpty = !normalizeEntityString(candidate.isu_tuntutan) || candidate.isu_tuntutan === "Aksi Unjuk Rasa";
-  if (candLocGeneric && isIsuEmpty) {
-    return {
-      action: "AMBIGUOUS",
-      confidence: "ambiguous",
-      reason: `Field esensial (lokasi dan isu tuntutan) kosong atau hanya placeholder generik. Rekor tidak memiliki identitas unik yang dapat diverifikasi.`,
-      fingerprints
-    };
-  }
-
-  // Tier 4 Verdict: Truly New, Independent Incident
+  // Truly New, Independent Incident
+  // Fuzzy duplicate suppression disabled: different ID UNRAS values MUST NEVER be rejected or merged.
   return {
     action: "NEW",
     confidence: "distinct",
-    reason: `Kejadian unik baru terverifikasi pada tanggal ${candidate.tanggal}`,
+    reason: `Rekor baru dengan ID UNRAS '${candidate.kode_unras || candidate.id_kejadian}' pada tanggal ${candidate.tanggal}`,
     fingerprints
   };
 }

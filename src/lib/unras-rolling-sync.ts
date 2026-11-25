@@ -1194,60 +1194,6 @@ async function processSyncCore(
         continue;
       }
 
-      if (candidateVerdict.action === "DUPLICATE") {
-        // Requirement 5: For DUPLICATE matches, resolve identity confidence first.
-        // Only apply full overwrite update if identity confidence is strictly "confirmed" (Tier 1/2/3/4A).
-        // Never blindly apply updates to an arbitrary canonical record on "probable" similarity matches.
-        if (candidateVerdict.confidence === "confirmed" && candidateVerdict.canonicalId) {
-          const updateRes = await protestStore.updateProtest(
-            candidateVerdict.canonicalId,
-            mappedUpdates,
-            { id: "system-excel-sync", name: "Excel Inbound Sync", email: "system@scc.go.id", role: "admin" }
-          );
-          if (updateRes) {
-            updated++;
-            if (mappedStatusSumber) statusUpdated++;
-          } else {
-            skipped++;
-          }
-        } else {
-          skipped++;
-        }
-        errors.push(`[ID: ${idKejadian}] ${candidateVerdict.confidence === "confirmed" ? "Diperbarui (DUPLICATE - FULL OVERWRITE)" : "Dilewati (DUPLICATE)"}: ${candidateVerdict.reason}`);
-        if (candidateVerdict.canonicalId) {
-          cachedRegistryKeys.set(`ID:${idKejadian}`, candidateVerdict.canonicalId);
-          cachedRegistryKeys.set(candidateVerdict.fingerprints.exact, candidateVerdict.canonicalId);
-          if (candidateVerdict.fingerprints.semantic) {
-            cachedRegistryKeys.set(candidateVerdict.fingerprints.semantic, candidateVerdict.canonicalId);
-          }
-          if (candidateVerdict.fingerprints.sourceKey) {
-            cachedRegistryKeys.set(candidateVerdict.fingerprints.sourceKey, candidateVerdict.canonicalId);
-          }
-        }
-        continue;
-      }
-
-      if (candidateVerdict.action === "AMBIGUOUS") {
-        skipped++;
-        await protestStore.addToReviewQueue({
-          id: crypto.randomUUID(),
-          source_row_hash: candidateVerdict.fingerprints.exact,
-          tanggal: eventDateWib,
-          waktu: waktuNormalized,
-          lokasi,
-          organisasi_kelompok: organisasi,
-          isu_tuntutan: isu,
-          raw_payload: row,
-          ambiguity_reason: candidateVerdict.reason,
-          matched_canonical_id: candidateVerdict.canonicalId || null,
-          similarity_score: candidateVerdict.similarityScore || null,
-          status: "pending_review",
-          created_at: new Date().toISOString()
-        });
-        errors.push(`[Baris ${rowIndex}] Ditahan untuk Review (AMBIGU): ${candidateVerdict.reason}`);
-        continue;
-      }
-
       // action === "NEW": Update local caches so following rows in this batch recognize it
       sameDayExisting.push({
         id: idKejadian,
@@ -1260,12 +1206,10 @@ async function processSyncCore(
         created_at: new Date().toISOString()
       });
       cachedRegistryKeys.set(`ID:${idKejadian}`, idKejadian);
-      cachedRegistryKeys.set(candidateVerdict.fingerprints.exact, idKejadian);
-      if (candidateVerdict.fingerprints.semantic) {
-        cachedRegistryKeys.set(candidateVerdict.fingerprints.semantic, idKejadian);
-      }
-      if (candidateVerdict.fingerprints.sourceKey) {
-        cachedRegistryKeys.set(candidateVerdict.fingerprints.sourceKey, idKejadian);
+      const cleanKode = String(kodeUnras).trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+      if (cleanKode) {
+        cachedRegistryKeys.set(`UNRAS:${cleanKode}`, idKejadian);
+        cachedRegistryKeys.set(`SRC:${cleanKode}`, idKejadian);
       }
 
       // Coordinate validation: if provided, must be within valid geospatial ranges (-90..90, -180..180)

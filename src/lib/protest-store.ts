@@ -1324,6 +1324,7 @@ class ProtestDataStore {
           wilayah_hukum = ?,
           provinsi = ?,
           kota_kabupaten = ?,
+          keterangan_source = ?,
           status = ?,
           urgency = ?,
           category_id = ?,
@@ -1385,6 +1386,7 @@ class ProtestDataStore {
         updatedEvent.wilayah_hukum,
         updatedEvent.provinsi,
         updatedEvent.kota_kabupaten,
+        updatedEvent.keterangan_source ?? null,
         updatedEvent.status,
         updatedEvent.urgency,
         updatedEvent.category_id,
@@ -2366,10 +2368,6 @@ class ProtestDataStore {
           insertedByDate[tgl] = (insertedByDate[tgl] || 0) + 1;
 
           // Register canonical identity and fingerprints in registry
-          const fpExact = generateExactFingerprint(tgl, rec.lokasi, rec.organisasi_kelompok, rec.isu_tuntutan);
-          const fpSem = generateSemanticFingerprint(tgl, rec.organisasi_kelompok, rec.isu_tuntutan);
-          const srcKey = generateSourceKey(rec.kode_unras, rec.lokasi);
-
           const idEntries: IdentityRegistryEntry[] = [
             {
               id: crypto.randomUUID(),
@@ -2378,35 +2376,28 @@ class ProtestDataStore {
               identity_key: `ID:${rec.id_kejadian}`,
               event_date: tgl,
               confidence: "confirmed"
-            },
-            {
-              id: crypto.randomUUID(),
-              canonical_id: rec.id_kejadian,
-              identity_type: "fingerprint_exact",
-              identity_key: fpExact,
-              event_date: tgl,
-              confidence: "confirmed"
             }
           ];
-          if (fpSem) {
-            idEntries.push({
-              id: crypto.randomUUID(),
-              canonical_id: rec.id_kejadian,
-              identity_type: "fingerprint_semantic",
-              identity_key: fpSem,
-              event_date: tgl,
-              confidence: "confirmed"
-            });
-          }
-          if (srcKey) {
-            idEntries.push({
-              id: crypto.randomUUID(),
-              canonical_id: rec.id_kejadian,
-              identity_type: "source_id",
-              identity_key: srcKey,
-              event_date: tgl,
-              confidence: "confirmed"
-            });
+          if (rec.kode_unras) {
+            const cleanKode = String(rec.kode_unras).trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+            if (cleanKode) {
+              idEntries.push({
+                id: crypto.randomUUID(),
+                canonical_id: rec.id_kejadian,
+                identity_type: "source_id",
+                identity_key: `UNRAS:${cleanKode}`,
+                event_date: tgl,
+                confidence: "confirmed"
+              });
+              idEntries.push({
+                id: crypto.randomUUID(),
+                canonical_id: rec.id_kejadian,
+                identity_type: "source_id",
+                identity_key: `SRC:${cleanKode}`,
+                event_date: tgl,
+                confidence: "confirmed"
+              });
+            }
           }
 
           const idStmt = this.db.prepare(`
@@ -2528,6 +2519,19 @@ class ProtestDataStore {
         const rows = this.db.prepare("SELECT identity_key, canonical_id FROM unras_identity_registry").all() as Array<{ identity_key: string; canonical_id: string }>;
         for (const r of rows) {
           map.set(r.identity_key, r.canonical_id);
+        }
+        const protests = this.db.prepare("SELECT id_kejadian, kode_unras FROM protests WHERE deleted_at IS NULL").all() as Array<{ id_kejadian: string; kode_unras: string | null }>;
+        for (const p of protests) {
+          if (p.id_kejadian) {
+            map.set(`ID:${p.id_kejadian}`, p.id_kejadian);
+          }
+          if (p.kode_unras) {
+            const clean = String(p.kode_unras).trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+            if (clean) {
+              map.set(`UNRAS:${clean}`, p.id_kejadian);
+              map.set(`SRC:${clean}`, p.id_kejadian);
+            }
+          }
         }
       } catch (err) {
         console.warn("[ProtestDataStore] getAllIdentityKeys error:", err);

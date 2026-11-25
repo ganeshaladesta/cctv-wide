@@ -1252,18 +1252,32 @@ export async function upsertExcelBatchInSupabase(
         continue;
       }
 
-      // Check if row already exists in Supabase
-      const { data: existing, error: findErr } = await supabase
-        .from("protests")
-        .select("id, id_kejadian, status, validated_lat, validated_lng, actual_crowd_size, situation_summary, editorial_draft, editorial_final, is_archived, source_type")
-        .eq("id_kejadian", rec.id_kejadian)
-        .maybeSingle();
+      // Check if row already exists in Supabase by kode_unras or id_kejadian
+      let existing: any = null;
+      if (rec.kode_unras) {
+        const { data: byKode, error: errKode } = await supabase
+          .from("protests")
+          .select("id, id_kejadian, status, validated_lat, validated_lng, actual_crowd_size, situation_summary, editorial_draft, editorial_final, is_archived, source_type")
+          .eq("kode_unras", rec.kode_unras)
+          .is("deleted_at", null)
+          .maybeSingle();
+        if (!errKode && byKode) existing = byKode;
+      }
+      if (!existing && rec.id_kejadian) {
+        const { data: byId, error: findErr } = await supabase
+          .from("protests")
+          .select("id, id_kejadian, status, validated_lat, validated_lng, actual_crowd_size, situation_summary, editorial_draft, editorial_final, is_archived, source_type")
+          .eq("id_kejadian", rec.id_kejadian)
+          .is("deleted_at", null)
+          .maybeSingle();
 
-      if (findErr) {
-        lastError = findErr.message || JSON.stringify(findErr);
-        console.error("[Supabase upsert findErr]", findErr);
-        failed++;
-        continue;
+        if (findErr) {
+          lastError = findErr.message || JSON.stringify(findErr);
+          console.error("[Supabase upsert findErr]", findErr);
+          failed++;
+          continue;
+        }
+        existing = byId;
       }
 
       if (existing) {
@@ -1420,37 +1434,29 @@ export async function upsertExcelBatchInSupabase(
               event_date: tgl,
               confidence: "confirmed",
               metadata: {}
-            },
-            {
-              canonical_id: rec.id_kejadian,
-              identity_type: "fingerprint_exact",
-              identity_key: fpExact,
-              event_date: tgl,
-              confidence: "confirmed",
-              metadata: {}
             }
           ];
 
-          if (fpSem) {
-            idEntries.push({
-              canonical_id: rec.id_kejadian,
-              identity_type: "fingerprint_semantic",
-              identity_key: fpSem,
-              event_date: tgl,
-              confidence: "confirmed",
-              metadata: {}
-            });
-          }
-
-          if (srcKey) {
-            idEntries.push({
-              canonical_id: rec.id_kejadian,
-              identity_type: "source_id",
-              identity_key: srcKey,
-              event_date: tgl,
-              confidence: "confirmed",
-              metadata: {}
-            });
+          if (rec.kode_unras) {
+            const cleanKode = String(rec.kode_unras).trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+            if (cleanKode) {
+              idEntries.push({
+                canonical_id: rec.id_kejadian,
+                identity_type: "source_id",
+                identity_key: `UNRAS:${cleanKode}`,
+                event_date: tgl,
+                confidence: "confirmed",
+                metadata: {}
+              });
+              idEntries.push({
+                canonical_id: rec.id_kejadian,
+                identity_type: "source_id",
+                identity_key: `SRC:${cleanKode}`,
+                event_date: tgl,
+                confidence: "confirmed",
+                metadata: {}
+              });
+            }
           }
 
           await supabase.from("unras_identity_registry").upsert(idEntries, { onConflict: "identity_key" });
@@ -1485,6 +1491,24 @@ export async function fetchIdentityKeysFromSupabase(): Promise<Map<string, strin
       for (const r of data) {
         if (r.identity_key && r.canonical_id) {
           map.set(r.identity_key, r.canonical_id);
+        }
+      }
+    }
+
+    const { data: protestsData } = await supabase
+      .from("protests")
+      .select("id_kejadian, kode_unras")
+      .is("deleted_at", null);
+
+    if (Array.isArray(protestsData)) {
+      for (const p of protestsData) {
+        if (p.id_kejadian) map.set(`ID:${p.id_kejadian}`, p.id_kejadian);
+        if (p.kode_unras) {
+          const clean = String(p.kode_unras).trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+          if (clean) {
+            map.set(`UNRAS:${clean}`, p.id_kejadian);
+            map.set(`SRC:${clean}`, p.id_kejadian);
+          }
         }
       }
     }
