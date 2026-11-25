@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { protestStore } from '@/lib/protest-store';
 import { resolveCurrentUser, canEditProtest } from '@/lib/auth-roles';
+import { dispatchOutboundSync } from '@/lib/unras-outbound-sync';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -149,6 +150,12 @@ export async function POST(request: NextRequest, { params }: Params) {
     const updated = await protestStore.updateProtest(protest.id, {
       editorial_draft: generatedDraft
     }, user);
+
+    if (updated) {
+      dispatchOutboundSync(updated, { origin: "scc" }).catch((err) => {
+        console.warn("[Outbound Sync Background Warning]:", err);
+      });
+    }
 
     return NextResponse.json({
       success: true,

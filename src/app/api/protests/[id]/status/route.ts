@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { protestStore } from '@/lib/protest-store';
 import { resolveCurrentUser, canUpdateStatus } from '@/lib/auth-roles';
 import { ProtestStatus } from '@/lib/types/protests';
+import { dispatchOutboundSync } from '@/lib/unras-outbound-sync';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -54,6 +55,12 @@ export async function POST(request: NextRequest, { params }: Params) {
       reason,
       user
     );
+
+    if (updated) {
+      dispatchOutboundSync(updated, { origin: "scc" }).catch((err) => {
+        console.warn("[Outbound Sync Background Warning]:", err);
+      });
+    }
 
     return NextResponse.json({
       success: true,

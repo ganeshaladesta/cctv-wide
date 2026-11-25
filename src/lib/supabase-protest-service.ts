@@ -114,7 +114,12 @@ function mapRowToProtest(row: any): ProtestEvent {
     info_awal: row.info_awal || null,
     tindak_lanjut: row.tindak_lanjut || null,
     progres_asistensi: row.progres_asistensi || null,
-    realisasi: row.realisasi || null
+    realisasi: row.realisasi || null,
+    tujuan: row.tujuan || null,
+    jarak_lokasi_unras: row.jarak_lokasi_unras || null,
+    redaksi: row.redaksi || null,
+    last_outbound_synced_at: row.last_outbound_synced_at ? new Date(row.last_outbound_synced_at).toISOString() : null,
+    outbound_sync_status: (row.outbound_sync_status as any) || 'none'
   };
 }
 
@@ -437,6 +442,12 @@ export async function updateProtestInSupabase(
   if (updates.tindak_lanjut !== undefined) patch.tindak_lanjut = updates.tindak_lanjut;
   if (updates.progres_asistensi !== undefined) patch.progres_asistensi = updates.progres_asistensi;
   if (updates.realisasi !== undefined) patch.realisasi = updates.realisasi;
+  if (updates.status_sumber !== undefined) patch.status_sumber = updates.status_sumber;
+  if (updates.tujuan !== undefined) patch.tujuan = updates.tujuan;
+  if (updates.jarak_lokasi_unras !== undefined) patch.jarak_lokasi_unras = updates.jarak_lokasi_unras;
+  if (updates.redaksi !== undefined) patch.redaksi = updates.redaksi;
+  if (updates.last_outbound_synced_at !== undefined) patch.last_outbound_synced_at = updates.last_outbound_synced_at;
+  if (updates.outbound_sync_status !== undefined) patch.outbound_sync_status = updates.outbound_sync_status;
 
   if (updates.tanggal !== undefined) {
     patch.tanggal = updates.tanggal;
@@ -1256,8 +1267,54 @@ export async function upsertExcelBatchInSupabase(
       }
 
       if (existing) {
-        // SKIP EXISTING RECORD — NEVER UPDATE OR OVERWRITE OPERATOR FIELDS
-        skipped++;
+        // FULL OVERWRITE FOR MATCHED RECORD IN SUPABASE
+        const updatePayload: Record<string, any> = {
+          updated_at: now,
+          last_synced_at: now
+        };
+        if (rec.tanggal !== undefined) updatePayload.tanggal = rec.tanggal;
+        if (normStart.time !== undefined) updatePayload.waktu_mulai = normStart.time;
+        if (normEnd.time !== undefined) updatePayload.waktu_selesai = normEnd.time;
+        if (rec.event_datetime !== undefined) updatePayload.event_datetime = rec.event_datetime;
+        if (rec.lokasi !== undefined) updatePayload.lokasi = rec.lokasi;
+        if (rec.titik_kumpul !== undefined) updatePayload.titik_kumpul = rec.titik_kumpul;
+        if (rec.sasaran_aksi !== undefined) updatePayload.sasaran_aksi = rec.sasaran_aksi;
+        if (rec.isu_tuntutan !== undefined) updatePayload.isu_tuntutan = rec.isu_tuntutan;
+        if (rec.estimasi_massa_source !== undefined) updatePayload.estimasi_massa_source = rec.estimasi_massa_source;
+        if (rec.organisasi_kelompok !== undefined) updatePayload.organisasi_kelompok = rec.organisasi_kelompok;
+        if (rec.korlap_pimpinan !== undefined) updatePayload.korlap_pimpinan = rec.korlap_pimpinan;
+        if (rec.wilayah_hukum !== undefined) updatePayload.wilayah_hukum = rec.wilayah_hukum;
+        if (rec.provinsi !== undefined) updatePayload.provinsi = rec.provinsi;
+        if (rec.kota_kabupaten !== undefined) updatePayload.kota_kabupaten = rec.kota_kabupaten;
+        if (rec.keterangan_source !== undefined) updatePayload.keterangan_source = rec.keterangan_source;
+        if ((rec as any).status !== undefined) updatePayload.status = (rec as any).status;
+        if ((rec as any).status_sumber !== undefined) updatePayload.status_sumber = (rec as any).status_sumber;
+        if ((rec as any).regional !== undefined) updatePayload.regional = (rec as any).regional;
+        if ((rec as any).kategori_isu !== undefined) updatePayload.kategori_isu = (rec as any).kategori_isu;
+        if ((rec as any).dampak !== undefined) updatePayload.dampak = (rec as any).dampak;
+        if ((rec as any).keterangan_dampak !== undefined) updatePayload.keterangan_dampak = (rec as any).keterangan_dampak;
+        if ((rec as any).nama_pelapor !== undefined) updatePayload.nama_pelapor = (rec as any).nama_pelapor;
+        if ((rec as any).info_awal !== undefined) updatePayload.info_awal = (rec as any).info_awal;
+        if ((rec as any).tindak_lanjut !== undefined) updatePayload.tindak_lanjut = (rec as any).tindak_lanjut;
+        if ((rec as any).progres_asistensi !== undefined) updatePayload.progres_asistensi = (rec as any).progres_asistensi;
+        if ((rec as any).realisasi !== undefined) updatePayload.realisasi = (rec as any).realisasi;
+        if ((rec as any).tujuan !== undefined) updatePayload.tujuan = (rec as any).tujuan;
+        if ((rec as any).jarak_lokasi_unras !== undefined) updatePayload.jarak_lokasi_unras = (rec as any).jarak_lokasi_unras;
+        if ((rec as any).redaksi !== undefined) {
+          updatePayload.redaksi = (rec as any).redaksi;
+          updatePayload.editorial_draft = (rec as any).redaksi;
+        }
+        if ((rec as any).kp_kpw !== undefined) updatePayload.kp_kpw = (rec as any).kp_kpw;
+        if (rec.raw_source_payload !== undefined) updatePayload.raw_source_payload = rec.raw_source_payload;
+
+        const { error: updErr } = await supabase.from("protests").update(updatePayload).eq("id", existing.id);
+        if (updErr) {
+          lastError = updErr.message || JSON.stringify(updErr);
+          console.error("[Supabase upsert updErr]", updErr);
+          failed++;
+        } else {
+          updated++;
+        }
         continue;
       }
 
@@ -1315,6 +1372,19 @@ export async function upsertExcelBatchInSupabase(
       if ((rec as any).regional) (insertPayload as any).regional = (rec as any).regional;
       if ((rec as any).kategori_isu) (insertPayload as any).kategori_isu = (rec as any).kategori_isu;
       if ((rec as any).dampak) (insertPayload as any).dampak = (rec as any).dampak;
+      if ((rec as any).keterangan_dampak) (insertPayload as any).keterangan_dampak = (rec as any).keterangan_dampak;
+      if ((rec as any).nama_pelapor) (insertPayload as any).nama_pelapor = (rec as any).nama_pelapor;
+      if ((rec as any).info_awal) (insertPayload as any).info_awal = (rec as any).info_awal;
+      if ((rec as any).tindak_lanjut) (insertPayload as any).tindak_lanjut = (rec as any).tindak_lanjut;
+      if ((rec as any).progres_asistensi) (insertPayload as any).progres_asistensi = (rec as any).progres_asistensi;
+      if ((rec as any).realisasi) (insertPayload as any).realisasi = (rec as any).realisasi;
+      if ((rec as any).tujuan) (insertPayload as any).tujuan = (rec as any).tujuan;
+      if ((rec as any).jarak_lokasi_unras) (insertPayload as any).jarak_lokasi_unras = (rec as any).jarak_lokasi_unras;
+      if ((rec as any).redaksi) {
+        (insertPayload as any).redaksi = (rec as any).redaksi;
+        (insertPayload as any).editorial_draft = (rec as any).redaksi;
+      }
+      if ((rec as any).kp_kpw) (insertPayload as any).kp_kpw = (rec as any).kp_kpw;
 
       const { error: insErr } = await supabase.from("protests").insert(insertPayload);
       if (insErr) {
@@ -1395,7 +1465,7 @@ export async function upsertExcelBatchInSupabase(
     }
   }
 
-  return { inserted, updated: 0, skipped, failed, error: lastError };
+  return { inserted, updated, skipped, failed, error: lastError };
 }
 
 /**
