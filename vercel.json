@@ -4,11 +4,8 @@
     {
       "path": "/api/protests/sync",
       "schedule": "0 22 * * *"
-    },
-    {
-      "path": "/api/integrations/unras/outbound-worker",
-      "schedule": "* * * * *"
     }
   ]
 }
+
 

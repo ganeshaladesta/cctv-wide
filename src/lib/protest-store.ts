@@ -3866,11 +3866,9 @@ class ProtestDataStore {
 
     const selectStmt = this.db.prepare(`
       SELECT * FROM unras_outbound_jobs
-      WHERE (
-        status = 'pending'
-        OR (status = 'failed' AND attempts < max_attempts AND (next_retry_at IS NULL OR next_retry_at <= ?))
-      )
-      AND (locked_at IS NULL OR locked_at < ?)
+      WHERE status = 'pending'
+        AND (next_retry_at IS NULL OR next_retry_at <= ?)
+        AND (locked_at IS NULL OR locked_at < ?)
       ORDER BY created_at ASC
       LIMIT 1
     `);
@@ -4007,6 +4005,27 @@ class ProtestDataStore {
       WHERE status = 'processing' AND locked_at < ?
     `).run(new Date().toISOString(), threshold);
     return Number(result.changes || 0);
+  }
+
+  hasRecoverablePendingJobsLocal(graceWindowMs = 8000): boolean {
+    if (!this.db) return false;
+    const now = new Date().toISOString();
+    const createdBefore = new Date(Date.now() - graceWindowMs).toISOString();
+    const staleLockThreshold = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+
+    const row = this.db.prepare(`
+      SELECT id FROM unras_outbound_jobs
+      WHERE (
+        (status = 'pending' AND (locked_at IS NULL OR locked_at < ?) AND (
+          (attempts = 0 AND created_at <= ?)
+          OR (attempts > 0 AND (next_retry_at IS NULL OR next_retry_at <= ?))
+        ))
+        OR (status = 'processing' AND locked_at < ?)
+      )
+      LIMIT 1
+    `).get(staleLockThreshold, createdBefore, now, staleLockThreshold) as any;
+
+    return Boolean(row);
   }
 }
 

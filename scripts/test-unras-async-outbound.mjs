@@ -13,8 +13,14 @@ import {
   processOutboundJob,
   runOutboundSyncWorker,
   getLatestOutboundJobByProtestId,
-  retryOutboundJob
+  retryOutboundJob,
+  recoverPendingOutboundJobs,
+  verifyAndRecoverUnclaimedJob
 } from "../src/lib/unras-outbound-queue.ts";
+import { POST as workerPostHandler } from "../src/app/api/integrations/unras/outbound-worker/route.ts";
+import { NextRequest } from "next/server";
+import fs from "node:fs";
+import path from "node:path";
 import {
   buildOutboundPayload,
   mapSCCStatusToExcelStatus
@@ -436,7 +442,7 @@ test("14. Frontend distinguishes SCC save success from Excel sync success", () =
   assert.notEqual(sccSavedResponse.outbound_sync.status, "success", "Excel sync must remain pending until worker confirms execution");
 });
 
-test("15. Ambiguous HTTP timeout enforces extended backoff window (>=3 mins) to prevent duplicate execution", async () => {
+test("15. Ambiguous HTTP timeout blocks automatic retry to prevent duplicate delivery when Power Automate outcome is unknown", async () => {
   // Simulate an endpoint that does not respond in time (mock hanging server)
   const hangingServer = http.createServer((req, res) => {
     // Deliberately do not respond, causing client AbortError / timeout
@@ -458,30 +464,224 @@ test("15. Ambiguous HTTP timeout enforces extended backoff window (>=3 mins) to 
       status: "ongoing"
     });
 
-    const enqueueRes = await enqueueOutboundSync(event, { origin: "scc" });
+    await enqueueOutboundSync(event, { origin: "scc" });
     const claimed = await claimPendingOutboundJob("worker-ambig");
     assert.ok(claimed);
 
-    // Overwrite controller timeout in test via fast timeout
-    const startTime = Date.now();
-    const execRes = await processOutboundJob({
-      ...claimed,
-      // Pass a job with dummy URL that aborts immediately or times out
-    });
+    // Execute with 200ms timeout to simulate ambiguous timeout after sending POST to Power Automate
+    const execRes = await processOutboundJob(claimed, { timeoutMs: 200 });
+    assert.equal(execRes.success, false);
+    assert.equal(execRes.status, "failed");
 
-    // Verify latest job status
+    // Verify latest job status is marked failed (NOT pending) so automatic retry never sends a duplicate request
     const latestJob = await getLatestOutboundJobByProtestId(event.id);
     assert.ok(latestJob);
-    assert.equal(latestJob.status, "pending");
-    assert.ok(latestJob.next_retry_at);
+    assert.equal(latestJob.status, "failed", "Ambiguous timeout must mark job failed to halt automatic retry");
+    assert.equal(latestJob.next_retry_at, null, "Ambiguous timeout must not schedule automatic retry");
+    assert.match(latestJob.last_error || "", /ambiguous timeout|duplikat/i);
 
-    // Verify backoff is at least 2 minutes into the future
-    const retryTime = new Date(latestJob.next_retry_at).getTime();
-    const diffMs = retryTime - Date.now();
-    assert.ok(diffMs >= 2 * 60 * 1000, `Ambiguous timeout backoff must be at least 2 minutes to prevent Excel collision, got ${diffMs}ms`);
-    assert.match(latestJob.last_error || "", /ambiguous timeout|Timeout/);
+    // Verify another worker run cannot auto-claim the ambiguous-timeout job
+    const reClaim = await claimPendingOutboundJob("worker-ambig-2");
+    assert.equal(reClaim, null, "Worker must not auto-claim an ambiguous timeout job");
   } finally {
     delete process.env.POWER_AUTOMATE_OUTBOUND_URL;
     hangingServer.close();
   }
 });
+
+test("16. Pending job recovery mechanism recovers unclaimed pending jobs when webhook fails", async () => {
+  let receivedBody = null;
+  const mockServer = http.createServer((req, res) => {
+    let raw = "";
+    req.on("data", (chunk) => { raw += chunk; });
+    req.on("end", () => {
+      receivedBody = JSON.parse(raw);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ status: "ok" }));
+    });
+  });
+
+  await new Promise((resolve) => mockServer.listen(0, "127.0.0.1", resolve));
+  const port = mockServer.address().port;
+  process.env.POWER_AUTOMATE_OUTBOUND_URL = `http://127.0.0.1:${port}/recovery-test`;
+
+  try {
+    const testId = `test-recovery-${Date.now()}`;
+    const event = await protestStore.createProtest({
+      id_kejadian: `KEJ-${testId}`,
+      kode_unras: `UNR-${testId}`,
+      tanggal: "2026-11-25",
+      lokasi: "Istana Merdeka",
+      kota_kabupaten: "Jakarta Pusat",
+      isu_tuntutan: "Recovery Queue Test",
+      status: "ongoing"
+    });
+
+    const enqueueRes = await enqueueOutboundSync(event, { origin: "scc" });
+    assert.ok(enqueueRes.job);
+
+    // Simulate job sitting unclaimed for >10s because Supabase webhook delivery failed
+    const tenSecondsAgo = new Date(Date.now() - 12000).toISOString();
+    protestStore.db.prepare("UPDATE unras_outbound_jobs SET created_at = ? WHERE id = ?").run(
+      tenSecondsAgo,
+      enqueueRes.job.id
+    );
+
+    const recoveryRes = await recoverPendingOutboundJobs({
+      graceWindowMs: 8000,
+      maxJobs: 1,
+      trigger: "test_missed_webhook"
+    });
+
+    assert.equal(recoveryRes.recovered, true, "Recovery must detect and process unclaimed pending job");
+    assert.equal(recoveryRes.workerResult?.succeeded, 1);
+    assert.ok(receivedBody);
+    assert.equal(receivedBody.id_unras, `UNR-${testId}`);
+
+    const latestJob = await getLatestOutboundJobByProtestId(event.id);
+    assert.equal(latestJob?.status, "success");
+  } finally {
+    delete process.env.POWER_AUTOMATE_OUTBOUND_URL;
+    mockServer.close();
+  }
+});
+
+test("17. Supabase Database Webhook POST triggers worker on INSERT with CRON_SECRET and ignores non-pending UPDATE", async () => {
+  const mockServer = http.createServer((req, res) => {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ status: "ok" }));
+  });
+
+  await new Promise((resolve) => mockServer.listen(0, "127.0.0.1", resolve));
+  const port = mockServer.address().port;
+  process.env.POWER_AUTOMATE_OUTBOUND_URL = `http://127.0.0.1:${port}/webhook-test`;
+  process.env.CRON_SECRET = "test-secret-webhook-999";
+
+  try {
+    const testId = `test-db-webhook-${Date.now()}`;
+    const event = await protestStore.createProtest({
+      id_kejadian: `KEJ-${testId}`,
+      kode_unras: `UNR-${testId}`,
+      tanggal: "2026-11-25",
+      lokasi: "Bundaran HI",
+      kota_kabupaten: "Jakarta Pusat",
+      isu_tuntutan: "Supabase Webhook Trigger Test",
+      status: "ongoing"
+    });
+
+    const enqueueRes = await enqueueOutboundSync(event, { origin: "scc" });
+    assert.ok(enqueueRes.job);
+
+    // 1. Unauthorized webhook request must return 401
+    const unauthReq = new NextRequest("http://localhost/api/integrations/unras/outbound-worker", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer wrong-token" },
+      body: JSON.stringify({ type: "INSERT", table: "unras_outbound_jobs", record: enqueueRes.job })
+    });
+    const unauthRes = await workerPostHandler(unauthReq);
+    assert.equal(unauthRes.status, 401, "Invalid CRON_SECRET must be rejected with 401");
+
+    // 2. Non-pending UPDATE webhook must be skipped safely
+    const updateReq = new NextRequest("http://localhost/api/integrations/unras/outbound-worker", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer test-secret-webhook-999" },
+      body: JSON.stringify({
+        type: "UPDATE",
+        table: "unras_outbound_jobs",
+        record: { ...enqueueRes.job, status: "processing" }
+      })
+    });
+    const updateRes = await workerPostHandler(updateReq);
+    const updateJson = await updateRes.json();
+    assert.equal(updateJson.skipped, true, "Non-pending UPDATE webhook must be skipped");
+
+    // 3. Valid INSERT webhook triggers worker and completes job
+    const insertReq = new NextRequest("http://localhost/api/integrations/unras/outbound-worker", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer test-secret-webhook-999" },
+      body: JSON.stringify({
+        type: "INSERT",
+        table: "unras_outbound_jobs",
+        schema: "public",
+        record: enqueueRes.job,
+        old_record: null
+      })
+    });
+    const insertRes = await workerPostHandler(insertReq);
+    assert.equal(insertRes.status, 200);
+    const insertJson = await insertRes.json();
+    assert.equal(insertJson.success, true);
+    assert.equal(insertJson.trigger, "supabase_webhook_insert");
+    assert.equal(insertJson.succeeded, 1);
+
+    const latestJob = await getLatestOutboundJobByProtestId(event.id);
+    assert.equal(latestJob?.status, "success");
+  } finally {
+    delete process.env.POWER_AUTOMATE_OUTBOUND_URL;
+    delete process.env.CRON_SECRET;
+    mockServer.close();
+  }
+});
+
+test("18. Server-side post-enqueue fallback (verifyAndRecoverUnclaimedJob) recovers job without browser polling if pg_net webhook fails", async () => {
+  const mockServer = http.createServer((req, res) => {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ status: "ok" }));
+  });
+
+  await new Promise((resolve) => mockServer.listen(0, "127.0.0.1", resolve));
+  const port = mockServer.address().port;
+  process.env.POWER_AUTOMATE_OUTBOUND_URL = `http://127.0.0.1:${port}/post-save-fallback`;
+
+  try {
+    const testId = `test-no-poll-${Date.now()}`;
+    const event = await protestStore.createProtest({
+      id_kejadian: `KEJ-${testId}`,
+      kode_unras: `UNR-${testId}`,
+      tanggal: "2026-11-25",
+      lokasi: "Kemenkeu",
+      kota_kabupaten: "Jakarta Pusat",
+      isu_tuntutan: "Server Fallback Without Browser Poll",
+      status: "ongoing"
+    });
+
+    const enqueueRes = await enqueueOutboundSync(event, { origin: "scc" });
+    assert.ok(enqueueRes.job);
+
+    // Simulate job aged 2s and verifyAndRecoverUnclaimedJob running with 50ms delay
+    const twoSecondsAgo = new Date(Date.now() - 2000).toISOString();
+    protestStore.db.prepare("UPDATE unras_outbound_jobs SET created_at = ? WHERE id = ?").run(
+      twoSecondsAgo,
+      enqueueRes.job.id
+    );
+
+    const fallbackRes = await verifyAndRecoverUnclaimedJob(enqueueRes.job.id, {
+      delayMs: 50,
+      trigger: "test_server_after_fallback"
+    });
+    assert.equal(fallbackRes.recovered, true);
+
+    const latestJob = await getLatestOutboundJobByProtestId(event.id);
+    assert.equal(latestJob?.status, "success");
+  } finally {
+    delete process.env.POWER_AUTOMATE_OUTBOUND_URL;
+    mockServer.close();
+  }
+});
+
+test("19. SQL setup script (supabase/setup_unras_outbound_webhook.sql) is idempotent, uses pg_net + Vault, and only triggers AFTER INSERT", () => {
+  const sqlPath = path.resolve(process.cwd(), "supabase/setup_unras_outbound_webhook.sql");
+  assert.ok(fs.existsSync(sqlPath), "supabase/setup_unras_outbound_webhook.sql must exist");
+  const sql = fs.readFileSync(sqlPath, "utf8");
+
+  assert.match(sql, /CREATE EXTENSION IF NOT EXISTS pg_net/i);
+  assert.match(sql, /vault\.decrypted_secrets/i);
+  assert.match(sql, /net\.http_post/i);
+  assert.match(sql, /AFTER INSERT ON public\.unras_outbound_jobs/i);
+  assert.doesNotMatch(sql, /AFTER INSERT OR UPDATE/i, "Must never trigger on UPDATE");
+  assert.doesNotMatch(sql, /AFTER UPDATE/i, "Must never trigger on UPDATE");
+  assert.match(sql, /DROP TRIGGER IF EXISTS trg_unras_outbound_jobs_after_insert_webhook/i);
+});
+
+
+

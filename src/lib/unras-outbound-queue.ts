@@ -21,6 +21,39 @@ import {
   OutboundSyncResult
 } from "./unras-outbound-sync";
 
+export const DEFAULT_OUTBOUND_HTTP_TIMEOUT_MS = 50000; // 50s timeout to accommodate ~40s Power Automate Excel processing within Vercel 60s maxDuration
+const PERMANENT_FAILED_SENTINEL_RETRY_AT = "9999-12-31T23:59:59.000Z";
+const STALE_LOCK_WINDOW_MS = 5 * 60 * 1000;
+
+function mapSupabaseRowToJob(row: any): UnrasOutboundJob {
+  const rawNextRetry = row.next_retry_at ? String(row.next_retry_at) : null;
+  const normalizedNextRetry =
+    rawNextRetry && rawNextRetry.startsWith("9999-") ? null : rawNextRetry;
+
+  // If status is 'pending', locked_at in Supabase may hold a backoff guard timestamp (next_retry_at - 5m); normalize to null for domain consumers
+  const normalizedLockedAt =
+    row.status === "pending" ? null : (row.locked_at ? String(row.locked_at) : null);
+
+  return {
+    id: row.id,
+    protest_id: row.protest_id,
+    kode_unras: row.kode_unras,
+    id_kejadian: row.id_kejadian,
+    payload: typeof row.payload === "string" ? JSON.parse(row.payload) : row.payload,
+    status: row.status,
+    attempts: row.attempts,
+    max_attempts: row.max_attempts,
+    last_error: row.last_error,
+    correlation_id: row.correlation_id,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    started_at: row.started_at,
+    processed_at: row.processed_at,
+    next_retry_at: normalizedNextRetry,
+    locked_at: normalizedLockedAt
+  };
+}
+
 export interface EnqueueResult {
   queued: boolean;
   job?: UnrasOutboundJob;
@@ -171,7 +204,9 @@ export async function enqueueOutboundSync(
           p_correlation_id: newJob.correlation_id
         });
 
-        if (rpcErr) {
+        if (!rpcErr && rpcRes && typeof rpcRes === "object" && "job_id" in rpcRes && rpcRes.job_id) {
+          newJob.id = String(rpcRes.job_id);
+        } else if (rpcErr) {
           // Fallback to table insert if RPC not yet created in Supabase
           const { error: insertErr } = await supabase
             .from("unras_outbound_jobs")
@@ -242,35 +277,23 @@ export async function claimPendingOutboundJob(workerId = "worker-default"): Prom
     const supabase = getSupabaseAdminClient();
     if (supabase) {
       try {
-        // First try calling the RPC claim_unras_outbound_job
+        // First try calling the RPC claim_unras_outbound_job (uses FOR UPDATE SKIP LOCKED)
         const { data: rpcData, error: rpcError } = await supabase.rpc("claim_unras_outbound_job");
         if (!rpcError && rpcData && rpcData.length > 0) {
-          const row = rpcData[0];
-          return {
-            id: row.id,
-            protest_id: row.protest_id,
-            kode_unras: row.kode_unras,
-            id_kejadian: row.id_kejadian,
-            payload: typeof row.payload === "string" ? JSON.parse(row.payload) : row.payload,
-            status: row.status,
-            attempts: row.attempts,
-            max_attempts: row.max_attempts,
-            last_error: row.last_error,
-            correlation_id: row.correlation_id,
-            created_at: row.created_at,
-            updated_at: row.updated_at,
-            started_at: row.started_at,
-            processed_at: row.processed_at,
-            next_retry_at: row.next_retry_at,
-            locked_at: row.locked_at
-          };
+          return mapSupabaseRowToJob(rpcData[0]);
         }
 
-        // Fallback: Two-step atomic query in Supabase
+        if (!rpcError) {
+          // RPC succeeded and returned 0 rows: no eligible pending job in Supabase
+          return protestStore.claimOutboundJobLocal(workerId);
+        }
+
+        // Fallback if RPC error: Two-step atomic query in Supabase
         const { data: pendingRows } = await supabase
           .from("unras_outbound_jobs")
           .select("*")
-          .or(`status.eq.pending,and(status.eq.failed,attempts.lt.5,next_retry_at.lte.${now})`)
+          .eq("status", "pending")
+          .or(`next_retry_at.is.null,next_retry_at.lte.${now}`)
           .or(`locked_at.is.null,locked_at.lt.${staleThreshold}`)
           .order("created_at", { ascending: true })
           .limit(1);
@@ -292,24 +315,7 @@ export async function claimPendingOutboundJob(workerId = "worker-default"): Prom
             .single();
 
           if (!claimErr && claimedRows) {
-            return {
-              id: claimedRows.id,
-              protest_id: claimedRows.protest_id,
-              kode_unras: claimedRows.kode_unras,
-              id_kejadian: claimedRows.id_kejadian,
-              payload: typeof claimedRows.payload === "string" ? JSON.parse(claimedRows.payload) : claimedRows.payload,
-              status: claimedRows.status,
-              attempts: claimedRows.attempts,
-              max_attempts: claimedRows.max_attempts,
-              last_error: claimedRows.last_error,
-              correlation_id: claimedRows.correlation_id,
-              created_at: claimedRows.created_at,
-              updated_at: claimedRows.updated_at,
-              started_at: claimedRows.started_at,
-              processed_at: claimedRows.processed_at,
-              next_retry_at: claimedRows.next_retry_at,
-              locked_at: claimedRows.locked_at
-            };
+            return mapSupabaseRowToJob(claimedRows);
           }
         }
       } catch (err: any) {
@@ -326,18 +332,34 @@ export async function claimPendingOutboundJob(workerId = "worker-default"): Prom
  * Updates status and metadata of an outbound job in both Supabase and SQLite.
  */
 export async function updateOutboundJob(jobId: string, updates: Partial<UnrasOutboundJob>): Promise<void> {
+  const nowIso = new Date().toISOString();
   const patch: Record<string, any> = {
     ...updates,
-    updated_at: new Date().toISOString()
+    updated_at: nowIso
   };
 
   if (isSupabaseConfigured()) {
     const supabase = getSupabaseAdminClient();
     if (supabase) {
       try {
+        const supabasePatch: Record<string, any> = { ...patch };
+        // Ensure Migration 013 claim_unras_outbound_job() never auto-claims permanently failed jobs
+        if (supabasePatch.status === "failed" && !supabasePatch.next_retry_at) {
+          supabasePatch.next_retry_at = PERMANENT_FAILED_SENTINEL_RETRY_AT;
+        }
+        // Ensure Migration 013 claim_unras_outbound_job() respects future next_retry_at on pending jobs
+        if (
+          supabasePatch.status === "pending" &&
+          supabasePatch.next_retry_at &&
+          new Date(supabasePatch.next_retry_at).getTime() > Date.now() + 1000
+        ) {
+          const retryEpoch = new Date(supabasePatch.next_retry_at).getTime();
+          supabasePatch.locked_at = new Date(retryEpoch - STALE_LOCK_WINDOW_MS).toISOString();
+        }
+
         await supabase
           .from("unras_outbound_jobs")
-          .update(patch)
+          .update(supabasePatch)
           .eq("id", jobId);
       } catch (err: any) {
         console.warn("[OutboundQueue] Supabase job update warning:", err?.message || err);
@@ -353,10 +375,14 @@ export async function updateOutboundJob(jobId: string, updates: Partial<UnrasOut
 /**
  * Executes transmission of a claimed outbound job to Power Automate.
  */
-export async function processOutboundJob(job: UnrasOutboundJob): Promise<OutboundSyncResult> {
+export async function processOutboundJob(
+  job: UnrasOutboundJob,
+  options: { timeoutMs?: number } = {}
+): Promise<OutboundSyncResult> {
   const startTime = Date.now();
   const correlationId = job.correlation_id || `job-exec-${Date.now()}`;
   const outboundUrl = process.env.POWER_AUTOMATE_OUTBOUND_URL || process.env.UNRAS_OUTBOUND_WEBHOOK_URL;
+  const timeoutMs = options.timeoutMs || Number(process.env.OUTBOUND_HTTP_TIMEOUT_MS) || DEFAULT_OUTBOUND_HTTP_TIMEOUT_MS;
 
   if (!outboundUrl || outboundUrl.trim() === "") {
     const errorMsg = "Power Automate outbound webhook URL is not configured (POWER_AUTOMATE_OUTBOUND_URL).";
@@ -393,8 +419,8 @@ export async function processOutboundJob(job: UnrasOutboundJob): Promise<Outboun
   }
 
   const controller = new AbortController();
-  // 45s timeout: comfortably accommodates Power Automate execution (~38s) within Vercel 60s limit
-  const timeoutId = setTimeout(() => controller.abort(), 45000);
+  // 50s default timeout: comfortably accommodates Power Automate execution (~40s) within Vercel 60s maxDuration
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const response = await fetch(outboundUrl, {
@@ -575,8 +601,9 @@ export async function processOutboundJob(job: UnrasOutboundJob): Promise<Outboun
   } catch (err: any) {
     clearTimeout(timeoutId);
     const isAbort = err.name === "AbortError";
+    const timeoutSec = Math.max(1, Math.round(timeoutMs / 1000));
     const errorMsg = isAbort
-      ? "Batas waktu koneksi ke Power Automate habis (45 detik timeout). Alur kemungkinan telah menerima request dan sedang memproses Excel Table3 (ambiguous timeout). Pengulangan otomatis ditahan untuk mencegah duplikasi eksekusi."
+      ? `Batas waktu koneksi ke Power Automate habis (${timeoutSec} detik timeout). Request telah dikirim namun status eksekusi Excel Table3 tidak diketahui (ambiguous timeout). Retry otomatis dinonaktifkan untuk mencegah pengiriman duplikat.`
       : (err.message || String(err));
 
     return await handleJobFailure(job, errorMsg, 504, correlationId, startTime, isAbort);
@@ -585,6 +612,9 @@ export async function processOutboundJob(job: UnrasOutboundJob): Promise<Outboun
 
 /**
  * Handles retry calculation with exponential backoff or marks permanent failure.
+ * CRITICAL SAFETY RULE:
+ * When the outcome of the Power Automate request is unknown (isAmbiguousTimeout = true),
+ * automatic retry MUST be blocked to prevent duplicate delivery to Excel Table3.
  */
 async function handleJobFailure(
   job: UnrasOutboundJob,
@@ -595,13 +625,50 @@ async function handleJobFailure(
   isAmbiguousTimeout: boolean = false
 ): Promise<OutboundSyncResult> {
   const durationMs = Date.now() - startTime;
+
+  // Ambiguous HTTP timeout: outcome in Power Automate is unknown.
+  // Never automatically retry an unknown outcome to prevent duplicate row updates.
+  if (isAmbiguousTimeout) {
+    await updateOutboundJob(job.id, {
+      status: "failed",
+      next_retry_at: null,
+      last_error: errorMsg,
+      processed_at: new Date().toISOString(),
+      locked_at: null
+    });
+
+    try {
+      await protestStore.updateProtest(job.protest_id, {
+        outbound_sync_status: "failed"
+      }, { id: "system-worker", name: "Outbound Worker", email: "system@scc.go.id", role: "admin" });
+    } catch {}
+
+    logQueueDiagnostic({
+      correlation_id: correlationId,
+      event: "unras.job.ambiguous_timeout_halted",
+      job_id: job.id,
+      protest_id: job.protest_id,
+      id_unras: job.kode_unras,
+      result: "failed",
+      http_status: httpStatus,
+      attempts: job.attempts,
+      duration_ms: durationMs,
+      error: errorMsg
+    });
+
+    return {
+      success: false,
+      status: "failed",
+      http_status: httpStatus,
+      error: errorMsg,
+      duration_ms: durationMs
+    };
+  }
+
   const isRetryable = job.attempts < job.max_attempts;
 
   if (isRetryable) {
-    // If ambiguous timeout, enforce a minimum 3-minute backoff window to prevent concurrent write collisions
-    const backoffMs = isAmbiguousTimeout
-      ? Math.max(3 * 60 * 1000, Math.pow(2, job.attempts) * 30000)
-      : Math.pow(2, job.attempts) * 10000;
+    const backoffMs = Math.pow(2, job.attempts) * 10000;
     const nextRetry = new Date(Date.now() + backoffMs).toISOString();
 
     await updateOutboundJob(job.id, {
@@ -636,6 +703,7 @@ async function handleJobFailure(
   // Max attempts exceeded: mark permanently failed
   await updateOutboundJob(job.id, {
     status: "failed",
+    next_retry_at: null,
     last_error: `Gagal permanen setelah ${job.attempts} percobaan. Terakhir: ${errorMsg}`,
     processed_at: new Date().toISOString(),
     locked_at: null
@@ -670,6 +738,175 @@ async function handleJobFailure(
 }
 
 /**
+ * Resets stale processing locks (>5 minutes) in both Supabase and local SQLite.
+ */
+export async function resetStaleOutboundJobLocks(timeoutMs = STALE_LOCK_WINDOW_MS): Promise<number> {
+  let resetCount = 0;
+  const threshold = new Date(Date.now() - timeoutMs).toISOString();
+  const nowIso = new Date().toISOString();
+
+  if (isSupabaseConfigured()) {
+    const supabase = getSupabaseAdminClient();
+    if (supabase) {
+      try {
+        const { data } = await supabase
+          .from("unras_outbound_jobs")
+          .update({
+            status: "pending",
+            locked_at: null,
+            updated_at: nowIso
+          })
+          .eq("status", "processing")
+          .lt("locked_at", threshold)
+          .select("id");
+        if (data) {
+          resetCount += data.length;
+        }
+      } catch (err: any) {
+        console.warn("[OutboundQueue] Supabase resetStaleLocks warning:", err?.message || err);
+      }
+    }
+  }
+
+  try {
+    resetCount += protestStore.resetStaleOutboundJobLocksLocal(timeoutMs);
+  } catch {}
+
+  return resetCount;
+}
+
+/**
+ * Checks whether there are pending outbound jobs that need recovery
+ * (e.g., missed by Supabase Database Webhook or due for scheduled retry).
+ */
+export async function hasRecoverablePendingJobs(graceWindowMs = 8000): Promise<boolean> {
+  const nowIso = new Date().toISOString();
+  const createdBeforeIso = new Date(Date.now() - graceWindowMs).toISOString();
+  const staleThresholdIso = new Date(Date.now() - STALE_LOCK_WINDOW_MS).toISOString();
+
+  if (isSupabaseConfigured()) {
+    const supabase = getSupabaseAdminClient();
+    if (supabase) {
+      try {
+        // 1. Check stale processing jobs
+        const { data: staleRows } = await supabase
+          .from("unras_outbound_jobs")
+          .select("id")
+          .eq("status", "processing")
+          .lt("locked_at", staleThresholdIso)
+          .limit(1);
+        if (staleRows && staleRows.length > 0) return true;
+
+        // 2. Check unclaimed new pending jobs older than graceWindowMs (missed webhook)
+        const { data: missedRows } = await supabase
+          .from("unras_outbound_jobs")
+          .select("id")
+          .eq("status", "pending")
+          .eq("attempts", 0)
+          .lte("created_at", createdBeforeIso)
+          .or(`locked_at.is.null,locked_at.lt.${staleThresholdIso}`)
+          .limit(1);
+        if (missedRows && missedRows.length > 0) return true;
+
+        // 3. Check due retry pending jobs (attempts > 0 and next_retry_at <= now)
+        const { data: retryRows } = await supabase
+          .from("unras_outbound_jobs")
+          .select("id")
+          .eq("status", "pending")
+          .gt("attempts", 0)
+          .or(`next_retry_at.is.null,next_retry_at.lte.${nowIso}`)
+          .or(`locked_at.is.null,locked_at.lt.${staleThresholdIso}`)
+          .limit(1);
+        if (retryRows && retryRows.length > 0) return true;
+      } catch (err: any) {
+        console.warn("[OutboundQueue] Supabase hasRecoverablePendingJobs warning:", err?.message || err);
+      }
+    }
+  }
+
+  try {
+    return protestStore.hasRecoverablePendingJobsLocal(graceWindowMs);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Recovery mechanism for pending jobs that were missed due to webhook failure,
+ * network interruption, or elapsed retry backoff timer.
+ */
+export async function recoverPendingOutboundJobs(options: {
+  graceWindowMs?: number;
+  maxJobs?: number;
+  timeBudgetMs?: number;
+  trigger?: string;
+} = {}): Promise<{
+  recovered: boolean;
+  reason: string;
+  workerResult?: WorkerExecutionResult;
+}> {
+  const graceWindowMs = options.graceWindowMs ?? 8000;
+  const resetCount = await resetStaleOutboundJobLocks();
+  const hasPending = await hasRecoverablePendingJobs(graceWindowMs);
+
+  if (!hasPending && resetCount === 0) {
+    return {
+      recovered: false,
+      reason: "Tidak ada job pending tertunda atau stale lock yang memerlukan recovery."
+    };
+  }
+
+  const workerResult = await runOutboundSyncWorker({
+    maxJobs: options.maxJobs || 2,
+    timeBudgetMs: options.timeBudgetMs || 52000,
+    workerId: `worker-recovery-${options.trigger || "auto"}`
+  });
+
+  return {
+    recovered: workerResult.processed > 0 || resetCount > 0,
+    reason: `Recovery selesai (${options.trigger || "auto"}): ${workerResult.processed} job diproses, ${resetCount} stale lock dipulihkan.`,
+    workerResult
+  };
+}
+
+/**
+ * Server-side post-enqueue fallback check (runs inside Next.js after() lifecycle).
+ * Waits a brief grace period (default 5s) for the PostgreSQL pg_net AFTER INSERT trigger
+ * to invoke the outbound-worker and claim the job. If pg_net failed or is unavailable
+ * and the job is still unclaimed after the delay, recovers and processes it on the server
+ * without requiring any browser polling.
+ */
+export async function verifyAndRecoverUnclaimedJob(
+  jobId: string,
+  options: { delayMs?: number; trigger?: string } = {}
+): Promise<{ recovered: boolean; reason: string }> {
+  const delayMs = options.delayMs ?? 5000;
+  if (delayMs > 0) {
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+
+  const job = await getOutboundJobById(jobId);
+  if (!job) {
+    return { recovered: false, reason: "Job tidak ditemukan." };
+  }
+
+  // If pg_net webhook already claimed, processed, or retried the job, do nothing
+  if (job.status !== "pending" || job.attempts > 0 || job.locked_at !== null) {
+    return {
+      recovered: false,
+      reason: `Job ${jobId} sudah ditangani oleh pg_net webhook (status: ${job.status}, attempts: ${job.attempts}).`
+    };
+  }
+
+  // pg_net webhook did not claim the job within the grace period: run atomic recovery
+  return await recoverPendingOutboundJobs({
+    graceWindowMs: Math.max(0, delayMs - 1000),
+    maxJobs: 1,
+    trigger: options.trigger || "post_enqueue_after_fallback"
+  });
+}
+
+/**
  * Worker execution loop: Processes pending jobs with bounded concurrency and execution budget.
  */
 export async function runOutboundSyncWorker(options: {
@@ -679,7 +916,7 @@ export async function runOutboundSyncWorker(options: {
 } = {}): Promise<WorkerExecutionResult> {
   // Default maxJobs = 2 with conservative time budget check to fit safely within Vercel 60s execution limit
   const maxJobs = options.maxJobs || 2;
-  const timeBudgetMs = options.timeBudgetMs || 50000;
+  const timeBudgetMs = options.timeBudgetMs || 52000;
   const workerId = options.workerId || `worker-${process.pid || Math.random().toString(36).slice(2, 6)}`;
   const startTime = Date.now();
 
@@ -692,15 +929,14 @@ export async function runOutboundSyncWorker(options: {
     jobs: []
   };
 
-  // 1. First recover any stale processing locks
-  try {
-    protestStore.resetStaleOutboundJobLocksLocal();
-  } catch {}
+  // 1. First recover any stale processing locks in both Supabase and SQLite
+  await resetStaleOutboundJobLocks();
 
   // 2. Process jobs one by one up to maxJobs within budget
   while (results.processed < maxJobs) {
-    // If a job was already processed and elapsed time > 15s, stop now to prevent exceeding Vercel 60s limit
-    if (results.processed > 0 && Date.now() - startTime > 15000) {
+    // Since one Power Automate execution can take ~40s, if 1 job already ran and >12s elapsed,
+    // stop claiming more jobs in this invocation so we never exceed Vercel's 60s maxDuration.
+    if (results.processed > 0 && Date.now() - startTime > 12000) {
       break;
     }
     if (Date.now() - startTime > timeBudgetMs - 10000) {
@@ -758,24 +994,7 @@ export async function getLatestOutboundJobByProtestId(protestId: string): Promis
           .maybeSingle();
 
         if (!error && data) {
-          return {
-            id: data.id,
-            protest_id: data.protest_id,
-            kode_unras: data.kode_unras,
-            id_kejadian: data.id_kejadian,
-            payload: typeof data.payload === "string" ? JSON.parse(data.payload) : data.payload,
-            status: data.status,
-            attempts: data.attempts,
-            max_attempts: data.max_attempts,
-            last_error: data.last_error,
-            correlation_id: data.correlation_id,
-            created_at: data.created_at,
-            updated_at: data.updated_at,
-            started_at: data.started_at,
-            processed_at: data.processed_at,
-            next_retry_at: data.next_retry_at,
-            locked_at: data.locked_at
-          };
+          return mapSupabaseRowToJob(data);
         }
       } catch (err: any) {
         console.warn("[OutboundQueue] Supabase getLatestJob warning:", err?.message || err);
@@ -801,24 +1020,7 @@ export async function getOutboundJobById(jobId: string): Promise<UnrasOutboundJo
           .maybeSingle();
 
         if (!error && data) {
-          return {
-            id: data.id,
-            protest_id: data.protest_id,
-            kode_unras: data.kode_unras,
-            id_kejadian: data.id_kejadian,
-            payload: typeof data.payload === "string" ? JSON.parse(data.payload) : data.payload,
-            status: data.status,
-            attempts: data.attempts,
-            max_attempts: data.max_attempts,
-            last_error: data.last_error,
-            correlation_id: data.correlation_id,
-            created_at: data.created_at,
-            updated_at: data.updated_at,
-            started_at: data.started_at,
-            processed_at: data.processed_at,
-            next_retry_at: data.next_retry_at,
-            locked_at: data.locked_at
-          };
+          return mapSupabaseRowToJob(data);
         }
       } catch {}
     }

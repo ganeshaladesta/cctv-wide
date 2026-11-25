@@ -1,10 +1,12 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { resolveCurrentUser } from '@/lib/auth-roles';
 import { protestStore } from '@/lib/protest-store';
 import { executeManualSyncTrigger } from '@/lib/unras-manual-trigger';
+import { recoverPendingOutboundJobs } from '@/lib/unras-outbound-queue';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
+export const maxDuration = 60;
 
 /**
  * GET /api/protests/sync
@@ -28,6 +30,19 @@ export async function GET(request: NextRequest) {
     const limit = searchParams.get('limit') ? parseInt(searchParams.get('limit')!, 10) : 10;
     const logs = await protestStore.getSyncLogs(limit);
     const stats = await protestStore.getStats();
+
+    // Non-blocking background sweep for any orphaned pending outbound jobs or due retries
+    try {
+      after(async () => {
+        try {
+          await recoverPendingOutboundJobs({
+            graceWindowMs: 8000,
+            maxJobs: 1,
+            trigger: "scheduled_sync_sweep"
+          });
+        } catch {}
+      });
+    } catch {}
 
     return NextResponse.json({
       success: true,

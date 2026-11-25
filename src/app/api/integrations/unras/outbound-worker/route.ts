@@ -1,36 +1,71 @@
+import crypto from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { runOutboundSyncWorker } from "@/lib/unras-outbound-queue";
 
-export const dynamic = 'force-dynamic';
-export const maxDuration = 60; // 60s max execution limit on Vercel Pro
+export const dynamic = "force-dynamic";
+export const maxDuration = 60; // 60s max execution limit on Vercel (accommodates ~40s Power Automate Excel processing)
+
+/**
+ * Constant-time secret comparison to prevent timing side-channel leaks.
+ */
+function verifySecretToken(provided: string | null | undefined, expected: string): boolean {
+  if (!provided || !expected) return false;
+  const a = Buffer.from(provided.trim());
+  const b = Buffer.from(expected.trim());
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
 
 /**
  * Authentication check for outbound worker.
- * Allows Vercel Cron (Authorization: Bearer <CRON_SECRET>),
- * x-cron-secret header, or authorized SCC operator/admin role.
+ * Supports:
+ * 1. Supabase Database Webhook / Server Secret via:
+ *    - Authorization: Bearer <CRON_SECRET>
+ *    - x-cron-secret: <CRON_SECRET>
+ *    - x-webhook-secret: <CRON_SECRET | SUPABASE_WEBHOOK_SECRET>
+ * 2. Internal Admin / Operator role header.
+ * Never exposes CRON_SECRET or SUPABASE_WEBHOOK_SECRET to the client.
  */
 function isAuthorizedWorkerRequest(request: NextRequest): boolean {
   const cronSecret = process.env.CRON_SECRET;
-  
-  // 1. If CRON_SECRET configured, verify bearer token or header
+  const webhookSecret = process.env.SUPABASE_WEBHOOK_SECRET || cronSecret;
+
+  const authHeader = request.headers.get("authorization");
+  const bearerToken =
+    authHeader && authHeader.startsWith("Bearer ")
+      ? authHeader.slice(7).trim()
+      : null;
+  const headerCronSecret = request.headers.get("x-cron-secret");
+  const headerWebhookSecret = request.headers.get("x-webhook-secret");
+
   if (cronSecret) {
-    const authHeader = request.headers.get("authorization");
-    if (authHeader && authHeader.startsWith("Bearer ")) {
-      const token = authHeader.slice(7).trim();
-      if (token === cronSecret) return true;
+    if (
+      verifySecretToken(bearerToken, cronSecret) ||
+      verifySecretToken(headerCronSecret, cronSecret) ||
+      verifySecretToken(headerWebhookSecret, cronSecret)
+    ) {
+      return true;
     }
-    const headerSecret = request.headers.get("x-cron-secret");
-    if (headerSecret === cronSecret) return true;
   }
 
-  // 2. Allow requests with verified admin / operator role header
+  if (webhookSecret) {
+    if (
+      verifySecretToken(bearerToken, webhookSecret) ||
+      verifySecretToken(headerWebhookSecret, webhookSecret) ||
+      verifySecretToken(headerCronSecret, webhookSecret)
+    ) {
+      return true;
+    }
+  }
+
+  // Allow requests with verified internal admin / operator role header when no secret mismatch
   const userRole = request.headers.get("x-scc-user-role");
   if (userRole === "admin" || userRole === "operator") {
     return true;
   }
 
-  // 3. In development or testing where CRON_SECRET is not configured, permit execution
-  if (!cronSecret && process.env.NODE_ENV !== "production") {
+  // In local development or testing where neither secret is configured, permit execution
+  if (!cronSecret && !webhookSecret && process.env.NODE_ENV !== "production") {
     return true;
   }
 
@@ -39,28 +74,30 @@ function isAuthorizedWorkerRequest(request: NextRequest): boolean {
 
 /**
  * GET /api/integrations/unras/outbound-worker
- * Vercel Cron invocation handler
+ * Manual / Recovery worker invocation handler
  */
 export async function GET(request: NextRequest) {
   if (!isAuthorizedWorkerRequest(request)) {
     return NextResponse.json(
-      { success: false, error: "Akses ditolak: Token CRON_SECRET atau sesi tidak valid." },
+      { success: false, error: "Akses ditolak: Token autentikasi worker tidak valid." },
       { status: 401 }
     );
   }
 
   try {
     const searchParams = request.nextUrl.searchParams;
-    const maxJobs = parseInt(searchParams.get("max_jobs") || "5", 10);
-    const timeBudgetMs = parseInt(searchParams.get("time_budget_ms") || "45000", 10);
+    const maxJobs = parseInt(searchParams.get("max_jobs") || "2", 10);
+    const timeBudgetMs = parseInt(searchParams.get("time_budget_ms") || "52000", 10);
 
     const result = await runOutboundSyncWorker({
-      maxJobs: Math.min(Math.max(1, maxJobs), 15),
-      timeBudgetMs: Math.min(Math.max(5000, timeBudgetMs), 55000)
+      maxJobs: Math.min(Math.max(1, maxJobs), 10),
+      timeBudgetMs: Math.min(Math.max(5000, timeBudgetMs), 55000),
+      workerId: "worker-http-get"
     });
 
     return NextResponse.json({
       success: true,
+      trigger: "http_get",
       message: `Worker selesai memproses ${result.processed} job. (Sukses: ${result.succeeded}, Gagal: ${result.failed}, Dijadwalkan Ulang: ${result.retried})`,
       ...result
     });
@@ -74,9 +111,84 @@ export async function GET(request: NextRequest) {
 
 /**
  * POST /api/integrations/unras/outbound-worker
- * Manual trigger or background runner invocation handler
+ * Primary target for Supabase Database Webhook (AFTER INSERT on public.unras_outbound_jobs)
+ * as well as server-side recovery triggers.
  */
 export async function POST(request: NextRequest) {
-  return GET(request);
+  if (!isAuthorizedWorkerRequest(request)) {
+    return NextResponse.json(
+      { success: false, error: "Akses ditolak: Token autentikasi webhook worker tidak valid." },
+      { status: 401 }
+    );
+  }
+
+  try {
+    let webhookPayload: any = null;
+    try {
+      const text = await request.text();
+      if (text && text.trim().startsWith("{")) {
+        webhookPayload = JSON.parse(text);
+      }
+    } catch {}
+
+    // Inspect Supabase Database Webhook payload if provided
+    if (webhookPayload && typeof webhookPayload === "object") {
+      const eventType = webhookPayload.type ? String(webhookPayload.type).toUpperCase() : null;
+      const tableName = webhookPayload.table ? String(webhookPayload.table) : null;
+      const recordStatus = webhookPayload.record?.status ? String(webhookPayload.record.status) : null;
+
+      if (tableName && tableName !== "unras_outbound_jobs") {
+        return NextResponse.json({
+          success: true,
+          skipped: true,
+          reason: `Diabaikan: Webhook berasal dari tabel '${tableName}', bukan 'unras_outbound_jobs'.`
+        });
+      }
+
+      if (eventType === "DELETE") {
+        return NextResponse.json({
+          success: true,
+          skipped: true,
+          reason: "Diabaikan: Event DELETE tidak memicu outbound worker."
+        });
+      }
+
+      // Guard against recursive self-triggering if webhook was accidentally configured on UPDATE
+      if (eventType === "UPDATE" && recordStatus && recordStatus !== "pending") {
+        return NextResponse.json({
+          success: true,
+          skipped: true,
+          reason: `Diabaikan: Event UPDATE dengan status '${recordStatus}' bukan job pending baru.`
+        });
+      }
+    }
+
+    const searchParams = request.nextUrl.searchParams;
+    const maxJobs = parseInt(searchParams.get("max_jobs") || "2", 10);
+    const timeBudgetMs = parseInt(searchParams.get("time_budget_ms") || "52000", 10);
+    const triggerSource = webhookPayload?.type
+      ? `supabase_webhook_${String(webhookPayload.type).toLowerCase()}`
+      : "http_post";
+
+    const result = await runOutboundSyncWorker({
+      maxJobs: Math.min(Math.max(1, maxJobs), 10),
+      timeBudgetMs: Math.min(Math.max(5000, timeBudgetMs), 55000),
+      workerId: `worker-${triggerSource}`
+    });
+
+    return NextResponse.json({
+      success: true,
+      trigger: triggerSource,
+      webhook_job_id: webhookPayload?.record?.id || null,
+      message: `Worker (${triggerSource}) selesai memproses ${result.processed} job. (Sukses: ${result.succeeded}, Gagal: ${result.failed}, Dijadwalkan Ulang: ${result.retried})`,
+      ...result
+    });
+  } catch (error: any) {
+    return NextResponse.json(
+      { success: false, error: error?.message || "Worker gagal memproses trigger webhook outbound." },
+      { status: 500 }
+    );
+  }
 }
+
 

@@ -1,11 +1,12 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { protestStore } from '@/lib/protest-store';
 import { resolveCurrentUser, canEditProtest, canDeleteProtest } from '@/lib/auth-roles';
 import { masterDataService } from '@/lib/master-data-service';
-import { enqueueOutboundSync } from '@/lib/unras-outbound-queue';
+import { enqueueOutboundSync, verifyAndRecoverUnclaimedJob } from '@/lib/unras-outbound-queue';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
+export const maxDuration = 60;
 
 interface Params {
   params: Promise<{ id: string }>;
@@ -170,6 +171,19 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       try {
         const queueRes = await enqueueOutboundSync(updated, { origin: "scc", route: "PATCH /api/protests/[id]" });
         outboundJob = queueRes.job || null;
+        if (outboundJob) {
+          const targetJobId = outboundJob.id;
+          try {
+            after(async () => {
+              try {
+                await verifyAndRecoverUnclaimedJob(targetJobId, {
+                  delayMs: 5000,
+                  trigger: "patch_protest_after_fallback"
+                });
+              } catch {}
+            });
+          } catch {}
+        }
       } catch (err: any) {
         console.warn("[Outbound Queue Warning]:", err?.message || err);
       }
