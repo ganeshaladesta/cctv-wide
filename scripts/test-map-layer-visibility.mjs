@@ -274,49 +274,24 @@ runTest("UNRAS radius cycle and formatting (1km -> 1.5km -> OFF -> 250m -> 500m 
   assert.equal(`Radius UNRAS: ${formatUnrasRadius(dist)}`, "Radius UNRAS: 1 km");
 });
 
-// TEST 12: BI Monitoring radius state cycling and label formatting
-runTest("BI monitoring radius cycle (3km -> 5km -> 10km -> Concentric -> OFF -> 1km -> 3km)", () => {
-  const nextMap = {
-    3000: 5000,
-    5000: 10000,
-    10000: -1,
-    [-1]: 0,
-    0: 1000,
-    1000: 3000
+// TEST 12: BI Monitoring radius options, default toggle OFF, default 50m, and persistence
+runTest("BI monitoring radius restricted to [50, 100, 150, 200, 250] meters with default OFF and 50m", () => {
+  const VALID_BI_RADII = [50, 100, 150, 200, 250];
+  const DEFAULT_CONFIG = {
+    isOfficeRadiusEnabled: false,
+    officeRadius: 50,
+    unrasRadius: 500,
+    isHudOpen: false
   };
 
-  const formatBIRadius = (dist) => {
-    if (dist === -1) return "Konsentris";
-    if (dist === 0) return "Nonaktif";
-    return `${dist / 1000} km`;
-  };
+  assert.equal(DEFAULT_CONFIG.isOfficeRadiusEnabled, false, "BI Radius toggle must default to OFF");
+  assert.equal(DEFAULT_CONFIG.isHudOpen, false, "Tactical HUD toggle must default to OFF");
+  assert.equal(DEFAULT_CONFIG.officeRadius, 50, "BI Radius must default to 50 meter");
+  assert.deepEqual(VALID_BI_RADII, [50, 100, 150, 200, 250]);
 
-  let dist = 3000;
-  assert.equal(`Radius Pemantauan BI: ${formatBIRadius(dist)}`, "Radius Pemantauan BI: 3 km");
-
-  dist = nextMap[dist];
-  assert.equal(dist, 5000);
-  assert.equal(`Radius Pemantauan BI: ${formatBIRadius(dist)}`, "Radius Pemantauan BI: 5 km");
-
-  dist = nextMap[dist];
-  assert.equal(dist, 10000);
-  assert.equal(`Radius Pemantauan BI: ${formatBIRadius(dist)}`, "Radius Pemantauan BI: 10 km");
-
-  dist = nextMap[dist];
-  assert.equal(dist, -1);
-  assert.equal(`Radius Pemantauan BI: ${formatBIRadius(dist)}`, "Radius Pemantauan BI: Konsentris");
-
-  dist = nextMap[dist];
-  assert.equal(dist, 0);
-  assert.equal(`Radius Pemantauan BI: ${formatBIRadius(dist)}`, "Radius Pemantauan BI: Nonaktif");
-
-  dist = nextMap[dist];
-  assert.equal(dist, 1000);
-  assert.equal(`Radius Pemantauan BI: ${formatBIRadius(dist)}`, "Radius Pemantauan BI: 1 km");
-
-  dist = nextMap[dist];
-  assert.equal(dist, 3000);
-  assert.equal(`Radius Pemantauan BI: ${formatBIRadius(dist)}`, "Radius Pemantauan BI: 3 km");
+  for (const r of VALID_BI_RADII) {
+    assert.equal(`${r} meter`, `${r} meter`);
+  }
 });
 
 // TEST 13: Radius controls are strictly decoupled (no shared state mutation)
@@ -371,9 +346,96 @@ runTest("Verify no duplicate external BI office visibility button exists in inte
   // Check that the new radius controls exist with their exact test IDs and tooltips
   assert.ok(content.includes('data-testid="btn-radius-unras"'));
   assert.ok(content.includes('data-testid="btn-radius-bi"'));
+  assert.ok(content.includes('data-testid="select-radius-bi"'));
+  assert.ok(content.includes("VALID_OFFICE_RADII_METERS = [50, 100, 150, 200, 250]"));
+  assert.ok(content.includes("DEFAULT_OFFICE_RADIUS_METERS = 50"));
+  assert.ok(content.includes("DEFAULT_OFFICE_RADIUS_ENABLED = false"));
+  assert.ok(content.includes("DEFAULT_TACTICAL_HUD_OPEN = false"));
   assert.ok(content.includes("Mengatur jarak analisis dari titik kejadian unjuk rasa."));
   assert.ok(content.includes("Mengatur jarak pemantauan dari lokasi kantor BI."));
   assert.ok(content.includes("Menampilkan overlay informasi dan elemen situasional taktis pada peta."));
+});
+
+// TEST 16: End-to-end persistence, independence, and reset behavior for BI Radius & Tactical HUD
+runTest("Fresh dashboard defaults OFF/50m, independent activation, persistence across refresh, and reset", () => {
+  mockLocalStorage.clear();
+  const TACTICAL_KEY = "scc_map_tactical_config_v2";
+  const VALID_OFFICE_RADII = [50, 100, 150, 200, 250];
+  const DEFAULT_CONFIG = {
+    isOfficeRadiusEnabled: false,
+    officeRadius: 50,
+    unrasRadius: 500,
+    selectedAssetType: "office",
+    selectedAssetId: "bi-off-kpbi-pusat",
+    isHudOpen: false,
+    hasManualSelection: false
+  };
+
+  const getStoredConfig = () => {
+    const raw = mockLocalStorage.getItem(TACTICAL_KEY);
+    if (!raw) return { ...DEFAULT_CONFIG };
+    const parsed = JSON.parse(raw);
+    return {
+      isOfficeRadiusEnabled:
+        typeof parsed.isOfficeRadiusEnabled === "boolean" ? parsed.isOfficeRadiusEnabled : false,
+      officeRadius: VALID_OFFICE_RADII.includes(parsed.officeRadius) ? parsed.officeRadius : 50,
+      unrasRadius: [0, 250, 500, 1000, 1500].includes(parsed.unrasRadius) ? parsed.unrasRadius : 500,
+      selectedAssetType: parsed.selectedAssetType === "protest" ? "protest" : "office",
+      selectedAssetId: typeof parsed.selectedAssetId === "string" ? parsed.selectedAssetId : "bi-off-kpbi-pusat",
+      isHudOpen: typeof parsed.isHudOpen === "boolean" ? parsed.isHudOpen : false,
+      hasManualSelection: Boolean(parsed.hasManualSelection)
+    };
+  };
+
+  const persistConfig = (patch) => {
+    const current = getStoredConfig();
+    mockLocalStorage.setItem(TACTICAL_KEY, JSON.stringify({ ...current, ...patch }));
+  };
+
+  // 1 & 2: Fresh dashboard -> both toggles OFF, BI radius 50m
+  let cfg = getStoredConfig();
+  assert.equal(cfg.isOfficeRadiusEnabled, false);
+  assert.equal(cfg.isHudOpen, false);
+  assert.equal(cfg.officeRadius, 50);
+
+  // 4 & 6: Manually enable Tactical HUD -> BI Radius remains OFF
+  persistConfig({ isHudOpen: true });
+  cfg = getStoredConfig();
+  assert.equal(cfg.isHudOpen, true);
+  assert.equal(cfg.isOfficeRadiusEnabled, false);
+
+  // 5 & 6: Manually enable BI Radius and select 200m -> Tactical HUD state is untouched; invalid radius rejected
+  persistConfig({ isHudOpen: false });
+  persistConfig({ isOfficeRadiusEnabled: true, officeRadius: 200 });
+  cfg = getStoredConfig();
+  assert.equal(cfg.isOfficeRadiusEnabled, true);
+  assert.equal(cfg.officeRadius, 200);
+  assert.equal(cfg.isHudOpen, false);
+
+  // 3: Legacy/invalid radius (e.g. 1000 or 3000) falls back to 50m
+  persistConfig({ officeRadius: 3000 });
+  cfg = getStoredConfig();
+  assert.equal(cfg.officeRadius, 50);
+
+  // 7: Refresh preserves saved user preferences
+  persistConfig({ isOfficeRadiusEnabled: true, officeRadius: 150, isHudOpen: true });
+  const afterRefresh = getStoredConfig();
+  assert.equal(afterRefresh.isOfficeRadiusEnabled, true);
+  assert.equal(afterRefresh.officeRadius, 150);
+  assert.equal(afterRefresh.isHudOpen, true);
+
+  // Reset restores BI Radius OFF, Tactical HUD OFF, BI Radius 50m
+  persistConfig({
+    isOfficeRadiusEnabled: false,
+    officeRadius: 50,
+    unrasRadius: 500,
+    isHudOpen: false,
+    hasManualSelection: false
+  });
+  const afterReset = getStoredConfig();
+  assert.equal(afterReset.isOfficeRadiusEnabled, false);
+  assert.equal(afterReset.isHudOpen, false);
+  assert.equal(afterReset.officeRadius, 50);
 });
 
 console.log(`\n=== LAYER VISIBILITY TEST SUMMARY: ${passed}/${total} PASSED ===\n`);

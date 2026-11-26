@@ -40,6 +40,8 @@ export function calculateHaversineDistanceMeters(
   return Math.round(R * c);
 }
 
+export const BI_MONITORING_RADIUS_OPTIONS_METERS = [50, 100, 150, 200, 250] as const;
+
 export interface TacticalGeoIntHudProps {
   isOpen: boolean;
   onClose: () => void;
@@ -47,7 +49,9 @@ export interface TacticalGeoIntHudProps {
   biOffices: BIOffice[];
   protestEvents: ProtestEvent[];
   markers: CompactMarker[];
-  officeRadius: number; // 0, 1000, 3000, 5000, 10000, -1 (concentric)
+  isOfficeRadiusEnabled?: boolean;
+  onToggleOfficeRadius?: () => void;
+  officeRadius: number; // 50, 100, 150, 200, 250 (meters)
   unrasRadius: number; // 0, 250, 500, 1000, 1500
   onChangeOfficeRadius: (r: number) => void;
   onChangeUnrasRadius: (r: number) => void;
@@ -62,6 +66,8 @@ export function TacticalGeoIntHud({
   biOffices,
   protestEvents,
   markers,
+  isOfficeRadiusEnabled = false,
+  onToggleOfficeRadius,
   officeRadius,
   unrasRadius,
   onChangeOfficeRadius,
@@ -145,7 +151,7 @@ export function TacticalGeoIntHud({
   const effectiveRadius = isOffice
     ? officeRadius > 0
       ? officeRadius
-      : 1000
+      : 50
     : unrasRadius > 0
     ? unrasRadius
     : 500;
@@ -364,30 +370,46 @@ export function TacticalGeoIntHud({
 
         {/* Radius Configuration & CCTV Tactical Sensor Controls */}
         <div className="p-3 bg-[#0B101D] border border-slate-800 rounded-xl space-y-2">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2">
             <span className="text-[11px] font-bold text-white flex items-center gap-1.5">
               <Layers className="w-3.5 h-3.5 text-blue-400" />
               {isOffice ? "Radius Perimeter Pengamanan BI" : "Radius Perimeter Aksi Unras"}
             </span>
-            <span className="text-[10px] font-mono text-blue-400 font-bold">
-              {isOffice
-                ? officeRadius === -1
-                  ? "Konsentris (1-10km)"
-                  : officeRadius === 0
+            {isOffice ? (
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-mono text-blue-400 font-bold">
+                  {officeRadius} meter
+                </span>
+                {onToggleOfficeRadius && (
+                  <button
+                    type="button"
+                    data-testid="hud-toggle-bi-radius"
+                    onClick={onToggleOfficeRadius}
+                    className={`px-1.5 py-0.5 rounded text-[9px] font-mono font-bold border transition-colors cursor-pointer ${
+                      isOfficeRadiusEnabled
+                        ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
+                        : "bg-white/5 text-slate-400 border-white/10 hover:text-white"
+                    }`}
+                  >
+                    {isOfficeRadiusEnabled ? "ON" : "OFF"}
+                  </button>
+                )}
+              </div>
+            ) : (
+              <span className="text-[10px] font-mono text-blue-400 font-bold">
+                {unrasRadius === 0
                   ? "Nonaktif"
-                  : `${officeRadius / 1000} km`
-                : unrasRadius === 0
-                ? "Nonaktif"
-                : unrasRadius >= 1000
-                ? `${unrasRadius / 1000} km`
-                : `${unrasRadius} m`}
-            </span>
+                  : unrasRadius >= 1000
+                  ? `${unrasRadius / 1000} km`
+                  : `${unrasRadius} m`}
+              </span>
+            )}
           </div>
 
           {/* Quick Radius Buttons */}
           {isOffice ? (
-            <div className="grid grid-cols-4 gap-1.5 pt-1">
-              {[1000, 3000, 5000, -1].map((r) => (
+            <div className="grid grid-cols-5 gap-1.5 pt-1">
+              {BI_MONITORING_RADIUS_OPTIONS_METERS.map((r) => (
                 <button
                   key={r}
                   type="button"
@@ -398,7 +420,7 @@ export function TacticalGeoIntHud({
                       : "bg-white/5 border-white/10 text-slate-300 hover:bg-white/10"
                   }`}
                 >
-                  {r === -1 ? "Konsentris" : `${r / 1000}km`}
+                  {r} m
                 </button>
               ))}
             </div>

@@ -39,13 +39,17 @@ export interface MapLayerVisibility {
 }
 
 export const STORAGE_LAYER_VISIBILITY_KEY = "scc_map_layer_visibility";
-export const STORAGE_TACTICAL_CONFIG_KEY = "scc_map_tactical_config_v1";
+export const STORAGE_TACTICAL_CONFIG_KEY = "scc_map_tactical_config_v2";
 
-export const DEFAULT_OFFICE_RADIUS_METERS = 1000; // 1.000 meter (1 km)
+export const VALID_OFFICE_RADII_METERS = [50, 100, 150, 200, 250] as const;
+export const DEFAULT_OFFICE_RADIUS_METERS = 50; // 50 meter
+export const DEFAULT_OFFICE_RADIUS_ENABLED = false; // Default OFF
+export const DEFAULT_TACTICAL_HUD_OPEN = false; // Default OFF
 export const DEFAULT_UNRAS_RADIUS_METERS = 500; // 500 meter
 export const DEFAULT_TACTICAL_MAP_ZOOM = 14;
 
 export interface StoredTacticalMapConfig {
+  isOfficeRadiusEnabled: boolean;
   officeRadius: number;
   unrasRadius: number;
   selectedAssetType: "office" | "protest";
@@ -55,11 +59,12 @@ export interface StoredTacticalMapConfig {
 }
 
 export const DEFAULT_TACTICAL_MAP_CONFIG: StoredTacticalMapConfig = {
+  isOfficeRadiusEnabled: DEFAULT_OFFICE_RADIUS_ENABLED,
   officeRadius: DEFAULT_OFFICE_RADIUS_METERS,
   unrasRadius: DEFAULT_UNRAS_RADIUS_METERS,
   selectedAssetType: "office",
   selectedAssetId: "bi-off-kpbi-pusat",
-  isHudOpen: true,
+  isHudOpen: DEFAULT_TACTICAL_HUD_OPEN,
   hasManualSelection: false
 };
 
@@ -69,9 +74,13 @@ export function getStoredTacticalMapConfig(): StoredTacticalMapConfig {
     const raw = window.localStorage?.getItem(STORAGE_TACTICAL_CONFIG_KEY);
     if (!raw) return { ...DEFAULT_TACTICAL_MAP_CONFIG };
     const parsed = JSON.parse(raw);
-    const validOfficeRadii = [0, 1000, 3000, 5000, 10000, -1];
+    const validOfficeRadii: readonly number[] = VALID_OFFICE_RADII_METERS;
     const validUnrasRadii = [0, 250, 500, 1000, 1500];
     return {
+      isOfficeRadiusEnabled:
+        typeof parsed.isOfficeRadiusEnabled === "boolean"
+          ? parsed.isOfficeRadiusEnabled
+          : DEFAULT_OFFICE_RADIUS_ENABLED,
       officeRadius: validOfficeRadii.includes(parsed.officeRadius)
         ? parsed.officeRadius
         : DEFAULT_OFFICE_RADIUS_METERS,
@@ -80,7 +89,7 @@ export function getStoredTacticalMapConfig(): StoredTacticalMapConfig {
         : DEFAULT_UNRAS_RADIUS_METERS,
       selectedAssetType: parsed.selectedAssetType === "protest" ? "protest" : "office",
       selectedAssetId: typeof parsed.selectedAssetId === "string" ? parsed.selectedAssetId : "bi-off-kpbi-pusat",
-      isHudOpen: typeof parsed.isHudOpen === "boolean" ? parsed.isHudOpen : true,
+      isHudOpen: typeof parsed.isHudOpen === "boolean" ? parsed.isHudOpen : DEFAULT_TACTICAL_HUD_OPEN,
       hasManualSelection: Boolean(parsed.hasManualSelection)
     };
   } catch {
@@ -746,7 +755,10 @@ export default function InteractiveMap({
   const [initialTacticalConfig] = useState<StoredTacticalMapConfig>(() => getStoredTacticalMapConfig());
   const [darkFilter, setDarkFilter] = useState(true);
   const [clustering, setClustering] = useState(true);
-  const [officeRadiusDistance, setOfficeRadiusDistance] = useState<number>(initialTacticalConfig.officeRadius); // 0, 1000, 3000, 5000, 10000, -1
+  const [isOfficeRadiusEnabled, setIsOfficeRadiusEnabled] = useState<boolean>(
+    initialTacticalConfig.isOfficeRadiusEnabled
+  );
+  const [officeRadiusDistance, setOfficeRadiusDistance] = useState<number>(initialTacticalConfig.officeRadius); // 50, 100, 150, 200, 250 (meters)
   const [unrasRadiusDistance, setUnrasRadiusDistance] = useState<number>(initialTacticalConfig.unrasRadius); // 0, 250, 500, 1000, 1500
   const [fetchedBIOffices, setFetchedBIOffices] = useState<BIOffice[]>([]);
   const [selectedGeoIntAsset, setSelectedGeoIntAsset] = useState<
@@ -759,9 +771,19 @@ export default function InteractiveMap({
   const hasManualAssetSelectionRef = useRef<boolean>(initialTacticalConfig.hasManualSelection);
   const initialTacticalCenterAppliedRef = useRef<boolean>(false);
 
+  const handleToggleOfficeRadius = useCallback(() => {
+    setIsOfficeRadiusEnabled((prev) => {
+      const next = !prev;
+      persistTacticalMapConfig({ isOfficeRadiusEnabled: next });
+      return next;
+    });
+  }, []);
+
   const handleSetOfficeRadius = useCallback((nextRadius: number) => {
-    setOfficeRadiusDistance(nextRadius);
-    persistTacticalMapConfig({ officeRadius: nextRadius });
+    const validOfficeRadii: readonly number[] = VALID_OFFICE_RADII_METERS;
+    const sanitized = validOfficeRadii.includes(nextRadius) ? nextRadius : DEFAULT_OFFICE_RADIUS_METERS;
+    setOfficeRadiusDistance(sanitized);
+    persistTacticalMapConfig({ officeRadius: sanitized });
   }, []);
 
   const handleSetUnrasRadius = useCallback((nextRadius: number) => {
@@ -937,7 +959,9 @@ export default function InteractiveMap({
 
     if (initialVisibility.cctv) map.addLayer(clusterGroup);
     if (initialVisibility.biOffice) {
-      map.addLayer(biRadiusGroup);
+      if (initialTacticalConfig.isOfficeRadiusEnabled) {
+        map.addLayer(biRadiusGroup);
+      }
       map.addLayer(biOfficeGroup);
     }
     if (initialVisibility.unras) {
@@ -1359,14 +1383,15 @@ export default function InteractiveMap({
     }
   }, [allBIOffices, showBIOfficeLayer, protestEvents, selectedGeoIntAsset]);
 
-  // Render Bank Indonesia Office Radius Rings
+  // Render Bank Indonesia Office Radius Rings (only when enabled; radius in meters: 50, 100, 150, 200, 250)
   useEffect(() => {
     const group = biRadiusLayerGroupRef.current;
     const map = mapRef.current;
     if (!group || !map) return;
     group.clearLayers();
 
-    if (!showBIOfficeLayer || officeRadiusDistance === 0) {
+    const validOfficeRadii: readonly number[] = VALID_OFFICE_RADII_METERS;
+    if (!showBIOfficeLayer || !isOfficeRadiusEnabled || !validOfficeRadii.includes(officeRadiusDistance)) {
       if (map.hasLayer(group)) map.removeLayer(group);
       return;
     }
@@ -1395,42 +1420,18 @@ export default function InteractiveMap({
       }
 
       const isHeadquarters = off.office_type === "Kantor Pusat";
-      if (officeRadiusDistance === -1) {
-        // Concentric rings: 1km, 3km, 5km, 10km
-        const concentric = [
-          { r: 1000, color: isHeadquarters ? "#F59E0B" : isSelected ? "#38BDF8" : "#38BDF8", weight: 2, dash: "3, 3", opacity: isHeadquarters ? 0.16 : 0.12, fill: isHeadquarters ? "#D97706" : "#0284C7" },
-          { r: 3000, color: isHeadquarters ? "#D97706" : isSelected ? "#38BDF8" : "#0284C7", weight: 1.5, dash: "4, 4", opacity: isHeadquarters ? 0.11 : 0.08, fill: isHeadquarters ? "#B45309" : "#0369A1" },
-          { r: 5000, color: isHeadquarters ? "#B45309" : isSelected ? "#38BDF8" : "#0369A1", weight: 1, dash: "5, 5", opacity: isHeadquarters ? 0.06 : 0.04, fill: isHeadquarters ? "#92400E" : "#1E3A8A" },
-          { r: 10000, color: isHeadquarters ? "#92400E" : isSelected ? "#38BDF8" : "#1E3A8A", weight: 1, dash: "6, 6", opacity: isHeadquarters ? 0.03 : 0.02, fill: isHeadquarters ? "#78350F" : "#0F172A" }
-        ];
-
-        for (const ring of concentric) {
-          const circle = L.circle([off.latitude, off.longitude], {
-            radius: ring.r,
-            color: isSelected ? "#38BDF8" : ring.color,
-            weight: isSelected ? ring.weight + 0.5 : ring.weight,
-            dashArray: ring.dash,
-            fillColor: ring.fill,
-            fillOpacity: isSelected ? ring.opacity * 1.5 : ring.opacity,
-            interactive: false
-          });
-          group.addLayer(circle);
-        }
-      } else {
-        // Single radius
-        const circle = L.circle([off.latitude, off.longitude], {
-          radius: officeRadiusDistance,
-          color: isHeadquarters ? "#F59E0B" : isSelected ? "#38BDF8" : "#0284C7",
-          weight: isSelected || isHeadquarters ? 2.5 : 1.5,
-          dashArray: "4, 4",
-          fillColor: isHeadquarters ? "#D97706" : "#0284C7",
-          fillOpacity: isSelected ? 0.18 : isHeadquarters ? 0.12 : 0.08,
-          interactive: false
-        });
-        group.addLayer(circle);
-      }
+      const circle = L.circle([off.latitude, off.longitude], {
+        radius: officeRadiusDistance,
+        color: isHeadquarters ? "#F59E0B" : isSelected ? "#38BDF8" : "#0284C7",
+        weight: isSelected || isHeadquarters ? 2.5 : 1.5,
+        dashArray: "4, 4",
+        fillColor: isHeadquarters ? "#D97706" : "#0284C7",
+        fillOpacity: isSelected ? 0.18 : isHeadquarters ? 0.12 : 0.08,
+        interactive: false
+      });
+      group.addLayer(circle);
     }
-  }, [allBIOffices, showBIOfficeLayer, officeRadiusDistance, mapZoom, selectedGeoIntAsset]);
+  }, [allBIOffices, showBIOfficeLayer, isOfficeRadiusEnabled, officeRadiusDistance, mapZoom, selectedGeoIntAsset]);
 
   // Render UNRAS Radius Rings
   useEffect(() => {
@@ -1480,19 +1481,21 @@ export default function InteractiveMap({
 
   const handleResetView = () => {
     hasManualAssetSelectionRef.current = false;
+    setIsOfficeRadiusEnabled(DEFAULT_OFFICE_RADIUS_ENABLED);
     setOfficeRadiusDistance(DEFAULT_OFFICE_RADIUS_METERS);
     setUnrasRadiusDistance(DEFAULT_UNRAS_RADIUS_METERS);
-    setIsGeoIntHudOpen(true);
+    setIsGeoIntHudOpen(DEFAULT_TACTICAL_HUD_OPEN);
 
     const targetKpbi = kpbiHeadquarters || findKpbiHeadquartersOffice(allBIOffices);
     if (targetKpbi && targetKpbi.latitude !== null && targetKpbi.longitude !== null) {
       setSelectedGeoIntAsset({ type: "office", office: targetKpbi });
       persistTacticalMapConfig({
+        isOfficeRadiusEnabled: DEFAULT_OFFICE_RADIUS_ENABLED,
         officeRadius: DEFAULT_OFFICE_RADIUS_METERS,
         unrasRadius: DEFAULT_UNRAS_RADIUS_METERS,
         selectedAssetType: "office",
         selectedAssetId: targetKpbi.id,
-        isHudOpen: true,
+        isHudOpen: DEFAULT_TACTICAL_HUD_OPEN,
         hasManualSelection: false
       });
       mapRef.current?.flyTo([targetKpbi.latitude, targetKpbi.longitude], DEFAULT_TACTICAL_MAP_ZOOM, { duration: 1.0 });
@@ -1795,36 +1798,53 @@ export default function InteractiveMap({
             </span>
           </button>
 
-          {/* Radius Pemantauan BI */}
-          <button
-            type="button"
-            data-testid="btn-radius-bi"
-            onClick={() => {
-              const nextMap: Record<number, number> = {
-                1000: 3000,
-                3000: 5000,
-                5000: 10000,
-                10000: -1,
-                [-1]: 0,
-                0: 1000
-              };
-              handleSetOfficeRadius(nextMap[officeRadiusDistance] ?? DEFAULT_OFFICE_RADIUS_METERS);
-            }}
-            title="Mengatur jarak pemantauan dari lokasi kantor BI."
-            className={`px-2.5 sm:px-3 py-1.5 rounded-xl text-[11px] sm:text-xs font-medium border backdrop-blur-md transition-all shadow-lg flex items-center gap-1.5 cursor-pointer bg-emerald-500/15 border-emerald-500/40 text-emerald-300 hover:text-white hover:bg-emerald-500/25 ${
-              !showBIOfficeLayer ? "opacity-75" : ""
-            }`}
+          {/* Radius Pemantauan BI (Independent Toggle + Meter Radius Options: 50, 100, 150, 200, 250 m) */}
+          <div
+            data-testid="bi-radius-control-group"
+            className={`px-2 sm:px-2.5 py-1 rounded-xl text-[11px] sm:text-xs font-medium border backdrop-blur-md transition-all shadow-lg flex items-center gap-1.5 ${
+              isOfficeRadiusEnabled
+                ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-300"
+                : "bg-[#090C12]/92 border-[var(--border-default)] text-[#98A4B8]"
+            } ${!showBIOfficeLayer ? "opacity-75" : ""}`}
           >
-            <Building2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-            <span className="whitespace-nowrap">Radius Pemantauan BI:</span>
-            <span className="font-mono font-bold text-white tabular-nums">
-              {officeRadiusDistance === -1
-                ? "Konsentris"
-                : officeRadiusDistance === 0
-                ? "Nonaktif"
-                : `${officeRadiusDistance / 1000} km`}
-            </span>
-          </button>
+            <button
+              type="button"
+              data-testid="btn-radius-bi"
+              onClick={handleToggleOfficeRadius}
+              title="Mengatur jarak pemantauan dari lokasi kantor BI."
+              className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors"
+            >
+              <Building2
+                className={`w-3.5 h-3.5 shrink-0 ${
+                  isOfficeRadiusEnabled ? "text-emerald-400" : "text-slate-400"
+                }`}
+              />
+              <span className="whitespace-nowrap">Radius Pemantauan BI:</span>
+              <span
+                className={`font-mono font-bold px-1.5 py-0.5 rounded text-[10px] ${
+                  isOfficeRadiusEnabled
+                    ? "bg-emerald-500/25 text-emerald-300 border border-emerald-500/40"
+                    : "bg-white/5 text-slate-400 border border-white/10"
+                }`}
+              >
+                {isOfficeRadiusEnabled ? "ON" : "OFF"}
+              </span>
+            </button>
+
+            <select
+              data-testid="select-radius-bi"
+              aria-label="Pilih Radius Pemantauan BI dalam meter"
+              value={officeRadiusDistance}
+              onChange={(e) => handleSetOfficeRadius(Number(e.target.value))}
+              className="bg-[#0B101D] text-white font-mono font-bold text-[11px] rounded-lg px-1.5 py-0.5 border border-white/10 focus:outline-none focus:border-emerald-400 cursor-pointer tabular-nums"
+            >
+              {VALID_OFFICE_RADII_METERS.map((r) => (
+                <option key={r} value={r} className="bg-[#0B101D] text-white">
+                  {r} meter
+                </option>
+              ))}
+            </select>
+          </div>
 
           {/* Group C: Tactical Visualization */}
           <button
@@ -1937,6 +1957,8 @@ export default function InteractiveMap({
         biOffices={allBIOffices}
         protestEvents={protestEvents || []}
         markers={validMarkers}
+        isOfficeRadiusEnabled={isOfficeRadiusEnabled}
+        onToggleOfficeRadius={handleToggleOfficeRadius}
         officeRadius={officeRadiusDistance}
         unrasRadius={unrasRadiusDistance}
         onChangeOfficeRadius={handleSetOfficeRadius}
