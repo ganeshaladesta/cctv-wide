@@ -145,10 +145,10 @@ export function TacticalGeoIntHud({
   const effectiveRadius = isOffice
     ? officeRadius > 0
       ? officeRadius
-      : 3000
+      : 1000
     : unrasRadius > 0
     ? unrasRadius
-    : 1500;
+    : 500;
 
   const nearbyCameras = useMemo(() => {
     if (targetLat === null || targetLat === undefined || targetLng === null || targetLng === undefined) {

@@ -39,6 +39,86 @@ export interface MapLayerVisibility {
 }
 
 export const STORAGE_LAYER_VISIBILITY_KEY = "scc_map_layer_visibility";
+export const STORAGE_TACTICAL_CONFIG_KEY = "scc_map_tactical_config_v1";
+
+export const DEFAULT_OFFICE_RADIUS_METERS = 1000; // 1.000 meter (1 km)
+export const DEFAULT_UNRAS_RADIUS_METERS = 500; // 500 meter
+export const DEFAULT_TACTICAL_MAP_ZOOM = 14;
+
+export interface StoredTacticalMapConfig {
+  officeRadius: number;
+  unrasRadius: number;
+  selectedAssetType: "office" | "protest";
+  selectedAssetId: string | null;
+  isHudOpen: boolean;
+  hasManualSelection: boolean;
+}
+
+export const DEFAULT_TACTICAL_MAP_CONFIG: StoredTacticalMapConfig = {
+  officeRadius: DEFAULT_OFFICE_RADIUS_METERS,
+  unrasRadius: DEFAULT_UNRAS_RADIUS_METERS,
+  selectedAssetType: "office",
+  selectedAssetId: "bi-off-kpbi-pusat",
+  isHudOpen: true,
+  hasManualSelection: false
+};
+
+export function getStoredTacticalMapConfig(): StoredTacticalMapConfig {
+  if (typeof window === "undefined") return { ...DEFAULT_TACTICAL_MAP_CONFIG };
+  try {
+    const raw = window.localStorage?.getItem(STORAGE_TACTICAL_CONFIG_KEY);
+    if (!raw) return { ...DEFAULT_TACTICAL_MAP_CONFIG };
+    const parsed = JSON.parse(raw);
+    const validOfficeRadii = [0, 1000, 3000, 5000, 10000, -1];
+    const validUnrasRadii = [0, 250, 500, 1000, 1500];
+    return {
+      officeRadius: validOfficeRadii.includes(parsed.officeRadius)
+        ? parsed.officeRadius
+        : DEFAULT_OFFICE_RADIUS_METERS,
+      unrasRadius: validUnrasRadii.includes(parsed.unrasRadius)
+        ? parsed.unrasRadius
+        : DEFAULT_UNRAS_RADIUS_METERS,
+      selectedAssetType: parsed.selectedAssetType === "protest" ? "protest" : "office",
+      selectedAssetId: typeof parsed.selectedAssetId === "string" ? parsed.selectedAssetId : "bi-off-kpbi-pusat",
+      isHudOpen: typeof parsed.isHudOpen === "boolean" ? parsed.isHudOpen : true,
+      hasManualSelection: Boolean(parsed.hasManualSelection)
+    };
+  } catch {
+    return { ...DEFAULT_TACTICAL_MAP_CONFIG };
+  }
+}
+
+export function persistTacticalMapConfig(patch: Partial<StoredTacticalMapConfig>): void {
+  if (typeof window === "undefined") return;
+  try {
+    const current = getStoredTacticalMapConfig();
+    const next: StoredTacticalMapConfig = { ...current, ...patch };
+    window.localStorage?.setItem(STORAGE_TACTICAL_CONFIG_KEY, JSON.stringify(next));
+  } catch {}
+}
+
+/**
+ * Resolves the official Kantor Pusat Bank Indonesia (KPBI) Jakarta landmark from
+ * loaded BI Office records without hardcoding new coordinates.
+ */
+export function findKpbiHeadquartersOffice(offices: BIOffice[]): BIOffice | null {
+  if (!offices || offices.length === 0) return null;
+  return (
+    offices.find(
+      (o) =>
+        o.validation_status === "verified" &&
+        o.latitude !== null &&
+        o.longitude !== null &&
+        (o.id === "bi-off-kpbi-pusat" ||
+          o.office_id === "KPBI" ||
+          o.office_id === "KPBI-PUSAT" ||
+          o.office_type === "Kantor Pusat" ||
+          o.office_name.toLowerCase().includes("kantor pusat bank indonesia"))
+    ) ||
+    offices.find((o) => o.validation_status === "verified" && o.latitude !== null && o.longitude !== null) ||
+    null
+  );
+}
 
 export const DEFAULT_LAYER_VISIBILITY: MapLayerVisibility = {
   cctv: true,
@@ -663,17 +743,49 @@ export default function InteractiveMap({
     };
   }, [isLayerMenuOpen]);
 
+  const [initialTacticalConfig] = useState<StoredTacticalMapConfig>(() => getStoredTacticalMapConfig());
   const [darkFilter, setDarkFilter] = useState(true);
   const [clustering, setClustering] = useState(true);
-  const [officeRadiusDistance, setOfficeRadiusDistance] = useState<number>(3000); // 0, 1000, 3000, 5000, 10000, -1
-  const [unrasRadiusDistance, setUnrasRadiusDistance] = useState<number>(1000); // 0, 250, 500, 1000, 1500
+  const [officeRadiusDistance, setOfficeRadiusDistance] = useState<number>(initialTacticalConfig.officeRadius); // 0, 1000, 3000, 5000, 10000, -1
+  const [unrasRadiusDistance, setUnrasRadiusDistance] = useState<number>(initialTacticalConfig.unrasRadius); // 0, 250, 500, 1000, 1500
   const [fetchedBIOffices, setFetchedBIOffices] = useState<BIOffice[]>([]);
   const [selectedGeoIntAsset, setSelectedGeoIntAsset] = useState<
     { type: "office"; office: BIOffice } | { type: "protest"; protest: ProtestEvent } | null
   >(null);
-  const [isGeoIntHudOpen, setIsGeoIntHudOpen] = useState(false);
-  const [mapZoom, setMapZoom] = useState(5);
+  const [isGeoIntHudOpen, setIsGeoIntHudOpen] = useState<boolean>(initialTacticalConfig.isHudOpen);
+  const [mapZoom, setMapZoom] = useState(DEFAULT_TACTICAL_MAP_ZOOM);
   const [isFullscreen, setIsFullscreen] = useState(false);
+
+  const hasManualAssetSelectionRef = useRef<boolean>(initialTacticalConfig.hasManualSelection);
+  const initialTacticalCenterAppliedRef = useRef<boolean>(false);
+
+  const handleSetOfficeRadius = useCallback((nextRadius: number) => {
+    setOfficeRadiusDistance(nextRadius);
+    persistTacticalMapConfig({ officeRadius: nextRadius });
+  }, []);
+
+  const handleSetUnrasRadius = useCallback((nextRadius: number) => {
+    setUnrasRadiusDistance(nextRadius);
+    persistTacticalMapConfig({ unrasRadius: nextRadius });
+  }, []);
+
+  const handleSelectGeoIntAsset = useCallback(
+    (
+      nextAsset: { type: "office"; office: BIOffice } | { type: "protest"; protest: ProtestEvent },
+      isManual: boolean = true
+    ) => {
+      if (isManual) {
+        hasManualAssetSelectionRef.current = true;
+      }
+      setSelectedGeoIntAsset(nextAsset);
+      persistTacticalMapConfig({
+        selectedAssetType: nextAsset.type,
+        selectedAssetId: nextAsset.type === "office" ? nextAsset.office.id : nextAsset.protest.id,
+        hasManualSelection: isManual ? true : hasManualAssetSelectionRef.current
+      });
+    },
+    []
+  );
 
   // Load BI offices from API if not provided via props
   useEffect(() => {
@@ -695,6 +807,65 @@ export default function InteractiveMap({
   const allBIOffices = useMemo(() => {
     return externalBIOffices && externalBIOffices.length > 0 ? externalBIOffices : fetchedBIOffices;
   }, [externalBIOffices, fetchedBIOffices]);
+
+  const kpbiHeadquarters = useMemo(() => {
+    return findKpbiHeadquartersOffice(allBIOffices);
+  }, [allBIOffices]);
+
+  // Initialize Tactical HUD target & initial map center on Kantor Pusat Bank Indonesia (Jakarta)
+  // Respects manual user selection across re-renders and refreshes; never auto-picks an UNRAS point by default.
+  useEffect(() => {
+    if (allBIOffices.length === 0) return;
+
+    const stored = getStoredTacticalMapConfig();
+
+    // 1. If operator previously manually selected a specific asset, restore it once without overwriting on subsequent renders
+    if (!selectedGeoIntAsset && stored.hasManualSelection && stored.selectedAssetId) {
+      if (stored.selectedAssetType === "office") {
+        const matchedOffice = allBIOffices.find(
+          (o) => o.id === stored.selectedAssetId || o.office_id === stored.selectedAssetId
+        );
+        if (matchedOffice && matchedOffice.latitude !== null && matchedOffice.longitude !== null) {
+          setSelectedGeoIntAsset({ type: "office", office: matchedOffice });
+          if (!initialTacticalCenterAppliedRef.current && mapRef.current && !focusProtestEvent && !selectedProvince && !selectedCity) {
+            initialTacticalCenterAppliedRef.current = true;
+            mapRef.current.setView([matchedOffice.latitude, matchedOffice.longitude], DEFAULT_TACTICAL_MAP_ZOOM);
+            setMapZoom(DEFAULT_TACTICAL_MAP_ZOOM);
+          }
+          return;
+        }
+      } else if (stored.selectedAssetType === "protest" && protestEvents && protestEvents.length > 0) {
+        const matchedProtest = protestEvents.find((p) => p.id === stored.selectedAssetId);
+        if (matchedProtest && matchedProtest.validated_lat !== null && matchedProtest.validated_lng !== null) {
+          setSelectedGeoIntAsset({ type: "protest", protest: matchedProtest });
+          if (!initialTacticalCenterAppliedRef.current && mapRef.current && !focusProtestEvent && !selectedProvince && !selectedCity) {
+            initialTacticalCenterAppliedRef.current = true;
+            mapRef.current.setView([matchedProtest.validated_lat, matchedProtest.validated_lng], DEFAULT_TACTICAL_MAP_ZOOM);
+            setMapZoom(DEFAULT_TACTICAL_MAP_ZOOM);
+          }
+          return;
+        }
+      }
+    }
+
+    // 2. Default behavior when no manual selection exists: center Tactical HUD & map on Kantor Pusat Bank Indonesia, Jakarta
+    if (!selectedGeoIntAsset && !hasManualAssetSelectionRef.current && kpbiHeadquarters) {
+      setSelectedGeoIntAsset({ type: "office", office: kpbiHeadquarters });
+      if (
+        !initialTacticalCenterAppliedRef.current &&
+        mapRef.current &&
+        kpbiHeadquarters.latitude !== null &&
+        kpbiHeadquarters.longitude !== null &&
+        !focusProtestEvent &&
+        !selectedProvince &&
+        !selectedCity
+      ) {
+        initialTacticalCenterAppliedRef.current = true;
+        mapRef.current.setView([kpbiHeadquarters.latitude, kpbiHeadquarters.longitude], DEFAULT_TACTICAL_MAP_ZOOM);
+        setMapZoom(DEFAULT_TACTICAL_MAP_ZOOM);
+      }
+    }
+  }, [allBIOffices, kpbiHeadquarters, protestEvents, selectedGeoIntAsset, focusProtestEvent, selectedProvince, selectedCity]);
 
   // Strict coordinate validation:
   // latitude >= -90 && latitude <= 90 && longitude >= -180 && longitude <= 180
@@ -1090,8 +1261,9 @@ export default function InteractiveMap({
             e.stopPropagation();
             e.preventDefault();
             marker.closePopup();
-            setSelectedGeoIntAsset({ type: "protest", protest: p });
+            handleSelectGeoIntAsset({ type: "protest", protest: p }, true);
             setIsGeoIntHudOpen(true);
+            persistTacticalMapConfig({ isHudOpen: true });
           };
         }
       });
@@ -1175,8 +1347,9 @@ export default function InteractiveMap({
             e.stopPropagation();
             e.preventDefault();
             marker.closePopup();
-            setSelectedGeoIntAsset({ type: "office", office: off });
+            handleSelectGeoIntAsset({ type: "office", office: off }, true);
             setIsGeoIntHudOpen(true);
+            persistTacticalMapConfig({ isHudOpen: true });
           };
         }
       });
@@ -1306,7 +1479,27 @@ export default function InteractiveMap({
   }, [protestEvents, showProtestLayer, unrasRadiusDistance, mapZoom, selectedGeoIntAsset]);
 
   const handleResetView = () => {
-    mapRef.current?.flyTo([-2.5489, 118.0149], 5, { duration: 1.0 });
+    hasManualAssetSelectionRef.current = false;
+    setOfficeRadiusDistance(DEFAULT_OFFICE_RADIUS_METERS);
+    setUnrasRadiusDistance(DEFAULT_UNRAS_RADIUS_METERS);
+    setIsGeoIntHudOpen(true);
+
+    const targetKpbi = kpbiHeadquarters || findKpbiHeadquartersOffice(allBIOffices);
+    if (targetKpbi && targetKpbi.latitude !== null && targetKpbi.longitude !== null) {
+      setSelectedGeoIntAsset({ type: "office", office: targetKpbi });
+      persistTacticalMapConfig({
+        officeRadius: DEFAULT_OFFICE_RADIUS_METERS,
+        unrasRadius: DEFAULT_UNRAS_RADIUS_METERS,
+        selectedAssetType: "office",
+        selectedAssetId: targetKpbi.id,
+        isHudOpen: true,
+        hasManualSelection: false
+      });
+      mapRef.current?.flyTo([targetKpbi.latitude, targetKpbi.longitude], DEFAULT_TACTICAL_MAP_ZOOM, { duration: 1.0 });
+    } else {
+      persistTacticalMapConfig({ ...DEFAULT_TACTICAL_MAP_CONFIG });
+      mapRef.current?.flyTo([-2.5489, 118.0149], 5, { duration: 1.0 });
+    }
   };
 
   const handleLocateMe = () => {
@@ -1578,13 +1771,13 @@ export default function InteractiveMap({
             data-testid="btn-radius-unras"
             onClick={() => {
               const nextMap: Record<number, number> = {
+                500: 1000,
                 1000: 1500,
                 1500: 0,
                 0: 250,
-                250: 500,
-                500: 1000
+                250: 500
               };
-              setUnrasRadiusDistance(nextMap[unrasRadiusDistance] ?? 1000);
+              handleSetUnrasRadius(nextMap[unrasRadiusDistance] ?? DEFAULT_UNRAS_RADIUS_METERS);
             }}
             title="Mengatur jarak analisis dari titik kejadian unjuk rasa."
             className={`px-2.5 sm:px-3 py-1.5 rounded-xl text-[11px] sm:text-xs font-medium border backdrop-blur-md transition-all shadow-lg flex items-center gap-1.5 cursor-pointer bg-red-500/15 border-red-500/40 text-red-300 hover:text-white hover:bg-red-500/25 ${
@@ -1608,14 +1801,14 @@ export default function InteractiveMap({
             data-testid="btn-radius-bi"
             onClick={() => {
               const nextMap: Record<number, number> = {
+                1000: 3000,
                 3000: 5000,
                 5000: 10000,
                 10000: -1,
                 [-1]: 0,
-                0: 1000,
-                1000: 3000
+                0: 1000
               };
-              setOfficeRadiusDistance(nextMap[officeRadiusDistance] ?? 3000);
+              handleSetOfficeRadius(nextMap[officeRadiusDistance] ?? DEFAULT_OFFICE_RADIUS_METERS);
             }}
             title="Mengatur jarak pemantauan dari lokasi kantor BI."
             className={`px-2.5 sm:px-3 py-1.5 rounded-xl text-[11px] sm:text-xs font-medium border backdrop-blur-md transition-all shadow-lg flex items-center gap-1.5 cursor-pointer bg-emerald-500/15 border-emerald-500/40 text-emerald-300 hover:text-white hover:bg-emerald-500/25 ${
@@ -1640,15 +1833,17 @@ export default function InteractiveMap({
             title="Menampilkan overlay informasi dan elemen situasional taktis pada peta."
             onClick={() => {
               if (!selectedGeoIntAsset) {
-                // If no asset selected, pick first verified BI Office or first protest
-                if (allBIOffices.length > 0) {
-                  const firstVerified = allBIOffices.find((o) => o.validation_status === "verified");
-                  if (firstVerified) {
-                    setSelectedGeoIntAsset({ type: "office", office: firstVerified });
-                  }
+                // Default exclusively to Kantor Pusat Bank Indonesia (Jakarta); never auto-select UNRAS
+                const defaultKpbi = kpbiHeadquarters || findKpbiHeadquartersOffice(allBIOffices);
+                if (defaultKpbi) {
+                  handleSelectGeoIntAsset({ type: "office", office: defaultKpbi }, false);
                 }
               }
-              setIsGeoIntHudOpen((o) => !o);
+              setIsGeoIntHudOpen((o) => {
+                const next = !o;
+                persistTacticalMapConfig({ isHudOpen: next });
+                return next;
+              });
             }}
             className={`px-2.5 py-1.5 rounded-xl text-[11px] sm:text-xs font-semibold border backdrop-blur-md transition-all shadow-lg flex items-center gap-1.5 cursor-pointer ${
               isGeoIntHudOpen
@@ -1734,15 +1929,18 @@ export default function InteractiveMap({
       {/* Floating Tactical GeoINT Intelligence HUD Panel */}
       <TacticalGeoIntHud
         isOpen={isGeoIntHudOpen}
-        onClose={() => setIsGeoIntHudOpen(false)}
+        onClose={() => {
+          setIsGeoIntHudOpen(false);
+          persistTacticalMapConfig({ isHudOpen: false });
+        }}
         asset={selectedGeoIntAsset}
         biOffices={allBIOffices}
         protestEvents={protestEvents || []}
         markers={validMarkers}
         officeRadius={officeRadiusDistance}
         unrasRadius={unrasRadiusDistance}
-        onChangeOfficeRadius={setOfficeRadiusDistance}
-        onChangeUnrasRadius={setUnrasRadiusDistance}
+        onChangeOfficeRadius={handleSetOfficeRadius}
+        onChangeUnrasRadius={handleSetUnrasRadius}
         onPlayCamera={(cam) => onMarkerClickRef.current(cam.id, cam)}
         onFocusMap={(lat, lng, zoom = 15) => {
           mapRef.current?.flyTo([lat, lng], zoom, { duration: 1.0 });

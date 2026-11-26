@@ -110,71 +110,9 @@ export function ExecutiveKpiStrip({
 
         {/* Unified Command Telemetry Cards */}
         <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2 sm:gap-2.5">
-          {/* 1. CCTV Readiness */}
+          {/* 1. UNRAS Sedang Berlangsung (Ongoing) */}
           <ProgramsCard
             index={0}
-            enableShimmer
-            className="p-3 sm:p-3.5 rounded-2xl ee-surface border-[var(--border-default)] hover:border-[var(--border-strong)] transition-all cursor-pointer group"
-            onClick={() => onSelectTab("directory")}
-          >
-            <div className="flex items-center justify-between gap-1 text-[11px] text-[#98A4B8]">
-              <span className="truncate">Total CCTV Nasional</span>
-              <Video className="w-3.5 h-3.5 text-[#60A5FA] group-hover:scale-110 transition-transform shrink-0" />
-            </div>
-            <p className="text-base sm:text-lg font-extrabold mt-1 font-mono tabular-nums text-[#F3F6FB] truncate">
-              {cctvStats.total_cameras.toLocaleString("id-ID")}
-            </p>
-            <div className="flex items-center justify-between text-[10px] text-[#98A4B8] mt-1 pt-1 border-t border-white/[0.06] font-mono">
-              <span>{cctvStats.total_provinces} Provinsi</span>
-              <span>{cctvStats.total_cities} Kota/Kab</span>
-            </div>
-          </ProgramsCard>
-
-          {/* 2. CCTV Online & Uptime */}
-          <ProgramsCard
-            index={1}
-            enableShimmer
-            className="p-3 sm:p-3.5 rounded-2xl ee-surface border-emerald-500/25 hover:border-emerald-400/50 transition-all cursor-pointer group"
-            onClick={() => onSelectTab("directory")}
-          >
-            <div className="flex items-center justify-between gap-1 text-[11px] text-[#98A4B8]">
-              <span className="truncate">Kamera Online (Aktif)</span>
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 group-hover:scale-110 transition-transform shrink-0" />
-            </div>
-            <p className="text-base sm:text-lg font-extrabold mt-1 font-mono tabular-nums text-emerald-400 truncate">
-              {cctvStats.online_cameras.toLocaleString("id-ID")}
-            </p>
-            <div className="flex items-center justify-between text-[10px] text-[#98A4B8] mt-1 pt-1 border-t border-white/[0.06] font-mono">
-              <span>Uptime:</span>
-              <span className="text-emerald-400 font-bold">{uptimePct}%</span>
-            </div>
-          </ProgramsCard>
-
-          {/* 3. CCTV Offline */}
-          <ProgramsCard
-            index={2}
-            enableShimmer
-            className="p-3 sm:p-3.5 rounded-2xl ee-surface border-red-500/20 hover:border-red-400/40 transition-all cursor-pointer group"
-            onClick={() => onSelectTab("directory")}
-          >
-            <div className="flex items-center justify-between gap-1 text-[11px] text-[#98A4B8]">
-              <span className="truncate">Kamera Gangguan / Offline</span>
-              <XCircle className="w-3.5 h-3.5 text-red-400 group-hover:scale-110 transition-transform shrink-0" />
-            </div>
-            <p className="text-base sm:text-lg font-extrabold mt-1 font-mono tabular-nums text-red-400 truncate">
-              {cctvStats.offline_cameras.toLocaleString("id-ID")}
-            </p>
-            <div className="flex items-center justify-between text-[10px] text-[#98A4B8] mt-1 pt-1 border-t border-white/[0.06] font-mono">
-              <span>Rasio Offline:</span>
-              <span className="text-red-400 font-semibold">
-                {(100 - parseFloat(uptimePct)).toFixed(1)}%
-              </span>
-            </div>
-          </ProgramsCard>
-
-          {/* 4. UNRAS Sedang Berlangsung (Ongoing) */}
-          <ProgramsCard
-            index={3}
             enableShimmer
             className={`p-3 sm:p-3.5 rounded-2xl ee-surface transition-all cursor-pointer group ${
               ongoingCount > 0
@@ -198,9 +136,9 @@ export function ExecutiveKpiStrip({
             </div>
           </ProgramsCard>
 
-          {/* 5. UNRAS Pemantauan Khusus & Terjadwal */}
+          {/* 2. UNRAS Pemantauan Khusus & Terjadwal */}
           <ProgramsCard
-            index={4}
+            index={1}
             enableShimmer
             className="p-3 sm:p-3.5 rounded-2xl ee-surface border-purple-500/25 hover:border-purple-400/50 transition-all cursor-pointer group"
             onClick={() => onFilterUnrasStatus?.("monitoring")}
@@ -223,9 +161,9 @@ export function ExecutiveKpiStrip({
             </div>
           </ProgramsCard>
 
-          {/* 6. Estimasi Massa & Cakupan Pengawasan */}
+          {/* 3. Estimasi Massa & Cakupan Pengawasan */}
           <ProgramsCard
-            index={5}
+            index={2}
             enableShimmer
             className="p-3 sm:p-3.5 rounded-2xl ee-surface border-blue-500/25 hover:border-blue-400/50 transition-all cursor-pointer group"
             onClick={() => onSelectTab("protests")}
@@ -242,6 +180,68 @@ export function ExecutiveKpiStrip({
             <div className="flex items-center justify-between text-[10px] text-[#98A4B8] mt-1 pt-1 border-t border-white/[0.06] font-mono">
               <span>{totalElements > 0 ? `${totalElements} Elemen • ` : ""}{affectedRegionsCount} Wilayah</span>
               <span className="text-blue-300 font-bold">{affectedProvincesCount} Provinsi</span>
+            </div>
+          </ProgramsCard>
+
+          {/* 4. CCTV Readiness */}
+          <ProgramsCard
+            index={3}
+            enableShimmer
+            className="p-3 sm:p-3.5 rounded-2xl ee-surface border-[var(--border-default)] hover:border-[var(--border-strong)] transition-all cursor-pointer group"
+            onClick={() => onSelectTab("directory")}
+          >
+            <div className="flex items-center justify-between gap-1 text-[11px] text-[#98A4B8]">
+              <span className="truncate">Total CCTV Nasional</span>
+              <Video className="w-3.5 h-3.5 text-[#60A5FA] group-hover:scale-110 transition-transform shrink-0" />
+            </div>
+            <p className="text-base sm:text-lg font-extrabold mt-1 font-mono tabular-nums text-[#F3F6FB] truncate">
+              {cctvStats.total_cameras.toLocaleString("id-ID")}
+            </p>
+            <div className="flex items-center justify-between text-[10px] text-[#98A4B8] mt-1 pt-1 border-t border-white/[0.06] font-mono">
+              <span>{cctvStats.total_provinces} Provinsi</span>
+              <span>{cctvStats.total_cities} Kota/Kab</span>
+            </div>
+          </ProgramsCard>
+
+          {/* 5. CCTV Online & Uptime */}
+          <ProgramsCard
+            index={4}
+            enableShimmer
+            className="p-3 sm:p-3.5 rounded-2xl ee-surface border-emerald-500/25 hover:border-emerald-400/50 transition-all cursor-pointer group"
+            onClick={() => onSelectTab("directory")}
+          >
+            <div className="flex items-center justify-between gap-1 text-[11px] text-[#98A4B8]">
+              <span className="truncate">Kamera Online (Aktif)</span>
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 group-hover:scale-110 transition-transform shrink-0" />
+            </div>
+            <p className="text-base sm:text-lg font-extrabold mt-1 font-mono tabular-nums text-emerald-400 truncate">
+              {cctvStats.online_cameras.toLocaleString("id-ID")}
+            </p>
+            <div className="flex items-center justify-between text-[10px] text-[#98A4B8] mt-1 pt-1 border-t border-white/[0.06] font-mono">
+              <span>Uptime:</span>
+              <span className="text-emerald-400 font-bold">{uptimePct}%</span>
+            </div>
+          </ProgramsCard>
+
+          {/* 6. CCTV Offline */}
+          <ProgramsCard
+            index={5}
+            enableShimmer
+            className="p-3 sm:p-3.5 rounded-2xl ee-surface border-red-500/20 hover:border-red-400/40 transition-all cursor-pointer group"
+            onClick={() => onSelectTab("directory")}
+          >
+            <div className="flex items-center justify-between gap-1 text-[11px] text-[#98A4B8]">
+              <span className="truncate">Kamera Gangguan / Offline</span>
+              <XCircle className="w-3.5 h-3.5 text-red-400 group-hover:scale-110 transition-transform shrink-0" />
+            </div>
+            <p className="text-base sm:text-lg font-extrabold mt-1 font-mono tabular-nums text-red-400 truncate">
+              {cctvStats.offline_cameras.toLocaleString("id-ID")}
+            </p>
+            <div className="flex items-center justify-between text-[10px] text-[#98A4B8] mt-1 pt-1 border-t border-white/[0.06] font-mono">
+              <span>Rasio Offline:</span>
+              <span className="text-red-400 font-semibold">
+                {(100 - parseFloat(uptimePct)).toFixed(1)}%
+              </span>
             </div>
           </ProgramsCard>
         </div>
