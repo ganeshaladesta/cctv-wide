@@ -19,7 +19,8 @@ import {
   Check,
   Clock,
   ExternalLink,
-  Layers
+  Layers,
+  AlertCircle
 } from "lucide-react";
 import {
   ProtestEvent,
@@ -72,6 +73,17 @@ export function ProtestDashboard({
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isSyncOpen, setIsSyncOpen] = useState(false);
+
+  // Per-record independent outbound sync tracking (supports concurrent jobs across multiple records)
+  interface RecordSyncState {
+    status: "none" | "pending" | "processing" | "success" | "failed";
+    last_error?: string | null;
+    job_id?: string | null;
+    attempts?: number;
+    max_attempts?: number;
+    retrying?: boolean;
+  }
+  const [recordSyncStates, setRecordSyncStates] = useState<Record<string, RecordSyncState>>({});
 
   // Sync state for dedicated sync panel
   const [syncLogs, setSyncLogs] = useState<ProtestSyncLog[]>([]);
@@ -211,9 +223,11 @@ export function ProtestDashboard({
     }
   };
 
-  // Fetch Protests List
-  const fetchProtests = useCallback(async () => {
-    setLoading(true);
+  // Fetch Protests List (supports silent background refresh without blocking UI with global loading spinner)
+  const fetchProtests = useCallback(async (options?: { silent?: boolean }) => {
+    if (!options?.silent) {
+      setLoading(true);
+    }
     setError(null);
     try {
       const params = new URLSearchParams();
@@ -234,15 +248,137 @@ export function ProtestDashboard({
         throw new Error(json.error || "Gagal memuat daftar aksi unjuk rasa.");
       }
 
-      setEvents(json.data || []);
+      const loadedEvents: ProtestEvent[] = json.data || [];
+      setEvents(loadedEvents);
       setTotalCount(json.total || 0);
       setTotalPages(json.totalPages || 1);
+
+      // Merge record sync status from server without overwriting active in-flight polling states with 'none'
+      setRecordSyncStates((prev) => {
+        const next = { ...prev };
+        for (const ev of loadedEvents) {
+          const serverStatus = ev.outbound_sync_status || "none";
+          const current = next[ev.id];
+          if (!current) {
+            if (serverStatus !== "none") {
+              next[ev.id] = { status: serverStatus };
+            }
+          } else if (serverStatus !== "none") {
+            next[ev.id] = { ...current, status: serverStatus };
+          }
+        }
+        return next;
+      });
     } catch (err: any) {
       setError(err.message || "Terjadi kesalahan saat memuat data.");
     } finally {
-      setLoading(false);
+      if (!options?.silent) {
+        setLoading(false);
+      }
     }
   }, [page, limit, searchQuery, statusFilter, urgencyFilter, hasCoordsFilter, locationValidationFilter]);
+
+  // Listen to immediate non-blocking save event from ProtestDetailModal
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleProtestSaved = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail;
+      if (!detail?.protestId) return;
+
+      // Immediately update the saved record in memory so UI reflects changes without waiting
+      if (detail.protest) {
+        setEvents((prev) =>
+          prev.map((item) => (item.id === detail.protestId ? { ...item, ...detail.protest, outbound_sync_status: "pending" } : item))
+        );
+      }
+
+      // Mark this specific record's sync state as pending ("Menunggu sinkronisasi Excel")
+      setRecordSyncStates((prev) => ({
+        ...prev,
+        [detail.protestId]: {
+          status: "pending",
+          job_id: detail.outbound_sync?.job_id || null,
+          attempts: detail.outbound_sync?.attempts ?? 0,
+          max_attempts: 5,
+          last_error: null,
+          retrying: false
+        }
+      }));
+    };
+
+    window.addEventListener("scc-protest-saved", handleProtestSaved);
+    return () => window.removeEventListener("scc-protest-saved", handleProtestSaved);
+  }, []);
+
+  // Poll independent outbound sync status for all active pending/processing records concurrently
+  useEffect(() => {
+    const activeIds = Object.entries(recordSyncStates)
+      .filter(([, state]) => state.status === "pending" || state.status === "processing")
+      .map(([id]) => id);
+
+    if (activeIds.length === 0) return;
+
+    const pollActiveRecords = async () => {
+      await Promise.allSettled(
+        activeIds.map(async (id) => {
+          try {
+            const res = await fetch(`/api/protests/${id}/sync-status`, { cache: "no-store" });
+            const json = await res.json();
+            if (res.ok && json.success && json.data) {
+              setRecordSyncStates((prev) => ({
+                ...prev,
+                [id]: {
+                  ...prev[id],
+                  status: json.data.status || "none",
+                  last_error: json.data.last_error || null,
+                  job_id: json.data.job_id || null,
+                  attempts: json.data.attempts ?? 0,
+                  max_attempts: json.data.max_attempts ?? 5,
+                  retrying: false
+                }
+              }));
+            }
+          } catch {}
+        })
+      );
+    };
+
+    const interval = setInterval(pollActiveRecords, 3500);
+    return () => clearInterval(interval);
+  }, [recordSyncStates]);
+
+  const handleRetryRecordSync = async (protestId: string) => {
+    setRecordSyncStates((prev) => ({
+      ...prev,
+      [protestId]: {
+        ...(prev[protestId] || { status: "failed" }),
+        retrying: true
+      }
+    }));
+    try {
+      const res = await fetch(`/api/protests/${protestId}/sync-status`, { method: "POST" });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Gagal menjadwalkan ulang sinkronisasi.");
+      setRecordSyncStates((prev) => ({
+        ...prev,
+        [protestId]: {
+          status: "pending",
+          job_id: json.data?.job_id || prev[protestId]?.job_id || null,
+          last_error: null,
+          retrying: false
+        }
+      }));
+    } catch (err: any) {
+      setRecordSyncStates((prev) => ({
+        ...prev,
+        [protestId]: {
+          ...(prev[protestId] || { status: "failed" }),
+          retrying: false
+        }
+      }));
+      alert(err.message || "Gagal menjadwalkan ulang sinkronisasi.");
+    }
+  };
 
   const handleQuickVerify = async (event: ProtestEvent) => {
     if (!event.suggested_lat || !event.suggested_lng) return;
@@ -285,12 +421,12 @@ export function ProtestDashboard({
     setIsDetailOpen(true);
   };
 
-  const handleDataRefresh = async () => {
-    setDataRefreshing(true);
+  const handleDataRefresh = async (silent = false) => {
+    if (!silent) setDataRefreshing(true);
     try {
       await Promise.all([
         fetchStats(),
-        fetchProtests(),
+        fetchProtests({ silent: true }),
         fetchSyncData()
       ]);
       onProtestDataChange?.();
@@ -298,11 +434,11 @@ export function ProtestDashboard({
         window.dispatchEvent(new CustomEvent("scc-protest-updated"));
       }
     } finally {
-      setDataRefreshing(false);
+      if (!silent) setDataRefreshing(false);
     }
   };
 
-  const handleRefresh = handleDataRefresh;
+  const handleRefresh = () => handleDataRefresh(true);
 
   return (
     <div className="w-full space-y-5">
@@ -324,7 +460,7 @@ export function ProtestDashboard({
           {/* Data Refresh Button */}
           <button
             type="button"
-            onClick={handleDataRefresh}
+            onClick={() => handleDataRefresh(false)}
             disabled={dataRefreshing}
             className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-[#161C2B] hover:bg-[#1E2638] text-[#98A4B8] hover:text-white border border-[var(--border-default)] transition-colors flex items-center gap-1.5"
             title="Muat ulang data terbaru dari database (tanpa mengubah data sumber)"
@@ -896,6 +1032,69 @@ export function ProtestDashboard({
                       <span className="text-[11px] text-[#64748B]">
                         {event.kode_unras} • {event.id_kejadian}
                       </span>
+
+                      {/* Per-Record Independent Outbound Excel Sync Status Badge */}
+                      {(() => {
+                        const recSync = recordSyncStates[event.id];
+                        const effStatus = recSync?.status || event.outbound_sync_status || "none";
+                        if (effStatus === "pending") {
+                          return (
+                            <span
+                              data-testid={`sync-badge-${event.kode_unras}`}
+                              className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/40 inline-flex items-center gap-1"
+                            >
+                              <Clock className="w-3 h-3 animate-pulse" />
+                              <span>Menunggu sinkronisasi Excel</span>
+                            </span>
+                          );
+                        }
+                        if (effStatus === "processing") {
+                          return (
+                            <span
+                              data-testid={`sync-badge-${event.kode_unras}`}
+                              className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-500/20 text-blue-300 border border-blue-500/40 inline-flex items-center gap-1"
+                            >
+                              <RefreshCw className="w-3 h-3 animate-spin" />
+                              <span>Sedang menyinkronkan Excel</span>
+                            </span>
+                          );
+                        }
+                        if (effStatus === "success") {
+                          return (
+                            <span
+                              data-testid={`sync-badge-${event.kode_unras}`}
+                              className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 inline-flex items-center gap-1"
+                            >
+                              <CheckCircle2 className="w-3 h-3" />
+                              <span>Excel berhasil diperbarui</span>
+                            </span>
+                          );
+                        }
+                        if (effStatus === "failed") {
+                          return (
+                            <span className="inline-flex items-center gap-1.5">
+                              <span
+                                data-testid={`sync-badge-${event.kode_unras}`}
+                                title={recSync?.last_error || "Sinkronisasi Excel gagal"}
+                                className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/40 inline-flex items-center gap-1"
+                              >
+                                <AlertCircle className="w-3 h-3" />
+                                <span>Sinkronisasi Excel gagal</span>
+                              </span>
+                              <button
+                                type="button"
+                                disabled={recSync?.retrying}
+                                onClick={() => handleRetryRecordSync(event.id)}
+                                className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 border border-rose-500/30 inline-flex items-center gap-1 cursor-pointer transition-colors"
+                              >
+                                <RefreshCw className={`w-2.5 h-2.5 ${recSync?.retrying ? "animate-spin" : ""}`} />
+                                <span>{recSync?.retrying ? "Mencoba..." : "Coba Ulang"}</span>
+                              </button>
+                            </span>
+                          );
+                        }
+                        return null;
+                      })()}
                     </div>
 
                     <h2

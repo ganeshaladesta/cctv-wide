@@ -581,6 +581,15 @@ test("17. Supabase Database Webhook POST triggers worker on INSERT with CRON_SEC
     const unauthRes = await workerPostHandler(unauthReq);
     assert.equal(unauthRes.status, 401, "Invalid CRON_SECRET must be rejected with 401");
 
+    // 1B. Forged x-scc-user-role header without valid secret must also be rejected with 401
+    const roleBypassReq = new NextRequest("http://localhost/api/integrations/unras/outbound-worker", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-scc-user-role": "admin" },
+      body: JSON.stringify({ type: "INSERT", table: "unras_outbound_jobs", record: enqueueRes.job })
+    });
+    const roleBypassRes = await workerPostHandler(roleBypassReq);
+    assert.equal(roleBypassRes.status, 401, "x-scc-user-role bypass must be rejected with 401");
+
     // 2. Non-pending UPDATE webhook must be skipped safely
     const updateReq = new NextRequest("http://localhost/api/integrations/unras/outbound-worker", {
       method: "POST",
@@ -669,7 +678,7 @@ test("18. Server-side post-enqueue fallback (verifyAndRecoverUnclaimedJob) recov
   }
 });
 
-test("19. SQL setup script (supabase/setup_unras_outbound_webhook.sql) is idempotent, uses pg_net + Vault, and only triggers AFTER INSERT", () => {
+test("19. SQL setup script (supabase/setup_unras_outbound_webhook.sql) is idempotent, uses pg_net + Vault exclusively (no plaintext fallback table), and vercel.json has no outbound cron", () => {
   const sqlPath = path.resolve(process.cwd(), "supabase/setup_unras_outbound_webhook.sql");
   assert.ok(fs.existsSync(sqlPath), "supabase/setup_unras_outbound_webhook.sql must exist");
   const sql = fs.readFileSync(sqlPath, "utf8");
@@ -680,8 +689,204 @@ test("19. SQL setup script (supabase/setup_unras_outbound_webhook.sql) is idempo
   assert.match(sql, /AFTER INSERT ON public\.unras_outbound_jobs/i);
   assert.doesNotMatch(sql, /AFTER INSERT OR UPDATE/i, "Must never trigger on UPDATE");
   assert.doesNotMatch(sql, /AFTER UPDATE/i, "Must never trigger on UPDATE");
+  assert.doesNotMatch(sql, /CREATE TABLE.*unras_webhook_config/i, "Must never store CRON_SECRET in plaintext fallback table");
   assert.match(sql, /DROP TRIGGER IF EXISTS trg_unras_outbound_jobs_after_insert_webhook/i);
+
+  const vercelJsonPath = path.resolve(process.cwd(), "vercel.json");
+  const vercelJson = JSON.parse(fs.readFileSync(vercelJsonPath, "utf8"));
+  const crons = vercelJson.crons || [];
+  for (const c of crons) {
+    assert.notEqual(c.schedule, "* * * * *", "vercel.json must not contain per-minute cron");
+    assert.ok(!String(c.path).includes("outbound-worker"), "vercel.json must not contain outbound-worker cron");
+  }
 });
+
+test("20. Rapid multi-record editing (Save U1640, immediately edit and save U1639 while Power Automate is delayed): both jobs run independently without blocking or overwriting", async () => {
+  const processedPayloads = [];
+  const mockServer = http.createServer((req, res) => {
+    let raw = "";
+    req.on("data", (c) => { raw += c; });
+    req.on("end", () => {
+      const parsed = JSON.parse(raw);
+      processedPayloads.push(parsed);
+      // Simulate delayed Power Automate execution (120ms delay in test)
+      setTimeout(() => {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ updated: parsed.id_unras }));
+      }, 120);
+    });
+  });
+
+  await new Promise((resolve) => mockServer.listen(0, "127.0.0.1", resolve));
+  const port = mockServer.address().port;
+  process.env.POWER_AUTOMATE_OUTBOUND_URL = `http://127.0.0.1:${port}/multi-job-test`;
+
+  try {
+    const suffix = Date.now();
+    const u1640 = await protestStore.createProtest({
+      id_kejadian: `KEJ-20261125-U1640-${suffix}`,
+      kode_unras: `KEJ-20261125-U1640-${suffix}`,
+      tanggal: "2026-11-25",
+      lokasi: "Gedung DPR/MPR RI",
+      kota_kabupaten: "Jakarta Pusat",
+      isu_tuntutan: "Tuntutan Awal U1640",
+      status: "scheduled"
+    });
+
+    const u1639 = await protestStore.createProtest({
+      id_kejadian: `KEJ-20261125-U1639-${suffix}`,
+      kode_unras: `KEJ-20261125-U1639-${suffix}`,
+      tanggal: "2026-11-25",
+      lokasi: "Patung Kuda Monas",
+      kota_kabupaten: "Jakarta Pusat",
+      isu_tuntutan: "Tuntutan Awal U1639",
+      status: "scheduled"
+    });
+
+    // 1. Operator edits and saves U1640
+    const t0 = Date.now();
+    const updated1640 = await protestStore.updateProtest(u1640.id, {
+      situation_summary: "Update operator U1640",
+      status: "ongoing"
+    }, { id: "op-1", name: "Operator 1", email: "op1@scc.go.id", role: "operator" });
+    const q1640 = await enqueueOutboundSync(updated1640, { origin: "scc", route: "PATCH /api/protests/[id]" });
+    const save1640Ms = Date.now() - t0;
+
+    assert.ok(q1640.queued && q1640.job, "U1640 job must be durably enqueued");
+    assert.ok(save1640Ms < 100, `Save U1640 acceptance must not wait for Power Automate (<100ms, got ${save1640Ms}ms)`);
+    assert.equal(q1640.job.status, "pending");
+
+    // 2. Operator immediately opens, edits, and saves U1639 while U1640 is still pending/in-flight
+    const t1 = Date.now();
+    const updated1639 = await protestStore.updateProtest(u1639.id, {
+      situation_summary: "Update operator U1639",
+      status: "completed"
+    }, { id: "op-1", name: "Operator 1", email: "op1@scc.go.id", role: "operator" });
+    const q1639 = await enqueueOutboundSync(updated1639, { origin: "scc", route: "PATCH /api/protests/[id]" });
+    const save1639Ms = Date.now() - t1;
+
+    assert.ok(q1639.queued && q1639.job, "U1639 job must be durably enqueued");
+    assert.ok(save1639Ms < 100, `Save U1639 acceptance must not wait for Power Automate (<100ms, got ${save1639Ms}ms)`);
+    assert.notEqual(q1640.job.id, q1639.job.id, "Each job must have an independent job ID");
+    assert.notEqual(q1640.job.correlation_id, q1639.job.correlation_id, "Each job must have an independent correlation ID");
+
+    // 3. Two concurrent worker invocations claim and process U1640 and U1639 independently
+    const [claim1, claim2] = [
+      await claimPendingOutboundJob("worker-concurrent-1"),
+      await claimPendingOutboundJob("worker-concurrent-2")
+    ];
+    assert.ok(claim1 && claim2, "Both pending jobs must be claimable by independent workers");
+    assert.notEqual(claim1.id, claim2.id, "Workers must never claim the same job");
+
+    const [res1, res2] = await Promise.all([
+      processOutboundJob(claim1),
+      processOutboundJob(claim2)
+    ]);
+    assert.equal(res1.success, true);
+    assert.equal(res2.success, true);
+
+    // 4. Verify each record has its own independent status and preserved SCC data
+    const finalJob1640 = await getLatestOutboundJobByProtestId(u1640.id);
+    const finalJob1639 = await getLatestOutboundJobByProtestId(u1639.id);
+    assert.equal(finalJob1640?.status, "success");
+    assert.equal(finalJob1639?.status, "success");
+
+    const stored1640 = await protestStore.getProtestById(u1640.id);
+    const stored1639 = await protestStore.getProtestById(u1639.id);
+    assert.equal(stored1640?.outbound_sync_status, "success");
+    assert.equal(stored1640?.situation_summary, "Update operator U1640");
+    assert.equal(stored1639?.outbound_sync_status, "success");
+    assert.equal(stored1639?.situation_summary, "Update operator U1639");
+  } finally {
+    delete process.env.POWER_AUTOMATE_OUTBOUND_URL;
+    mockServer.close();
+  }
+});
+
+test("21. One failed job does not block another job, and Excel sync failure never rolls back SCC data", async () => {
+  const mockServer = http.createServer((req, res) => {
+    let raw = "";
+    req.on("data", (c) => { raw += c; });
+    req.on("end", () => {
+      const parsed = JSON.parse(raw);
+      if (String(parsed.id_unras).includes("FAIL-FIRST")) {
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Row not found in Excel Table3" }));
+      } else {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ status: "ok" }));
+      }
+    });
+  });
+
+  await new Promise((resolve) => mockServer.listen(0, "127.0.0.1", resolve));
+  const port = mockServer.address().port;
+  process.env.POWER_AUTOMATE_OUTBOUND_URL = `http://127.0.0.1:${port}/partial-failure-test`;
+
+  try {
+    const suffix = Date.now();
+    const failingProtest = await protestStore.createProtest({
+      id_kejadian: `KEJ-FAIL-${suffix}`,
+      kode_unras: `UNR-FAIL-FIRST-${suffix}`,
+      tanggal: "2026-11-25",
+      lokasi: "Lokasi Gagal Excel",
+      kota_kabupaten: "Jakarta Pusat",
+      isu_tuntutan: "Aksi 1",
+      status: "ongoing",
+      situation_summary: "Data SCC Tersimpan Aman"
+    });
+
+    const succeedingProtest = await protestStore.createProtest({
+      id_kejadian: `KEJ-OK-${suffix}`,
+      kode_unras: `UNR-OK-SECOND-${suffix}`,
+      tanggal: "2026-11-25",
+      lokasi: "Lokasi Sukses Excel",
+      kota_kabupaten: "Jakarta Pusat",
+      isu_tuntutan: "Aksi 2",
+      status: "completed"
+    });
+
+    await enqueueOutboundSync(failingProtest, { origin: "scc" });
+    await enqueueOutboundSync(succeedingProtest, { origin: "scc" });
+
+    // Worker processes up to 2 jobs: first job fails (404), second job must still be processed and succeed
+    const workerRes = await runOutboundSyncWorker({ maxJobs: 2 });
+    assert.equal(workerRes.processed, 2, "Worker must process both jobs without being blocked by the first failure");
+    assert.equal(workerRes.failed, 1);
+    assert.equal(workerRes.succeeded, 1);
+
+    // Verify failing protest keeps its SCC data intact while showing failed sync state
+    const storedFailing = await protestStore.getProtestById(failingProtest.id);
+    assert.equal(storedFailing?.situation_summary, "Data SCC Tersimpan Aman", "SCC data must never be rolled back on Excel sync failure");
+    assert.equal(storedFailing?.outbound_sync_status, "failed");
+
+    // Verify second protest succeeded independently
+    const storedSucceeding = await protestStore.getProtestById(succeedingProtest.id);
+    assert.equal(storedSucceeding?.outbound_sync_status, "success");
+  } finally {
+    delete process.env.POWER_AUTOMATE_OUTBOUND_URL;
+    mockServer.close();
+  }
+});
+
+test("22. Non-blocking Save UX contract in ProtestDetailModal and ProtestDashboard", () => {
+  const modalPath = path.resolve(process.cwd(), "src/components/protests/protest-detail-modal.tsx");
+  const dashboardPath = path.resolve(process.cwd(), "src/components/protests/protest-dashboard.tsx");
+  const modalCode = fs.readFileSync(modalPath, "utf8");
+  const dashboardCode = fs.readFileSync(dashboardPath, "utf8");
+
+  // Verify modal closes immediately via handleDurableSaveAccepted and shows required toast & status
+  assert.match(modalCode, /Perubahan berhasil disimpan/);
+  assert.match(modalCode, /Menunggu sinkronisasi Excel/);
+  assert.match(modalCode, /handleDurableSaveAccepted/);
+  assert.match(modalCode, /onClose\(\)/);
+
+  // Verify dashboard tracks per-record sync states independently and supports retry
+  assert.match(dashboardCode, /recordSyncStates/);
+  assert.match(dashboardCode, /Menunggu sinkronisasi Excel/);
+  assert.match(dashboardCode, /handleRetryRecordSync/);
+});
+
 
 
 

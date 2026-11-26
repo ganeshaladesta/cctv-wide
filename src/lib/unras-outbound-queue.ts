@@ -373,6 +373,30 @@ export async function updateOutboundJob(jobId: string, updates: Partial<UnrasOut
 }
 
 /**
+ * Safely updates protest.outbound_sync_status ONLY if the given jobId is still the
+ * latest outbound job for that protest. Prevents an older job from overwriting a
+ * newer job's status on the same protest record.
+ */
+async function updateProtestSyncStatusIfLatestJob(
+  protestId: string,
+  jobId: string,
+  updates: { outbound_sync_status: "pending" | "success" | "failed" | "none"; last_outbound_synced_at?: string }
+): Promise<void> {
+  try {
+    const latestJob = await getLatestOutboundJobByProtestId(protestId);
+    if (latestJob && latestJob.id !== jobId) {
+      // A newer job exists for this protest; do not overwrite its status
+      return;
+    }
+    await protestStore.updateProtest(
+      protestId,
+      updates,
+      { id: "system-worker", name: "Outbound Worker", email: "system@scc.go.id", role: "admin" }
+    );
+  } catch {}
+}
+
+/**
  * Executes transmission of a claimed outbound job to Power Automate.
  */
 export async function processOutboundJob(
@@ -393,11 +417,9 @@ export async function processOutboundJob(
       locked_at: null
     });
 
-    try {
-      await protestStore.updateProtest(job.protest_id, {
-        outbound_sync_status: "failed"
-      }, { id: "system-worker", name: "Outbound Worker", email: "system@scc.go.id", role: "admin" });
-    } catch {}
+    await updateProtestSyncStatusIfLatestJob(job.protest_id, job.id, {
+      outbound_sync_status: "failed"
+    });
 
     logQueueDiagnostic({
       correlation_id: correlationId,
@@ -450,13 +472,11 @@ export async function processOutboundJob(
         locked_at: null
       });
 
-      // Update protest record
-      try {
-        await protestStore.updateProtest(job.protest_id, {
-          outbound_sync_status: "success",
-          last_outbound_synced_at: now
-        }, { id: "system-worker", name: "Outbound Worker", email: "system@scc.go.id", role: "admin" });
-      } catch {}
+      // Update protest record only if this job is still the latest job for this protest
+      await updateProtestSyncStatusIfLatestJob(job.protest_id, job.id, {
+        outbound_sync_status: "success",
+        last_outbound_synced_at: now
+      });
 
       logQueueDiagnostic({
         correlation_id: correlationId,
@@ -488,11 +508,9 @@ export async function processOutboundJob(
         locked_at: null
       });
 
-      try {
-        await protestStore.updateProtest(job.protest_id, {
-          outbound_sync_status: "failed"
-        }, { id: "system-worker", name: "Outbound Worker", email: "system@scc.go.id", role: "admin" });
-      } catch {}
+      await updateProtestSyncStatusIfLatestJob(job.protest_id, job.id, {
+        outbound_sync_status: "failed"
+      });
 
       logQueueDiagnostic({
         correlation_id: correlationId,
@@ -526,11 +544,9 @@ export async function processOutboundJob(
         locked_at: null
       });
 
-      try {
-        await protestStore.updateProtest(job.protest_id, {
-          outbound_sync_status: "failed"
-        }, { id: "system-worker", name: "Outbound Worker", email: "system@scc.go.id", role: "admin" });
-      } catch {}
+      await updateProtestSyncStatusIfLatestJob(job.protest_id, job.id, {
+        outbound_sync_status: "failed"
+      });
 
       logQueueDiagnostic({
         correlation_id: correlationId,
@@ -565,11 +581,9 @@ export async function processOutboundJob(
         locked_at: null
       });
 
-      try {
-        await protestStore.updateProtest(job.protest_id, {
-          outbound_sync_status: "failed"
-        }, { id: "system-worker", name: "Outbound Worker", email: "system@scc.go.id", role: "admin" });
-      } catch {}
+      await updateProtestSyncStatusIfLatestJob(job.protest_id, job.id, {
+        outbound_sync_status: "failed"
+      });
 
       logQueueDiagnostic({
         correlation_id: correlationId,
@@ -637,11 +651,9 @@ async function handleJobFailure(
       locked_at: null
     });
 
-    try {
-      await protestStore.updateProtest(job.protest_id, {
-        outbound_sync_status: "failed"
-      }, { id: "system-worker", name: "Outbound Worker", email: "system@scc.go.id", role: "admin" });
-    } catch {}
+    await updateProtestSyncStatusIfLatestJob(job.protest_id, job.id, {
+      outbound_sync_status: "failed"
+    });
 
     logQueueDiagnostic({
       correlation_id: correlationId,
@@ -709,11 +721,9 @@ async function handleJobFailure(
     locked_at: null
   });
 
-  try {
-    await protestStore.updateProtest(job.protest_id, {
-      outbound_sync_status: "failed"
-    }, { id: "system-worker", name: "Outbound Worker", email: "system@scc.go.id", role: "admin" });
-  } catch {}
+  await updateProtestSyncStatusIfLatestJob(job.protest_id, job.id, {
+    outbound_sync_status: "failed"
+  });
 
   logQueueDiagnostic({
     correlation_id: correlationId,

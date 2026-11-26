@@ -2,16 +2,16 @@
 
 Dokumen ini menjelaskan cara mengaktifkan dan mengonfigurasi pemicu event-driven berbasis **PostgreSQL Trigger + `pg_net` + Supabase Vault** pada tabel `public.unras_outbound_jobs` untuk proyek **SCC Eagle Eyes**.
 
-Arsitektur ini menggantikan Vercel Cron per menit (`* * * * *`) sehingga **100% kompatibel dengan Vercel Hobby**, memiliki latensi pemicu instan begitu transaksi `INSERT` di-commit, serta tidak pernah menyimpan `CRON_SECRET` secara hardcoded di dalam kode sumber maupun repositori Git.
+Arsitektur ini menggantikan Vercel Cron per menit (`* * * * *`) sehingga **100% kompatibel dengan Vercel Hobby**, memiliki latensi pemicu instan begitu transaksi `INSERT` di-commit, serta tidak pernah menyimpan `CRON_SECRET` secara hardcoded di kode sumber, Git, maupun tabel plaintext.
 
 ---
 
 ## 1. Kapabilitas Supabase & `pg_net`
 
-- **`pg_net` Extension**: Didukung penuh secara native pada seluruh proyek Supabase PostgreSQL (`pg_available_extensions WHERE name = 'pg_net'`). Ekstensi ini menyediakan fungsi `net.http_post(...)` yang bekerja secara **asinkron dan transaksional** melalui tabel antrean internal `net.http_request_queue`.
+- **`pg_net` Extension**: Didukung secara native pada Supabase PostgreSQL (`pg_available_extensions WHERE name = 'pg_net'`). Menyediakan fungsi `net.http_post(...)` yang bekerja secara **asinkron dan transaksional** melalui tabel antrean internal `net.http_request_queue`.
 - **Jaminan Transaksional (`AFTER INSERT`)**: Request HTTP ke `/api/integrations/unras/outbound-worker` hanya dikirim oleh background worker `pg_net` **setelah** transaksi `INSERT` pada `public.unras_outbound_jobs` berhasil di-commit (`COMMIT`). Jika transaksi dibatalkan (`ROLLBACK`), request HTTP otomatis ikut dibatalkan.
-- **Isolasi Kegagalan (`EXCEPTION WHEN OTHERS`)**: Fungsi trigger `public.trigger_unras_outbound_worker_pg_net()` membungkus pemanggilan `net.http_post` di dalam blok `EXCEPTION`. Apabila terjadi gangguan pada `pg_net` atau konfigurasi Vault belum lengkap, transaksi `INSERT` **tidak akan pernah gagal** — job tetap tersimpan dengan aman sebagai `status = 'pending'` di `public.unras_outbound_jobs` dan akan diproses oleh mekanisme recovery server.
-- **Supabase Vault (`supabase_vault`)**: Menyimpan `CRON_SECRET` dan URL produksi Vercel secara terenkripsi pada tabel internal Vault dan hanya dapat dibaca melalui view `vault.decrypted_secrets` oleh fungsi `SECURITY DEFINER` dengan `search_path` yang terkunci.
+- **Isolasi Kegagalan (`EXCEPTION WHEN OTHERS`)**: Fungsi trigger `public.trigger_unras_outbound_worker_pg_net()` membungkus pembacaan Vault dan pemanggilan `net.http_post` di dalam blok `EXCEPTION`. Apabila terjadi gangguan pada `pg_net` atau secret belum tersedia, transaksi `INSERT` **tidak akan pernah gagal** — job tetap tersimpan dengan aman sebagai `status = 'pending'` di `public.unras_outbound_jobs`.
+- **Penyimpanan Rahasia Eksklusif di Supabase Vault (`supabase_vault`)**: `CRON_SECRET` dan URL worker produksi disimpan secara terenkripsi di **Supabase Vault** (`vault.secrets`) dan hanya didekripsi saat runtime melalui `vault.decrypted_secrets` oleh fungsi trigger `SECURITY DEFINER` dengan `search_path` yang terkunci. Tidak ada tabel fallback plaintext yang digunakan.
 
 ---
 
@@ -21,14 +21,12 @@ Arsitektur ini menggantikan Vercel Cron per menit (`* * * * *`) sehingga **100% 
 
 Buka **Supabase Dashboard** $\rightarrow$ **SQL Editor**, lalu jalankan langkah-langkah berikut secara berurutan:
 
-### Langkah 1 — Aktifkan Ekstensi `pg_net`
-Pastikan ekstensi `pg_net` aktif:
+### Langkah 1 — Aktifkan Ekstensi `pg_net` dan `supabase_vault`
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS pg_net;
+CREATE EXTENSION IF NOT EXISTS supabase_vault;
 ```
-
-*(Opsional: Anda juga dapat mengaktifkannya melalui menu **Supabase Dashboard $\rightarrow$ Database $\rightarrow$ Extensions** dengan mencari `pg_net` dan mengklik Enable).*
 
 ---
 
@@ -97,40 +95,23 @@ END $$;
 Salin dan jalankan seluruh isi file [supabase/setup_unras_outbound_webhook.sql](file:///d:/MORNINGSTAR/cctv/supabase/setup_unras_outbound_webhook.sql) di **Supabase SQL Editor**.
 
 Script tersebut secara idempoten akan:
-1. Memastikan `pg_net` aktif.
-2. Membuat skema fallback terkunci `private.unras_webhook_config` (RLS aktif, `REVOKE ALL` dari `PUBLIC`, `anon`, dan `authenticated`).
-3. Membuat fungsi trigger `public.trigger_unras_outbound_worker_pg_net()` (`SECURITY DEFINER`, `SET search_path = pg_catalog, public, net, extensions`).
-4. Menghapus duplikat trigger webhook lama (jika ada) dan memasang trigger tunggal `trg_unras_outbound_jobs_after_insert_webhook` (**hanya** `AFTER INSERT FOR EACH ROW`).
-
----
-
-### Alternatif Aman Jika Supabase Vault Tidak Tersedia
-
-Apabila instance PostgreSQL Anda tidak mengaktifkan `supabase_vault`, fungsi trigger secara otomatis membaca dari tabel terproteksi `private.unras_webhook_config` yang dibuat oleh script setup (tidak dapat diakses oleh `anon` maupun `authenticated`). Untuk mengisi konfigurasi pada tabel fallback tersebut, jalankan di SQL Editor sebagai `postgres` superuser:
-
-```sql
-INSERT INTO private.unras_webhook_config (key, value, updated_at)
-VALUES
-  ('unras_outbound_worker_url', 'https://<VERCEL_PRODUCTION_DOMAIN>/api/integrations/unras/outbound-worker', NOW()),
-  ('unras_outbound_cron_secret', '<CRON_SECRET_ANDA>', NOW())
-ON CONFLICT (key) DO UPDATE
-  SET value = EXCLUDED.value,
-      updated_at = NOW();
-```
+1. Memastikan ekstensi `pg_net` dan `supabase_vault` aktif.
+2. Membuat fungsi trigger `public.trigger_unras_outbound_worker_pg_net()` (`SECURITY DEFINER`, `SET search_path = pg_catalog, public, net, vault, extensions`).
+3. Menghapus duplikat trigger webhook lama (jika ada) dan memasang trigger tunggal `trg_unras_outbound_jobs_after_insert_webhook` (**hanya** `AFTER INSERT FOR EACH ROW`).
 
 ---
 
 ## 3. Verifikasi Instalasi Trigger & Secret
 
-Jalankan query verifikasi berikut di **Supabase SQL Editor** (query ini aman dan **tidak** menampilkan nilai teks rahasia `CRON_SECRET`):
+Jalankan query verifikasi berikut di **Supabase SQL Editor** (query ini aman dan **tidak** menampilkan nilai plaintext `CRON_SECRET`):
 
 ```sql
--- 1. Verifikasi ekstensi pg_net aktif
+-- 1. Verifikasi ekstensi pg_net dan supabase_vault aktif
 SELECT extname, extversion
 FROM pg_extension
 WHERE extname IN ('pg_net', 'supabase_vault');
 
--- 2. Verifikasi secret terdaftar di Vault (tanpa mencetak nilai secret)
+-- 2. Verifikasi secret terdaftar di Vault (tanpa mencetak nilai decrypted_secret)
 SELECT name, description, created_at, updated_at
 FROM vault.secrets
 WHERE name IN ('unras_outbound_worker_url', 'unras_outbound_cron_secret');
@@ -153,11 +134,9 @@ Hasil yang diharapkan pada query #3:
 
 ## 4. Cara Menguji Trigger dengan Rekor Antrean Terkontrol
 
-Untuk menguji bahwa `INSERT` ke `public.unras_outbound_jobs` memicu `pg_net` dan diproses oleh worker:
-
-1. **Uji melalui Aplikasi SCC (Direkomendasikan)**:
-   - Buka salah satu data UNRAS di SCC Eagle Eyes, ubah catatan atau status, lalu klik **Simpan**.
-   - Atau jalankan pengujian terkontrol di SQL Editor untuk melihat respons HTTP `pg_net`:
+1. **Melalui Aplikasi SCC**:
+   - Buka salah satu data UNRAS di SCC Eagle Eyes, ubah catatan atau status, lalu klik **Simpan**. Modal akan langsung tertutup setelah database SCC menerima perubahan, menampilkan toast **"Perubahan berhasil disimpan"** dan status **"Menunggu sinkronisasi Excel"**.
+2. **Verifikasi Pengiriman `pg_net` di SQL Editor**:
 
 ```sql
 -- Pantau log pengiriman HTTP terbaru dari pg_net
@@ -186,19 +165,27 @@ ORDER BY created_at DESC
 LIMIT 5;
 ```
 
-Jika konfigurasi benar:
-- Tabel `net._http_response` akan mencatat `status_code = 200` dari endpoint `/api/integrations/unras/outbound-worker`.
-- Baris pada `public.unras_outbound_jobs` akan bergerak dari `pending` $\rightarrow$ `processing` $\rightarrow$ `success`.
+---
+
+## 5. Batasan Recovery Tanpa Per-Minute External Cron
+
+Karena paket Vercel Hobby tidak mendukung Cron per menit (`* * * * *`):
+- **Pemicu Utama**: Setiap `INSERT` job baru memicu worker secara langsung melalui PostgreSQL `AFTER INSERT` + `pg_net`.
+- **Pemicu Recovery untuk Job yang Gagal Sementara (5xx Backoff) atau Webhook Gagal**:
+  - Karena trigger `pg_net` hanya berjalan pada `AFTER INSERT` (bukan timer berkala setiap menit), job yang gagal akibat error HTTP 5xx atau terlewat karena gangguan jaringan `pg_net` dipulihkan ketika salah satu dari event berikut terjadi:
+    1. **INSERT Job Berikutnya (FIFO Drain)**: Setiap kali ada perubahan UNRAS baru yang di-save, worker yang terpicu akan memproses job tertua yang sudah jatuh tempo terlebih dahulu (`ORDER BY created_at ASC FOR UPDATE SKIP LOCKED`).
+    2. **Polling Status / Aktivitas Dashboard Operator**: Saat UI memantau `GET /api/protests/[id]/sync-status` untuk job aktif atau saat halaman dashboard dimuat.
+    3. **Tombol Manual Retry Operator**: Operator menekan tombol **"Coba Sinkronkan Ulang"** (`POST /api/protests/[id]/sync-status`) pada kartu/baris yang gagal.
+    4. **Cron Harian Vercel (`0 22 * * *`)**: Rute `/api/protests/sync` melakukan *background sweep* atas job pending yang sudah jatuh tempo.
+  - **Catatan Kejujuran Teknis**: Tanpa scheduler eksternal per menit, apabila sebuah job mengalami error 5xx dan *tidak ada* aktivitas operator di dashboard serta *tidak ada* `INSERT` job baru sama sekali, job retry tersebut baru akan tersapu otomatis pada jadwal cron berikutnya atau saat operator membuka dashboard / menekan tombol Retry.
 
 ---
 
-## 5. Prosedur Rollback / Menghapus Trigger Secara Aman
+## 6. Prosedur Rollback / Menghapus Trigger Secara Aman
 
 Apabila Anda perlu menonaktifkan atau menghapus trigger `pg_net` tanpa menghapus tabel `public.unras_outbound_jobs` maupun data antrean:
 
 ```sql
--- Hapus trigger dan fungsi pemicu pg_net (data antrean di unras_outbound_jobs tetap utuh)
 DROP TRIGGER IF EXISTS trg_unras_outbound_jobs_after_insert_webhook ON public.unras_outbound_jobs;
 DROP FUNCTION IF EXISTS public.trigger_unras_outbound_worker_pg_net();
 ```
-

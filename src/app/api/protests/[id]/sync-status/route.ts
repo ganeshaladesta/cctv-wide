@@ -31,8 +31,7 @@ function scheduleBackgroundWorkerRecovery(task: () => Promise<any>) {
       }
     });
   } catch {
-    // Fallback if called outside a standard Next.js request scope (e.g., direct function test)
-    void Promise.resolve().then(task).catch(() => {});
+    // Running outside a Next.js request scope (e.g., direct unit test invocation); do not spawn unawaited floating promises
   }
 }
 

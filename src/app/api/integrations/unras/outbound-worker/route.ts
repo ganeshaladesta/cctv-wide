@@ -19,16 +19,16 @@ function verifySecretToken(provided: string | null | undefined, expected: string
 /**
  * Authentication check for outbound worker.
  * Supports:
- * 1. Supabase Database Webhook / Server Secret via:
- *    - Authorization: Bearer <CRON_SECRET>
- *    - x-cron-secret: <CRON_SECRET>
- *    - x-webhook-secret: <CRON_SECRET | SUPABASE_WEBHOOK_SECRET>
- * 2. Internal Admin / Operator role header.
+ * - Supabase pg_net / Server Secret via:
+ *   - Authorization: Bearer <CRON_SECRET | SUPABASE_WEBHOOK_SECRET>
+ *   - x-cron-secret: <CRON_SECRET | SUPABASE_WEBHOOK_SECRET>
+ *   - x-webhook-secret: <CRON_SECRET | SUPABASE_WEBHOOK_SECRET>
+ * - Local development fallback ONLY when neither secret is configured and NODE_ENV !== "production".
  * Never exposes CRON_SECRET or SUPABASE_WEBHOOK_SECRET to the client.
  */
 function isAuthorizedWorkerRequest(request: NextRequest): boolean {
-  const cronSecret = process.env.CRON_SECRET;
-  const webhookSecret = process.env.SUPABASE_WEBHOOK_SECRET || cronSecret;
+  const cronSecret = process.env.CRON_SECRET?.trim() || "";
+  const webhookSecret = process.env.SUPABASE_WEBHOOK_SECRET?.trim() || "";
 
   const authHeader = request.headers.get("authorization");
   const bearerToken =
@@ -58,13 +58,7 @@ function isAuthorizedWorkerRequest(request: NextRequest): boolean {
     }
   }
 
-  // Allow requests with verified internal admin / operator role header when no secret mismatch
-  const userRole = request.headers.get("x-scc-user-role");
-  if (userRole === "admin" || userRole === "operator") {
-    return true;
-  }
-
-  // In local development or testing where neither secret is configured, permit execution
+  // Fallback for local development/testing ONLY when both secrets are unconfigured and NODE_ENV !== "production"
   if (!cronSecret && !webhookSecret && process.env.NODE_ENV !== "production") {
     return true;
   }

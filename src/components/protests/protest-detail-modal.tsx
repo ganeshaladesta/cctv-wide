@@ -110,7 +110,12 @@ export function ProtestDetailModal({
   }
   const [syncInfo, setSyncInfo] = useState<OutboundSyncInfo | null>(null);
   const [retryingSync, setRetryingSync] = useState(false);
-  const [saveToast, setSaveToast] = useState<string | null>(null);
+  const [saveToast, setSaveToast] = useState<{
+    title: string;
+    syncStatusText: string;
+    kodeUnras?: string;
+  } | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // Modal Navigation Stack for CCTV monitoring (UNRAS Detail -> Camera Selection -> Single Player / Multi-View)
   type UnrasPlayerMode = "none" | "single" | "multiview";
@@ -151,6 +156,59 @@ export function ProtestDetailModal({
     if (typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent("scc-protest-updated"));
     }
+  };
+
+  /**
+   * Called immediately once the SCC backend confirms durable acceptance of the save
+   * and outbound queue insertion. Never waits for Power Automate or Excel completion.
+   */
+  const handleDurableSaveAccepted = (
+    updatedProtest?: ProtestEvent | null,
+    outboundSync?: { status?: string; job_id?: string | null; attempts?: number } | null
+  ) => {
+    const activeId = updatedProtest?.id || protestId;
+    const kodeUnras = updatedProtest?.kode_unras || eventData?.kode_unras || "";
+    setSaveError(null);
+
+    setSyncInfo((prev) => ({
+      status: "pending",
+      attempts: outboundSync?.attempts ?? 0,
+      max_attempts: 5,
+      last_error: null,
+      processed_at: null,
+      last_outbound_synced_at: prev?.last_outbound_synced_at || null,
+      job_id: outboundSync?.job_id || null
+    }));
+
+    setSaveToast({
+      title: "Perubahan berhasil disimpan",
+      syncStatusText: "Menunggu sinkronisasi Excel",
+      kodeUnras
+    });
+    setTimeout(() => setSaveToast(null), 4500);
+
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent("scc-protest-saved", {
+          detail: {
+            protestId: activeId,
+            kodeUnras,
+            protest: updatedProtest || null,
+            outbound_sync: {
+              status: "pending",
+              job_id: outboundSync?.job_id || null,
+              attempts: outboundSync?.attempts ?? 0
+            }
+          }
+        })
+      );
+      window.dispatchEvent(new CustomEvent("scc-protest-updated"));
+    }
+
+    onUpdated?.();
+    // Close modal immediately after durable acceptance so operator can edit other records
+    setIsEditModalOpen(false);
+    onClose();
   };
 
   useEffect(() => {
@@ -209,15 +267,32 @@ export function ProtestDetailModal({
   const handleRetrySync = async () => {
     if (!protestId) return;
     setRetryingSync(true);
+    setSaveError(null);
     try {
       const res = await fetch(`/api/protests/${protestId}/sync-status`, { method: "POST" });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Gagal menjadwalkan ulang sinkronisasi.");
-      setSaveToast("Sinkronisasi outbound dijadwalkan ulang.");
-      setTimeout(() => setSaveToast(null), 3000);
+      setSaveToast({
+        title: "Sinkronisasi dijadwalkan ulang",
+        syncStatusText: "Menunggu sinkronisasi Excel",
+        kodeUnras: eventData?.kode_unras
+      });
+      setTimeout(() => setSaveToast(null), 3500);
       await fetchSyncStatus(protestId);
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("scc-protest-saved", {
+            detail: {
+              protestId,
+              kodeUnras: eventData?.kode_unras,
+              protest: eventData,
+              outbound_sync: { status: "pending", job_id: json.data?.job_id || null, attempts: 0 }
+            }
+          })
+        );
+      }
     } catch (err: any) {
-      alert(err.message);
+      setSaveError(err.message || "Gagal menjadwalkan ulang sinkronisasi.");
     } finally {
       setRetryingSync(false);
     }
@@ -226,6 +301,7 @@ export function ProtestDetailModal({
   useEffect(() => {
     if (isOpen && protestId) {
       setActiveTab("ringkasan");
+      setSaveError(null);
       fetchDetail(protestId);
       fetchSyncStatus(protestId);
 
@@ -240,7 +316,37 @@ export function ProtestDetailModal({
     }
   }, [isOpen, protestId]);
 
-  if (!isOpen || !protestId || !mounted || typeof document === "undefined") return null;
+  const floatingToastPortal =
+    mounted && typeof document !== "undefined" && saveToast
+      ? createPortal(
+          <div
+            data-testid="unras-save-toast"
+            className="fixed top-5 right-5 z-[110000] px-4 py-3 bg-[#0D121B]/95 backdrop-blur-md text-white text-xs rounded-2xl shadow-2xl flex items-center gap-3 border border-emerald-500/40 pointer-events-auto"
+          >
+            <div className="p-1.5 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0">
+              <CheckCircle2 className="w-4 h-4" />
+            </div>
+            <div className="space-y-0.5">
+              <div className="font-bold text-emerald-300 flex items-center gap-1.5">
+                <span>{saveToast.title}</span>
+                {saveToast.kodeUnras && (
+                  <span className="px-1.5 py-0.2 rounded bg-white/10 text-[10px] font-mono text-white">
+                    {saveToast.kodeUnras}
+                  </span>
+                )}
+              </div>
+              <div className="text-[11px] text-amber-300 flex items-center gap-1 font-medium">
+                <Clock className="w-3 h-3 animate-pulse" />
+                <span>{saveToast.syncStatusText}</span>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )
+      : null;
+
+  if (!mounted || typeof document === "undefined") return null;
+  if (!isOpen || !protestId) return floatingToastPortal;
 
   // Add Situational Report
   const handleAddReport = async (e: React.FormEvent) => {
@@ -275,15 +381,7 @@ export function ProtestDetailModal({
   const handleTransitionStatus = async (toStatus: ProtestStatus) => {
     const effectiveReason = statusReason.trim() || `Perubahan status operasional menjadi ${toStatus.toUpperCase()}`;
     setSubmittingStatus(true);
-    setSyncInfo(prev => ({
-      status: "pending",
-      attempts: 0,
-      max_attempts: 5,
-      last_error: null,
-      created_at: new Date().toISOString(),
-      processed_at: null,
-      last_outbound_synced_at: prev?.last_outbound_synced_at || null
-    }));
+    setSaveError(null);
     try {
       const res = await fetch(`/api/protests/${protestId}/status`, {
         method: "POST",
@@ -294,16 +392,15 @@ export function ProtestDetailModal({
         })
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Gagal mengubah status.");
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || "Gagal mengubah status.");
+      }
 
       setStatusReason("");
-      setSaveToast(`Status berhasil diubah menjadi '${toStatus}'.`);
-      setTimeout(() => setSaveToast(null), 4000);
-      await fetchDetail(protestId);
-      fetchSyncStatus(protestId);
-      notifyUpdated();
+      handleDurableSaveAccepted(json.data, json.outbound_sync);
     } catch (err: any) {
-      alert(err.message);
+      // Keep modal open and preserve user input when SCC persistence fails
+      setSaveError(err.message || "Gagal mengubah status.");
     } finally {
       setSubmittingStatus(false);
     }
@@ -380,15 +477,7 @@ export function ProtestDetailModal({
   // Save Editorial Text
   const handleSaveEditorial = async (isFinal: boolean = false) => {
     setSavingEditorial(true);
-    setSyncInfo(prev => ({
-      status: "pending",
-      attempts: 0,
-      max_attempts: 5,
-      last_error: null,
-      created_at: new Date().toISOString(),
-      processed_at: null,
-      last_outbound_synced_at: prev?.last_outbound_synced_at || null
-    }));
+    setSaveError(null);
     try {
       const payload: Record<string, string> = isFinal
         ? { editorial_final: editorialText }
@@ -400,15 +489,14 @@ export function ProtestDetailModal({
         body: JSON.stringify(payload)
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Gagal menyimpan teks editorial.");
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || "Gagal menyimpan teks editorial.");
+      }
 
-      setSaveToast(isFinal ? "Teks editorial berhasil difinalisasi!" : "Draft editorial berhasil disimpan.");
-      setTimeout(() => setSaveToast(null), 4000);
-      await fetchDetail(protestId);
-      fetchSyncStatus(protestId);
-      notifyUpdated();
+      handleDurableSaveAccepted(json.data, json.outbound_sync);
     } catch (err: any) {
-      alert(err.message);
+      // Keep modal open and preserve user input when SCC persistence fails
+      setSaveError(err.message || "Gagal menyimpan teks editorial.");
     } finally {
       setSavingEditorial(false);
     }
@@ -417,15 +505,7 @@ export function ProtestDetailModal({
   // Save Summary & Coordinates
   const handleSaveSummary = async () => {
     setSavingSummary(true);
-    setSyncInfo(prev => ({
-      status: "pending",
-      attempts: 0,
-      max_attempts: 5,
-      last_error: null,
-      created_at: new Date().toISOString(),
-      processed_at: null,
-      last_outbound_synced_at: prev?.last_outbound_synced_at || null
-    }));
+    setSaveError(null);
     try {
       const res = await fetch(`/api/protests/${protestId}`, {
         method: "PATCH",
@@ -438,15 +518,14 @@ export function ProtestDetailModal({
         })
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Gagal memperbarui ringkasan.");
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || "Gagal memperbarui ringkasan.");
+      }
 
-      setSaveToast("Pembaruan situasi operator berhasil disimpan.");
-      setTimeout(() => setSaveToast(null), 4000);
-      await fetchDetail(protestId);
-      fetchSyncStatus(protestId);
-      notifyUpdated();
+      handleDurableSaveAccepted(json.data, json.outbound_sync);
     } catch (err: any) {
-      alert(err.message);
+      // Keep modal open and preserve user input when SCC persistence fails
+      setSaveError(err.message || "Gagal memperbarui ringkasan.");
     } finally {
       setSavingSummary(false);
     }
@@ -484,11 +563,20 @@ export function ProtestDetailModal({
           className="relative w-full max-w-4xl bg-[#0D121B] border border-[var(--border-default)] rounded-2xl shadow-2xl overflow-hidden flex flex-col my-auto max-h-[90vh] pointer-events-auto"
           onClick={(e) => e.stopPropagation()}
         >
-          {/* Toast Notification */}
-          {saveToast && (
-            <div className="absolute top-4 right-14 z-50 px-4 py-2 bg-emerald-600 text-white text-xs font-bold rounded-xl shadow-xl flex items-center gap-2 border border-emerald-400 animate-in fade-in slide-in-from-top-2">
-              <CheckCircle2 className="w-4 h-4" />
-              <span>{saveToast}</span>
+          {/* Inline Save Error Alert (keeps modal open and preserves operator input) */}
+          {saveError && (
+            <div className="mx-5 mt-3 p-3 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                <span>{saveError}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSaveError(null)}
+                className="text-rose-400 hover:text-white p-1"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
             </div>
           )}
 
@@ -1461,6 +1549,7 @@ export function ProtestDetailModal({
 
   return (
     <>
+      {floatingToastPortal}
       {createPortal(modalContent, document.body)}
 
       {/* Standalone Map Picker Modal Portaled directly to document.body */}
@@ -1507,8 +1596,7 @@ export function ProtestDetailModal({
           initialData={eventData}
           onSaved={(updated) => {
             setEventData(updated);
-            if (protestId) fetchDetail(protestId);
-            notifyUpdated();
+            handleDurableSaveAccepted(updated, { status: "pending" });
           }}
         />
       )}
