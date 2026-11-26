@@ -139,6 +139,21 @@ export function UnrasPriorityPanel({
     fetchPanelEvents(selectedDate);
   }, [selectedDate, fetchDailyOverview, fetchPanelEvents]);
 
+  // Immediately re-fetch incident cards and situation overview when an operator links/unlinks a CCTV camera or updates an incident
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleProtestUpdated = () => {
+      fetchDailyOverview(selectedDate);
+      fetchPanelEvents(selectedDate);
+    };
+    window.addEventListener("scc-protest-updated", handleProtestUpdated);
+    window.addEventListener("scc-protest-saved", handleProtestUpdated);
+    return () => {
+      window.removeEventListener("scc-protest-updated", handleProtestUpdated);
+      window.removeEventListener("scc-protest-saved", handleProtestUpdated);
+    };
+  }, [selectedDate, fetchDailyOverview, fetchPanelEvents]);
+
   const handleDateChange = useCallback((newDate: string) => {
     setSelectedDate(newDate);
     onOperationalDateChange?.(newDate);
@@ -536,7 +551,27 @@ export function UnrasPriorityPanel({
                 const crowd = event.actual_crowd_size || event.estimasi_massa_source;
                 const elements = getMassElements(event.organisasi_kelompok);
                 const hasCoords = event.validated_lat !== null && event.validated_lng !== null;
-                const cctvCount = event.camera_links?.length || 0;
+                const eventPoints = dailyOverview?.points.filter((pt) => pt.protest_id === event.id) || [];
+
+                // Deduplicate valid linked CCTV cameras from event.camera_links and dailyOverview points
+                const validCameraLinks = (() => {
+                  const seenIds = new Set<string>();
+                  const merged = [
+                    ...(Array.isArray(event.camera_links) ? event.camera_links : []),
+                    ...eventPoints.flatMap((pt) => (Array.isArray(pt.linked_cameras) ? pt.linked_cameras : []))
+                  ];
+                  return merged.filter((link) => {
+                    const camId = link?.camera_id ? String(link.camera_id).trim() : "";
+                    if (!camId || seenIds.has(camId)) return false;
+                    seenIds.add(camId);
+                    return true;
+                  });
+                })();
+
+                const cctvCount = validCameraLinks.length;
+                const hasPartialMetadataOnly =
+                  cctvCount > 0 &&
+                  validCameraLinks.every((l) => !l.camera || (!l.camera.province_name && !l.camera.city_name && !l.camera.latitude));
 
                 const isOngoing = normalizeProtestStatus(event.status) === "ongoing";
                 const isMonitoring = normalizeProtestStatus(event.status) === "monitoring";
@@ -637,6 +672,14 @@ export function UnrasPriorityPanel({
 
                       {/* CCTV Badge */}
                       <span
+                        data-testid={`incident-cctv-badge-${event.id}`}
+                        title={
+                          cctvCount > 0
+                            ? hasPartialMetadataOnly
+                              ? `${cctvCount} CCTV tertaut (menggunakan metadata tautan tersimpan)`
+                              : `${cctvCount} kamera CCTV tertaut ke kejadian ini`
+                            : "Belum ada kamera CCTV yang ditautkan ke kejadian ini"
+                        }
                         className={`text-[10px] font-mono px-1.5 py-0.5 rounded flex items-center gap-1 ${
                           cctvCount > 0
                             ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
@@ -803,8 +846,29 @@ export function UnrasPriorityPanel({
                           <button
                             type="button"
                             onClick={() => {
-                              const resolved = (event.camera_links || [])
-                                .map((l) => l.camera)
+                              const resolved = validCameraLinks
+                                .map((l) =>
+                                  l.camera || {
+                                    id: l.camera_id,
+                                    name: l.camera_name || l.camera_id,
+                                    province_id: "",
+                                    province_name: "",
+                                    city_id: "",
+                                    city_name: "",
+                                    source_id: "",
+                                    source_name: "",
+                                    location: "",
+                                    latitude: 0,
+                                    longitude: 0,
+                                    stream_url: l.camera_stream_url || "",
+                                    source_url: "",
+                                    protocol: (l.camera_protocol as any) || "HLS",
+                                    status: (l.camera_status as any) || "ONLINE",
+                                    last_checked_at: l.created_at || new Date().toISOString(),
+                                    created_at: l.created_at || new Date().toISOString(),
+                                    updated_at: l.created_at || new Date().toISOString()
+                                  }
+                                )
                                 .filter((c): c is Camera => Boolean(c));
                               onOpenDedicatedMultiView(event, resolved);
                             }}

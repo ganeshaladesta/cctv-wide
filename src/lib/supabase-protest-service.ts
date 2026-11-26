@@ -249,12 +249,111 @@ export async function queryProtestsFromSupabase(filters: ProtestFilterParams = {
     throw new Error(`Supabase query error: ${error.message}`);
   }
 
+  const protests = (data || []).map(mapRowToProtest);
+  await attachCameraLinksInSupabase(protests);
+
   return {
     total: count || 0,
     page,
     limit,
-    data: (data || []).map(mapRowToProtest)
+    data: protests
   };
+}
+
+/**
+ * Batch-attaches valid linked CCTV records from `protest_camera_links` to an array of ProtestEvents
+ * in a single query (avoiding N+1 requests per incident card).
+ */
+async function attachCameraLinksInSupabase(protests: ProtestEvent[]): Promise<void> {
+  if (!protests || protests.length === 0) return;
+  const supabase = getSupabaseAdminClient();
+  if (!supabase) return;
+
+  const protestIds = Array.from(new Set(protests.map((p) => p.id).filter(Boolean)));
+  if (protestIds.length === 0) return;
+
+  try {
+    const { data, error } = await supabase
+      .from("protest_camera_links")
+      .select("*")
+      .in("protest_id", protestIds)
+      .order("distance_meters", { ascending: true });
+
+    if (error || !Array.isArray(data)) {
+      for (const p of protests) {
+        if (!Array.isArray(p.camera_links)) p.camera_links = [];
+      }
+      return;
+    }
+
+    const cctvStore = getDataStore();
+    const linksByProtest = new Map<string, ProtestCameraLink[]>();
+    const seenPerProtest = new Map<string, Set<string>>();
+
+    for (const l of data) {
+      const protestId = l.protest_id ? String(l.protest_id).trim() : "";
+      const cameraId = l.camera_id ? String(l.camera_id).trim() : "";
+      if (!protestId || !cameraId) continue;
+
+      let seen = seenPerProtest.get(protestId);
+      if (!seen) {
+        seen = new Set<string>();
+        seenPerProtest.set(protestId, seen);
+      }
+      if (seen.has(cameraId)) continue;
+      seen.add(cameraId);
+
+      const cam = cctvStore.getCameraById(cameraId);
+      const linkObj: ProtestCameraLink = {
+        id: String(l.id),
+        protest_id: protestId,
+        point_id: l.point_id ? String(l.point_id) : undefined,
+        camera_id: cameraId,
+        camera_name: l.camera_name ? String(l.camera_name) : cameraId,
+        camera_stream_url: l.camera_stream_url || undefined,
+        camera_protocol: l.camera_protocol || undefined,
+        camera_status: l.camera_status || "ONLINE",
+        distance_meters: Number(l.distance_meters) || 0,
+        notes: l.notes || null,
+        is_recommended: Boolean(l.is_recommended),
+        linked_by_id: l.linked_by_id ? String(l.linked_by_id) : "system",
+        linked_by_name: l.linked_by_name ? String(l.linked_by_name) : "Operator SCC",
+        created_at: l.created_at ? new Date(l.created_at).toISOString() : new Date().toISOString(),
+        camera: cam || {
+          id: cameraId,
+          name: l.camera_name ? String(l.camera_name) : cameraId,
+          province_id: "",
+          province_name: "",
+          city_id: "",
+          city_name: "",
+          source_id: "",
+          source_name: "",
+          location: "",
+          latitude: 0,
+          longitude: 0,
+          stream_url: l.camera_stream_url || "",
+          source_url: "",
+          protocol: (l.camera_protocol as any) || "HLS",
+          status: (l.camera_status as any) || "ONLINE",
+          last_checked_at: new Date().toISOString(),
+          created_at: l.created_at ? String(l.created_at) : new Date().toISOString(),
+          updated_at: l.created_at ? String(l.created_at) : new Date().toISOString()
+        }
+      };
+
+      const list = linksByProtest.get(protestId) || [];
+      list.push(linkObj);
+      linksByProtest.set(protestId, list);
+    }
+
+    for (const p of protests) {
+      p.camera_links = linksByProtest.get(p.id) || [];
+    }
+  } catch {
+    for (const p of protests) {
+      if (!Array.isArray(p.camera_links)) p.camera_links = [];
+    }
+  }
 }
 
 /**
@@ -275,7 +374,9 @@ export async function getProtestByIdFromSupabase(id: string): Promise<ProtestEve
 
   const { data, error } = await query.maybeSingle();
   if (error || !data) return null;
-  return mapRowToProtest(data);
+  const protest = mapRowToProtest(data);
+  await attachCameraLinksInSupabase([protest]);
+  return protest;
 }
 
 /**
@@ -974,13 +1075,17 @@ export async function fetchDailySituationOverviewFromSupabase(dateStr: string): 
         .select("*")
         .in("protest_id", protestIds);
       if (!lkErr && Array.isArray(linkRows)) {
+        const cctvStore = getDataStore();
         for (const r of linkRows) {
+          const camId = r.camera_id ? String(r.camera_id).trim() : "";
+          if (!camId) continue;
+          const cam = cctvStore.getCameraById(camId);
           const lk: ProtestCameraLink = {
             id: String(r.id),
             protest_id: String(r.protest_id),
             point_id: r.point_id ? String(r.point_id) : undefined,
-            camera_id: String(r.camera_id),
-            camera_name: String(r.camera_name),
+            camera_id: camId,
+            camera_name: r.camera_name ? String(r.camera_name) : camId,
             camera_stream_url: r.camera_stream_url || undefined,
             camera_protocol: r.camera_protocol || undefined,
             camera_status: r.camera_status || "ONLINE",
@@ -989,11 +1094,33 @@ export async function fetchDailySituationOverviewFromSupabase(dateStr: string): 
             is_recommended: Boolean(r.is_recommended),
             linked_by_id: String(r.linked_by_id),
             linked_by_name: String(r.linked_by_name),
-            created_at: String(r.created_at)
+            created_at: String(r.created_at),
+            camera: cam || {
+              id: camId,
+              name: r.camera_name ? String(r.camera_name) : camId,
+              province_id: "",
+              province_name: "",
+              city_id: "",
+              city_name: "",
+              source_id: "",
+              source_name: "",
+              location: "",
+              latitude: 0,
+              longitude: 0,
+              stream_url: r.camera_stream_url || "",
+              source_url: "",
+              protocol: (r.camera_protocol as any) || "HLS",
+              status: (r.camera_status as any) || "ONLINE",
+              last_checked_at: new Date().toISOString(),
+              created_at: String(r.created_at),
+              updated_at: String(r.created_at)
+            }
           };
           const list = allLinksMap.get(lk.protest_id) || [];
-          list.push(lk);
-          allLinksMap.set(lk.protest_id, list);
+          if (!list.some((existing) => existing.camera_id === lk.camera_id)) {
+            list.push(lk);
+            allLinksMap.set(lk.protest_id, list);
+          }
         }
       }
     } catch {}

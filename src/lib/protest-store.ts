@@ -882,6 +882,7 @@ class ProtestDataStore {
       `).all(...params, limit, offset) as Array<Record<string, unknown>>;
 
       const data: ProtestEvent[] = rows.map((r) => this.mapRowToProtest(r));
+      this.attachCameraLinksLocal(data);
 
       return { total, page, limit, data };
     }
@@ -968,6 +969,7 @@ class ProtestDataStore {
     const total = items.length;
     items.sort((a, b) => b.tanggal.localeCompare(a.tanggal));
     const data = items.slice(offset, offset + limit);
+    this.attachCameraLinksLocal(data);
 
     return { total, page, limit, data };
   }
@@ -2049,6 +2051,104 @@ class ProtestDataStore {
     return this.getCameraLinksLocal(protestId);
   }
 
+  private resolveLinkRowWithCamera(r: Record<string, unknown>, cctvStore = getDataStore()): ProtestCameraLink | null {
+    const camId = r.camera_id != null ? String(r.camera_id).trim() : "";
+    const protestId = r.protest_id != null ? String(r.protest_id).trim() : "";
+    if (!camId || !protestId) return null;
+
+    const cam = cctvStore.getCameraById(camId);
+    const camName = r.camera_name ? String(r.camera_name) : cam?.name || camId;
+    const streamUrl = r.camera_stream_url ? String(r.camera_stream_url) : cam?.stream_url || undefined;
+    const protocol = r.camera_protocol ? String(r.camera_protocol) : cam?.protocol || undefined;
+    const status = r.camera_status ? String(r.camera_status) : cam?.status || "ONLINE";
+    const createdAt = r.created_at ? String(r.created_at) : new Date().toISOString();
+
+    return {
+      id: String(r.id),
+      protest_id: protestId,
+      point_id: r.point_id ? String(r.point_id) : null,
+      camera_id: camId,
+      camera_name: camName,
+      camera_stream_url: streamUrl,
+      camera_protocol: protocol,
+      camera_status: status,
+      distance_meters: Number(r.distance_meters || 0),
+      notes: r.notes ? String(r.notes) : null,
+      is_recommended: Boolean(r.is_recommended),
+      linked_by_id: r.linked_by_id ? String(r.linked_by_id) : "system",
+      linked_by_name: r.linked_by_name ? String(r.linked_by_name) : "Operator SCC",
+      created_at: createdAt,
+      camera: cam || {
+        id: camId,
+        name: camName,
+        province_id: "",
+        province_name: "",
+        city_id: "",
+        city_name: "",
+        source_id: "",
+        source_name: "",
+        location: "",
+        latitude: 0,
+        longitude: 0,
+        stream_url: streamUrl || "",
+        source_url: "",
+        protocol: (protocol as any) || "HLS",
+        status: (status as any) || "ONLINE",
+        last_checked_at: createdAt,
+        created_at: createdAt,
+        updated_at: createdAt
+      }
+    };
+  }
+
+  /**
+   * Batch-attaches valid linked CCTV records from `protest_camera_links` to an array of ProtestEvents
+   * in a single query without N+1 overhead.
+   */
+  attachCameraLinksLocal(protests: ProtestEvent[]): void {
+    if (!protests || protests.length === 0) return;
+    const cctvStore = getDataStore();
+
+    if (this.db) {
+      const protestIds = Array.from(new Set(protests.map((p) => p.id).filter(Boolean)));
+      if (protestIds.length === 0) return;
+
+      const placeholders = protestIds.map(() => "?").join(", ");
+      const rows = this.db
+        .prepare(`SELECT * FROM protest_camera_links WHERE protest_id IN (${placeholders}) ORDER BY distance_meters ASC`)
+        .all(...protestIds) as Array<Record<string, unknown>>;
+
+      const linksByProtest = new Map<string, ProtestCameraLink[]>();
+      const seenPerProtest = new Map<string, Set<string>>();
+
+      for (const r of rows) {
+        const link = this.resolveLinkRowWithCamera(r, cctvStore);
+        if (!link) continue;
+
+        let seen = seenPerProtest.get(link.protest_id);
+        if (!seen) {
+          seen = new Set<string>();
+          seenPerProtest.set(link.protest_id, seen);
+        }
+        if (seen.has(link.camera_id)) continue;
+        seen.add(link.camera_id);
+
+        const list = linksByProtest.get(link.protest_id) || [];
+        list.push(link);
+        linksByProtest.set(link.protest_id, list);
+      }
+
+      for (const p of protests) {
+        p.camera_links = linksByProtest.get(p.id) || [];
+      }
+      return;
+    }
+
+    for (const p of protests) {
+      p.camera_links = this.getCameraLinksLocal(p.id);
+    }
+  }
+
   getCameraLinksLocal(protestId: string, pointId?: string): ProtestCameraLink[] {
     const cctvStore = getDataStore();
     if (this.db) {
@@ -2064,34 +2164,31 @@ class ProtestDataStore {
       query += ` ORDER BY distance_meters ASC`;
 
       const rows = this.db.prepare(query).all(...params) as Array<Record<string, unknown>>;
+      const seen = new Set<string>();
+      const results: ProtestCameraLink[] = [];
 
-      return rows.map((r) => {
-        const camId = String(r.camera_id);
-        return {
-          id: String(r.id),
-          protest_id: String(r.protest_id),
-          point_id: r.point_id ? String(r.point_id) : null,
-          camera_id: camId,
-          camera_name: String(r.camera_name),
-          camera_stream_url: r.camera_stream_url ? String(r.camera_stream_url) : undefined,
-          camera_protocol: r.camera_protocol ? String(r.camera_protocol) : undefined,
-          camera_status: r.camera_status ? String(r.camera_status) : undefined,
-          distance_meters: Number(r.distance_meters || 0),
-          notes: r.notes ? String(r.notes) : null,
-          is_recommended: Boolean(r.is_recommended),
-          linked_by_id: String(r.linked_by_id),
-          linked_by_name: String(r.linked_by_name),
-          created_at: String(r.created_at),
-          camera: cctvStore.getCameraById(camId)
-        };
-      });
+      for (const r of rows) {
+        const link = this.resolveLinkRowWithCamera(r, cctvStore);
+        if (!link || seen.has(link.camera_id)) continue;
+        seen.add(link.camera_id);
+        results.push(link);
+      }
+
+      return results;
     }
 
-    const list = this.memoryLinks.get(protestId) || [];
-    if (pointId) {
-      return list.filter((l) => !l.point_id || l.point_id === pointId);
+    const rawList = this.memoryLinks.get(protestId) || [];
+    const filtered = pointId ? rawList.filter((l) => !l.point_id || l.point_id === pointId) : rawList;
+    const seen = new Set<string>();
+    const results: ProtestCameraLink[] = [];
+
+    for (const l of filtered) {
+      const link = this.resolveLinkRowWithCamera(l as unknown as Record<string, unknown>, cctvStore);
+      if (!link || seen.has(link.camera_id)) continue;
+      seen.add(link.camera_id);
+      results.push(link);
     }
-    return list;
+    return results;
   }
 
   /**

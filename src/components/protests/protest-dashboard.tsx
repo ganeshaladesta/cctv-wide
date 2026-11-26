@@ -310,6 +310,17 @@ export function ProtestDashboard({
     return () => window.removeEventListener("scc-protest-saved", handleProtestSaved);
   }, []);
 
+  // Listen to CCTV link/unlink and protest update events to immediately refresh card indicators
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleProtestUpdated = () => {
+      fetchProtests({ silent: true });
+      fetchStats();
+    };
+    window.addEventListener("scc-protest-updated", handleProtestUpdated);
+    return () => window.removeEventListener("scc-protest-updated", handleProtestUpdated);
+  }, [fetchProtests]);
+
   // Poll independent outbound sync status for all active pending/processing records concurrently
   useEffect(() => {
     const activeIds = Object.entries(recordSyncStates)
@@ -1032,6 +1043,27 @@ export function ProtestDashboard({
                       <span className="text-[11px] text-[#64748B]">
                         {event.kode_unras} • {event.id_kejadian}
                       </span>
+
+                      {/* Linked CCTV Indicator Badge */}
+                      {(() => {
+                        const validLinks = (event.camera_links || []).filter(
+                          (l) => l && typeof l.camera_id === "string" && l.camera_id.trim().length > 0
+                        );
+                        const cctvCount = new Set(validLinks.map((l) => l.camera_id.trim())).size;
+                        return (
+                          <span
+                            data-testid={`dashboard-cctv-badge-${event.id}`}
+                            className={`text-[10px] font-mono px-2 py-0.5 rounded-md inline-flex items-center gap-1 ${
+                              cctvCount > 0
+                                ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
+                                : "bg-amber-500/10 text-amber-400/80 border border-amber-500/20"
+                            }`}
+                          >
+                            <Video className="w-3 h-3" />
+                            <span>{cctvCount > 0 ? `${cctvCount} CCTV Tertaut` : "Belum Ada CCTV"}</span>
+                          </span>
+                        );
+                      })()}
 
                       {/* Per-Record Independent Outbound Excel Sync Status Badge */}
                       {(() => {
