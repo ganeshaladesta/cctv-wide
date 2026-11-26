@@ -42,10 +42,11 @@ export const STORAGE_LAYER_VISIBILITY_KEY = "scc_map_layer_visibility";
 export const STORAGE_TACTICAL_CONFIG_KEY = "scc_map_tactical_config_v2";
 
 export const VALID_OFFICE_RADII_METERS = [50, 100, 150, 200, 250] as const;
+export const VALID_UNRAS_RADII_METERS = [50, 100, 150, 200, 250] as const;
 export const DEFAULT_OFFICE_RADIUS_METERS = 50; // 50 meter
 export const DEFAULT_OFFICE_RADIUS_ENABLED = false; // Default OFF
 export const DEFAULT_TACTICAL_HUD_OPEN = false; // Default OFF
-export const DEFAULT_UNRAS_RADIUS_METERS = 500; // 500 meter
+export const DEFAULT_UNRAS_RADIUS_METERS = 50; // 50 meter
 export const DEFAULT_TACTICAL_MAP_ZOOM = 14;
 
 export interface StoredTacticalMapConfig {
@@ -75,7 +76,7 @@ export function getStoredTacticalMapConfig(): StoredTacticalMapConfig {
     if (!raw) return { ...DEFAULT_TACTICAL_MAP_CONFIG };
     const parsed = JSON.parse(raw);
     const validOfficeRadii: readonly number[] = VALID_OFFICE_RADII_METERS;
-    const validUnrasRadii = [0, 250, 500, 1000, 1500];
+    const validUnrasRadii: readonly number[] = VALID_UNRAS_RADII_METERS;
     return {
       isOfficeRadiusEnabled:
         typeof parsed.isOfficeRadiusEnabled === "boolean"
@@ -759,7 +760,7 @@ export default function InteractiveMap({
     initialTacticalConfig.isOfficeRadiusEnabled
   );
   const [officeRadiusDistance, setOfficeRadiusDistance] = useState<number>(initialTacticalConfig.officeRadius); // 50, 100, 150, 200, 250 (meters)
-  const [unrasRadiusDistance, setUnrasRadiusDistance] = useState<number>(initialTacticalConfig.unrasRadius); // 0, 250, 500, 1000, 1500
+  const [unrasRadiusDistance, setUnrasRadiusDistance] = useState<number>(initialTacticalConfig.unrasRadius); // 50, 100, 150, 200, 250 (meters)
   const [fetchedBIOffices, setFetchedBIOffices] = useState<BIOffice[]>([]);
   const [selectedGeoIntAsset, setSelectedGeoIntAsset] = useState<
     { type: "office"; office: BIOffice } | { type: "protest"; protest: ProtestEvent } | null
@@ -787,8 +788,10 @@ export default function InteractiveMap({
   }, []);
 
   const handleSetUnrasRadius = useCallback((nextRadius: number) => {
-    setUnrasRadiusDistance(nextRadius);
-    persistTacticalMapConfig({ unrasRadius: nextRadius });
+    const validUnrasRadii: readonly number[] = VALID_UNRAS_RADII_METERS;
+    const sanitized = validUnrasRadii.includes(nextRadius) ? nextRadius : DEFAULT_UNRAS_RADIUS_METERS;
+    setUnrasRadiusDistance(sanitized);
+    persistTacticalMapConfig({ unrasRadius: sanitized });
   }, []);
 
   const handleSelectGeoIntAsset = useCallback(
@@ -1433,14 +1436,15 @@ export default function InteractiveMap({
     }
   }, [allBIOffices, showBIOfficeLayer, isOfficeRadiusEnabled, officeRadiusDistance, mapZoom, selectedGeoIntAsset]);
 
-  // Render UNRAS Radius Rings
+  // Render UNRAS Radius Rings (radius in meters: 50, 100, 150, 200, 250)
   useEffect(() => {
     const group = unrasRadiusLayerGroupRef.current;
     const map = mapRef.current;
     if (!group || !map) return;
     group.clearLayers();
 
-    if (!showProtestLayer || unrasRadiusDistance === 0 || !protestEvents) {
+    const validUnrasRadii: readonly number[] = VALID_UNRAS_RADII_METERS;
+    if (!showProtestLayer || !validUnrasRadii.includes(unrasRadiusDistance) || !protestEvents) {
       if (map.hasLayer(group)) map.removeLayer(group);
       return;
     }
@@ -1768,17 +1772,17 @@ export default function InteractiveMap({
           </button>
 
           {/* Group B: Spatial Analysis Radius Controls */}
-          {/* Radius UNRAS */}
+          {/* Radius UNRAS (Meter Radius Options: 50, 100, 150, 200, 250 m; Default: 50 m) */}
           <button
             type="button"
             data-testid="btn-radius-unras"
             onClick={() => {
               const nextMap: Record<number, number> = {
-                500: 1000,
-                1000: 1500,
-                1500: 0,
-                0: 250,
-                250: 500
+                50: 100,
+                100: 150,
+                150: 200,
+                200: 250,
+                250: 50
               };
               handleSetUnrasRadius(nextMap[unrasRadiusDistance] ?? DEFAULT_UNRAS_RADIUS_METERS);
             }}
@@ -1790,11 +1794,7 @@ export default function InteractiveMap({
             <span className="w-2 h-2 rounded-full bg-red-400 shrink-0" />
             <span className="whitespace-nowrap">Radius UNRAS:</span>
             <span className="font-mono font-bold text-white tabular-nums">
-              {unrasRadiusDistance === 0
-                ? "Nonaktif"
-                : unrasRadiusDistance >= 1000
-                ? `${unrasRadiusDistance / 1000} km`
-                : `${unrasRadiusDistance} m`}
+              {unrasRadiusDistance} m
             </span>
           </button>
 

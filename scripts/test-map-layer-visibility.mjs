@@ -234,44 +234,42 @@ runTest("Active layer count badges accurately reflect 0/3, 1/3, 2/3, 3/3", () =>
   assert.equal(countActive({ cctv: false, biOffice: false, unras: false }), 0);
 });
 
-// TEST 11: UNRAS radius state cycling and label formatting
-runTest("UNRAS radius cycle and formatting (1km -> 1.5km -> OFF -> 250m -> 500m -> 1km)", () => {
+// TEST 11: UNRAS radius state cycling, 50m default, and label formatting (50m -> 100m -> 150m -> 200m -> 250m -> 50m)
+runTest("UNRAS radius restricted to [50, 100, 150, 200, 250]m with default 50m and cycle", () => {
+  const VALID_UNRAS_RADII = [50, 100, 150, 200, 250];
   const nextMap = {
-    1000: 1500,
-    1500: 0,
-    0: 250,
-    250: 500,
-    500: 1000
+    50: 100,
+    100: 150,
+    150: 200,
+    200: 250,
+    250: 50
   };
 
-  const formatUnrasRadius = (dist) => {
-    if (dist === 0) return "Nonaktif";
-    if (dist >= 1000) return `${dist / 1000} km`;
-    return `${dist} m`;
-  };
+  const formatUnrasRadius = (dist) => `${dist} m`;
 
-  let dist = 1000;
-  assert.equal(`Radius UNRAS: ${formatUnrasRadius(dist)}`, "Radius UNRAS: 1 km");
+  let dist = 50;
+  assert.equal(`Radius UNRAS: ${formatUnrasRadius(dist)}`, "Radius UNRAS: 50 m");
 
   dist = nextMap[dist];
-  assert.equal(dist, 1500);
-  assert.equal(`Radius UNRAS: ${formatUnrasRadius(dist)}`, "Radius UNRAS: 1.5 km");
+  assert.equal(dist, 100);
+  assert.equal(`Radius UNRAS: ${formatUnrasRadius(dist)}`, "Radius UNRAS: 100 m");
 
   dist = nextMap[dist];
-  assert.equal(dist, 0);
-  assert.equal(`Radius UNRAS: ${formatUnrasRadius(dist)}`, "Radius UNRAS: Nonaktif");
+  assert.equal(dist, 150);
+  assert.equal(`Radius UNRAS: ${formatUnrasRadius(dist)}`, "Radius UNRAS: 150 m");
+
+  dist = nextMap[dist];
+  assert.equal(dist, 200);
+  assert.equal(`Radius UNRAS: ${formatUnrasRadius(dist)}`, "Radius UNRAS: 200 m");
 
   dist = nextMap[dist];
   assert.equal(dist, 250);
   assert.equal(`Radius UNRAS: ${formatUnrasRadius(dist)}`, "Radius UNRAS: 250 m");
 
   dist = nextMap[dist];
-  assert.equal(dist, 500);
-  assert.equal(`Radius UNRAS: ${formatUnrasRadius(dist)}`, "Radius UNRAS: 500 m");
-
-  dist = nextMap[dist];
-  assert.equal(dist, 1000);
-  assert.equal(`Radius UNRAS: ${formatUnrasRadius(dist)}`, "Radius UNRAS: 1 km");
+  assert.equal(dist, 50);
+  assert.equal(`Radius UNRAS: ${formatUnrasRadius(dist)}`, "Radius UNRAS: 50 m");
+  assert.deepEqual(VALID_UNRAS_RADII, [50, 100, 150, 200, 250]);
 });
 
 // TEST 12: BI Monitoring radius options, default toggle OFF, default 50m, and persistence
@@ -280,13 +278,14 @@ runTest("BI monitoring radius restricted to [50, 100, 150, 200, 250] meters with
   const DEFAULT_CONFIG = {
     isOfficeRadiusEnabled: false,
     officeRadius: 50,
-    unrasRadius: 500,
+    unrasRadius: 50,
     isHudOpen: false
   };
 
   assert.equal(DEFAULT_CONFIG.isOfficeRadiusEnabled, false, "BI Radius toggle must default to OFF");
   assert.equal(DEFAULT_CONFIG.isHudOpen, false, "Tactical HUD toggle must default to OFF");
   assert.equal(DEFAULT_CONFIG.officeRadius, 50, "BI Radius must default to 50 meter");
+  assert.equal(DEFAULT_CONFIG.unrasRadius, 50, "UNRAS Radius must default to 50 meter");
   assert.deepEqual(VALID_BI_RADII, [50, 100, 150, 200, 250]);
 
   for (const r of VALID_BI_RADII) {
@@ -348,7 +347,9 @@ runTest("Verify no duplicate external BI office visibility button exists in inte
   assert.ok(content.includes('data-testid="btn-radius-bi"'));
   assert.ok(content.includes('data-testid="select-radius-bi"'));
   assert.ok(content.includes("VALID_OFFICE_RADII_METERS = [50, 100, 150, 200, 250]"));
+  assert.ok(content.includes("VALID_UNRAS_RADII_METERS = [50, 100, 150, 200, 250]"));
   assert.ok(content.includes("DEFAULT_OFFICE_RADIUS_METERS = 50"));
+  assert.ok(content.includes("DEFAULT_UNRAS_RADIUS_METERS = 50"));
   assert.ok(content.includes("DEFAULT_OFFICE_RADIUS_ENABLED = false"));
   assert.ok(content.includes("DEFAULT_TACTICAL_HUD_OPEN = false"));
   assert.ok(content.includes("Mengatur jarak analisis dari titik kejadian unjuk rasa."));
@@ -356,15 +357,16 @@ runTest("Verify no duplicate external BI office visibility button exists in inte
   assert.ok(content.includes("Menampilkan overlay informasi dan elemen situasional taktis pada peta."));
 });
 
-// TEST 16: End-to-end persistence, independence, and reset behavior for BI Radius & Tactical HUD
+// TEST 16: End-to-end persistence, independence, and reset behavior for BI Radius, UNRAS Radius & Tactical HUD
 runTest("Fresh dashboard defaults OFF/50m, independent activation, persistence across refresh, and reset", () => {
   mockLocalStorage.clear();
   const TACTICAL_KEY = "scc_map_tactical_config_v2";
   const VALID_OFFICE_RADII = [50, 100, 150, 200, 250];
+  const VALID_UNRAS_RADII = [50, 100, 150, 200, 250];
   const DEFAULT_CONFIG = {
     isOfficeRadiusEnabled: false,
     officeRadius: 50,
-    unrasRadius: 500,
+    unrasRadius: 50,
     selectedAssetType: "office",
     selectedAssetId: "bi-off-kpbi-pusat",
     isHudOpen: false,
@@ -379,7 +381,7 @@ runTest("Fresh dashboard defaults OFF/50m, independent activation, persistence a
       isOfficeRadiusEnabled:
         typeof parsed.isOfficeRadiusEnabled === "boolean" ? parsed.isOfficeRadiusEnabled : false,
       officeRadius: VALID_OFFICE_RADII.includes(parsed.officeRadius) ? parsed.officeRadius : 50,
-      unrasRadius: [0, 250, 500, 1000, 1500].includes(parsed.unrasRadius) ? parsed.unrasRadius : 500,
+      unrasRadius: VALID_UNRAS_RADII.includes(parsed.unrasRadius) ? parsed.unrasRadius : 50,
       selectedAssetType: parsed.selectedAssetType === "protest" ? "protest" : "office",
       selectedAssetId: typeof parsed.selectedAssetId === "string" ? parsed.selectedAssetId : "bi-off-kpbi-pusat",
       isHudOpen: typeof parsed.isHudOpen === "boolean" ? parsed.isHudOpen : false,
@@ -392,11 +394,12 @@ runTest("Fresh dashboard defaults OFF/50m, independent activation, persistence a
     mockLocalStorage.setItem(TACTICAL_KEY, JSON.stringify({ ...current, ...patch }));
   };
 
-  // 1 & 2: Fresh dashboard -> both toggles OFF, BI radius 50m
+  // 1 & 2: Fresh dashboard -> both toggles OFF, BI radius 50m, UNRAS radius 50m
   let cfg = getStoredConfig();
   assert.equal(cfg.isOfficeRadiusEnabled, false);
   assert.equal(cfg.isHudOpen, false);
   assert.equal(cfg.officeRadius, 50);
+  assert.equal(cfg.unrasRadius, 50);
 
   // 4 & 6: Manually enable Tactical HUD -> BI Radius remains OFF
   persistConfig({ isHudOpen: true });
@@ -404,31 +407,34 @@ runTest("Fresh dashboard defaults OFF/50m, independent activation, persistence a
   assert.equal(cfg.isHudOpen, true);
   assert.equal(cfg.isOfficeRadiusEnabled, false);
 
-  // 5 & 6: Manually enable BI Radius and select 200m -> Tactical HUD state is untouched; invalid radius rejected
+  // 5 & 6: Manually enable BI Radius and select 200m, UNRAS radius 150m -> Tactical HUD state is untouched
   persistConfig({ isHudOpen: false });
-  persistConfig({ isOfficeRadiusEnabled: true, officeRadius: 200 });
+  persistConfig({ isOfficeRadiusEnabled: true, officeRadius: 200, unrasRadius: 150 });
   cfg = getStoredConfig();
   assert.equal(cfg.isOfficeRadiusEnabled, true);
   assert.equal(cfg.officeRadius, 200);
+  assert.equal(cfg.unrasRadius, 150);
   assert.equal(cfg.isHudOpen, false);
 
-  // 3: Legacy/invalid radius (e.g. 1000 or 3000) falls back to 50m
-  persistConfig({ officeRadius: 3000 });
+  // 3: Legacy/invalid radius (e.g. 500, 1000, 1500, 3000) normalizes to 50m
+  persistConfig({ officeRadius: 3000, unrasRadius: 500 });
   cfg = getStoredConfig();
   assert.equal(cfg.officeRadius, 50);
+  assert.equal(cfg.unrasRadius, 50);
 
   // 7: Refresh preserves saved user preferences
-  persistConfig({ isOfficeRadiusEnabled: true, officeRadius: 150, isHudOpen: true });
+  persistConfig({ isOfficeRadiusEnabled: true, officeRadius: 150, unrasRadius: 200, isHudOpen: true });
   const afterRefresh = getStoredConfig();
   assert.equal(afterRefresh.isOfficeRadiusEnabled, true);
   assert.equal(afterRefresh.officeRadius, 150);
+  assert.equal(afterRefresh.unrasRadius, 200);
   assert.equal(afterRefresh.isHudOpen, true);
 
-  // Reset restores BI Radius OFF, Tactical HUD OFF, BI Radius 50m
+  // Reset restores BI Radius OFF, Tactical HUD OFF, BI Radius 50m, UNRAS Radius 50m
   persistConfig({
     isOfficeRadiusEnabled: false,
     officeRadius: 50,
-    unrasRadius: 500,
+    unrasRadius: 50,
     isHudOpen: false,
     hasManualSelection: false
   });
@@ -436,6 +442,7 @@ runTest("Fresh dashboard defaults OFF/50m, independent activation, persistence a
   assert.equal(afterReset.isOfficeRadiusEnabled, false);
   assert.equal(afterReset.isHudOpen, false);
   assert.equal(afterReset.officeRadius, 50);
+  assert.equal(afterReset.unrasRadius, 50);
 });
 
 console.log(`\n=== LAYER VISIBILITY TEST SUMMARY: ${passed}/${total} PASSED ===\n`);

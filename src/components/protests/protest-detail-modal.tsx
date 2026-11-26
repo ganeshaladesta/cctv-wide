@@ -581,63 +581,82 @@ export function ProtestDetailModal({
           )}
 
           {/* Modal Top Bar */}
-          <div className="px-4 sm:px-5 py-3 sm:py-4 border-b border-[var(--border-subtle)] bg-[#111622] flex items-center justify-between gap-3 shrink-0">
-            {/* Flexible Left Container with responsive truncation */}
-            <div className="flex items-center gap-2 sm:gap-2.5 min-w-0 flex-1 flex-wrap">
-              {eventData?.status_sumber && (
-                <span className="px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wider shrink-0 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
-                  Sumber Excel: {eventData.status_sumber}
+          <div className="px-4 sm:px-5 py-3 sm:py-4 border-b border-[var(--border-subtle)] bg-[#111622] flex items-start sm:items-center justify-between gap-3 shrink-0">
+            {/* Left Container: Stacked badge row + full-width title/subtitle so title never collapses into a 1-char sliver */}
+            <div className="flex flex-col gap-1.5 min-w-0 flex-1 overflow-hidden">
+              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                {eventData?.status_sumber && (
+                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider shrink-0 whitespace-nowrap bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                    Sumber Excel: {eventData.status_sumber}
+                  </span>
+                )}
+                <span
+                  className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider shrink-0 whitespace-nowrap ${
+                    eventData?.status === "ongoing"
+                      ? "bg-red-500/20 text-red-400 border border-red-500/40 animate-pulse"
+                      : eventData?.status === "scheduled"
+                      ? "bg-amber-500/20 text-amber-400 border border-amber-500/40"
+                      : eventData?.status === "monitoring"
+                      ? "bg-purple-500/20 text-purple-400 border border-purple-500/40"
+                      : eventData?.status === "completed"
+                      ? "bg-emerald-600/30 text-emerald-300 border border-emerald-500/50"
+                      : "bg-slate-500/20 text-slate-300 border border-slate-500/40"
+                  }`}
+                >
+                  Operator: {eventData?.status || "Loading..."}
                 </span>
-              )}
-              <span
-                className={`px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wider shrink-0 ${
-                  eventData?.status === "ongoing"
-                    ? "bg-red-500/20 text-red-400 border border-red-500/40 animate-pulse"
-                    : eventData?.status === "scheduled"
-                    ? "bg-amber-500/20 text-amber-400 border border-amber-500/40"
-                    : eventData?.status === "monitoring"
-                    ? "bg-purple-500/20 text-purple-400 border border-purple-500/40"
-                    : eventData?.status === "completed"
-                    ? "bg-emerald-600/30 text-emerald-300 border border-emerald-500/50"
-                    : "bg-slate-500/20 text-slate-300 border border-slate-500/40"
-                }`}
-              >
-                Operator: {eventData?.status || "Loading..."}
-              </span>
 
-              {/* Outbound Sync Status Badge */}
-              {syncInfo?.status === "pending" && (
-                <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1.5 shrink-0" title="Antrean pengiriman ke Excel Table3">
-                  <Clock className="w-3 h-3 animate-pulse" /> Menunggu sinkronisasi Excel
-                </span>
-              )}
-              {syncInfo?.status === "processing" && (
-                <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-500/20 text-blue-300 border border-blue-500/40 flex items-center gap-1.5 shrink-0" title="Pekerja latar belakang sedang mengirim ke Power Automate">
-                  <RefreshCw className="w-3 h-3 animate-spin" /> Sedang menyinkronkan Excel
-                </span>
-              )}
-              {syncInfo?.status === "success" && (
-                <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1.5 shrink-0" title="Excel Table3 berhasil diperbarui">
-                  <CheckCircle2 className="w-3 h-3" /> Excel berhasil diperbarui
-                </span>
-              )}
-              {syncInfo?.status === "failed" && (
-                <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/40 flex items-center gap-1.5 shrink-0" title={syncInfo.last_error || "Sinkronisasi gagal"}>
-                  <AlertCircle className="w-3 h-3" /> Sinkronisasi Excel gagal
-                </span>
-              )}
-              <div className="min-w-0 flex-1">
+                {/* Outbound Sync Status Badge */}
+                {syncInfo?.status === "pending" && (
+                  <span
+                    className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/40 inline-flex items-center gap-1.5 shrink-0 whitespace-nowrap"
+                    title="Antrean pengiriman ke Excel Table3"
+                  >
+                    <Clock className="w-3 h-3 animate-pulse shrink-0" />
+                    <span>Menunggu sinkronisasi Excel</span>
+                  </span>
+                )}
+                {syncInfo?.status === "processing" && (
+                  <span
+                    className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-blue-500/20 text-blue-300 border border-blue-500/40 inline-flex items-center gap-1.5 shrink-0 whitespace-nowrap"
+                    title="Pekerja latar belakang sedang mengirim ke Power Automate"
+                  >
+                    <RefreshCw className="w-3 h-3 animate-spin shrink-0" />
+                    <span>Sedang menyinkronkan Excel</span>
+                  </span>
+                )}
+                {syncInfo?.status === "success" && (
+                  <span
+                    className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 inline-flex items-center gap-1.5 shrink-0 whitespace-nowrap"
+                    title="Excel Table3 berhasil diperbarui"
+                  >
+                    <CheckCircle2 className="w-3 h-3 shrink-0" />
+                    <span>Excel berhasil diperbarui</span>
+                  </span>
+                )}
+                {syncInfo?.status === "failed" && (
+                  <span
+                    className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/40 inline-flex items-center gap-1.5 shrink-0 whitespace-nowrap"
+                    title={syncInfo.last_error || "Sinkronisasi gagal"}
+                  >
+                    <AlertCircle className="w-3 h-3 shrink-0" />
+                    <span>Sinkronisasi Excel gagal</span>
+                  </span>
+                )}
+              </div>
+
+              <div className="min-w-0 w-full">
                 <h2 id="unras-detail-title" className="text-sm sm:text-base font-bold text-white truncate">
                   {eventData?.isu_tuntutan || "Memuat Aksi Unjuk Rasa..."}
                 </h2>
-                <p className="text-[11px] text-[#98A4B8] truncate">
+                <p className="text-[11px] text-[#98A4B8] truncate mt-0.5">
                   {eventData?.kode_unras} • {eventData?.tanggal} • {eventData?.lokasi}
                 </p>
               </div>
             </div>
 
             {/* Right Action Container: Rigid width to protect button layout */}
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-2 shrink-0 self-start sm:self-center">
               <button
                 type="button"
                 onClick={() => setIsEditModalOpen(true)}
@@ -648,6 +667,7 @@ export function ProtestDetailModal({
                 <span className="whitespace-nowrap">Edit Data Unras</span>
               </button>
               <button
+                type="button"
                 onClick={onClose}
                 className="p-1.5 rounded-xl text-[#98A4B8] hover:text-white hover:bg-white/5 transition-colors cursor-pointer shrink-0"
                 aria-label="Tutup Detail Unras"

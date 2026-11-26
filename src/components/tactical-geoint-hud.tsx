@@ -41,6 +41,7 @@ export function calculateHaversineDistanceMeters(
 }
 
 export const BI_MONITORING_RADIUS_OPTIONS_METERS = [50, 100, 150, 200, 250] as const;
+export const UNRAS_RADIUS_OPTIONS_METERS = [50, 100, 150, 200, 250] as const;
 
 export interface TacticalGeoIntHudProps {
   isOpen: boolean;
@@ -52,7 +53,7 @@ export interface TacticalGeoIntHudProps {
   isOfficeRadiusEnabled?: boolean;
   onToggleOfficeRadius?: () => void;
   officeRadius: number; // 50, 100, 150, 200, 250 (meters)
-  unrasRadius: number; // 0, 250, 500, 1000, 1500
+  unrasRadius: number; // 50, 100, 150, 200, 250 (meters)
   onChangeOfficeRadius: (r: number) => void;
   onChangeUnrasRadius: (r: number) => void;
   onPlayCamera?: (camera: Camera) => void;
@@ -154,7 +155,7 @@ export function TacticalGeoIntHud({
       : 50
     : unrasRadius > 0
     ? unrasRadius
-    : 500;
+    : 50;
 
   const nearbyCameras = useMemo(() => {
     if (targetLat === null || targetLat === undefined || targetLng === null || targetLng === undefined) {
@@ -397,11 +398,7 @@ export function TacticalGeoIntHud({
               </div>
             ) : (
               <span className="text-[10px] font-mono text-blue-400 font-bold">
-                {unrasRadius === 0
-                  ? "Nonaktif"
-                  : unrasRadius >= 1000
-                  ? `${unrasRadius / 1000} km`
-                  : `${unrasRadius} m`}
+                {unrasRadius} m
               </span>
             )}
           </div>
@@ -425,8 +422,8 @@ export function TacticalGeoIntHud({
               ))}
             </div>
           ) : (
-            <div className="grid grid-cols-4 gap-1.5 pt-1">
-              {[250, 500, 1000, 1500].map((r) => (
+            <div className="grid grid-cols-5 gap-1.5 pt-1">
+              {UNRAS_RADIUS_OPTIONS_METERS.map((r) => (
                 <button
                   key={r}
                   type="button"
@@ -437,7 +434,7 @@ export function TacticalGeoIntHud({
                       : "bg-white/5 border-white/10 text-slate-300 hover:bg-white/10"
                   }`}
                 >
-                  {r >= 1000 ? `${r / 1000}km` : `${r}m`}
+                  {r} m
                 </button>
               ))}
             </div>
