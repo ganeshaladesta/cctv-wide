@@ -1244,15 +1244,6 @@ export function ProtestDetailModal({
                       >
                         Set Selesai & Arsipkan (Completed)
                       </button>
-
-                      <button
-                        type="button"
-                        disabled={submittingStatus || eventData.status === "cancelled"}
-                        onClick={() => handleTransitionStatus("cancelled")}
-                        className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-700 hover:bg-slate-600 text-white disabled:opacity-40 transition-colors"
-                      >
-                        Set Dibatalkan (Cancelled)
-                      </button>
                     </div>
                   </div>
 
