@@ -1081,7 +1081,6 @@ export function ProtestFormModal({
                   <option value="ongoing">ONGOING (Sedang Berlangsung)</option>
                   <option value="monitoring">MONITORING (Pemantauan Khusus)</option>
                   <option value="completed">COMPLETED (Selesai & Arsip)</option>
-                  <option value="cancelled">CANCELLED (Dibatalkan)</option>
                 </select>
               </div>
 
