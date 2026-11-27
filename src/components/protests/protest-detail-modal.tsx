@@ -258,6 +258,12 @@ export function ProtestDetailModal({
       const json = await res.json();
       if (res.ok && json.success && json.data) {
         setSyncInfo(json.data);
+        // Update local status_sumber badge ONLY after Excel confirms outbound sync success
+        if (json.data.status === "success" && json.data.status_sumber) {
+          setEventData((prev) =>
+            prev ? { ...prev, status_sumber: json.data.status_sumber } : prev
+          );
+        }
         return json.data.status;
       }
     } catch {}

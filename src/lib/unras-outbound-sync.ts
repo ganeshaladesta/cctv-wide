@@ -413,12 +413,16 @@ export async function dispatchOutboundSync(
       // HTTP 200 or 204: Excel row updated successfully
       if (response.status === 200 || response.status === 204) {
         const durationMs = Date.now() - startTime;
-        
-        // Update protest outbound sync state
+        const confirmedStatusSumber = mapSCCStatusToExcelStatus(
+          payload.fields?.["STATUS KEJADIAN"]
+        );
+
+        // Update protest outbound sync state & confirmed Excel status_sumber
         try {
           await protestStore.updateProtest(event.id, {
             last_outbound_synced_at: new Date().toISOString(),
-            outbound_sync_status: "success"
+            outbound_sync_status: "success",
+            status_sumber: confirmedStatusSumber
           }, { id: "system-outbound-sync", name: "Outbound Sync Service", email: "system@scc.go.id", role: "admin" });
         } catch {}
 

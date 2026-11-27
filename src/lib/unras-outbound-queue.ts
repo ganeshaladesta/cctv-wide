@@ -14,9 +14,10 @@
 import crypto from "node:crypto";
 import { getSupabaseAdminClient, isSupabaseConfigured } from "./supabase";
 import { protestStore } from "./protest-store";
-import { ProtestEvent, UnrasOutboundJob } from "./types/protests";
+import { ProtestEvent, SourceStatusCategory, UnrasOutboundJob } from "./types/protests";
 import {
   buildOutboundPayload,
+  mapSCCStatusToExcelStatus,
   OutboundSyncPayload,
   OutboundSyncResult,
   resolveOutboundIdUnras,
@@ -382,7 +383,11 @@ export async function updateOutboundJob(jobId: string, updates: Partial<UnrasOut
 async function updateProtestSyncStatusIfLatestJob(
   protestId: string,
   jobId: string,
-  updates: { outbound_sync_status: "pending" | "success" | "failed" | "none"; last_outbound_synced_at?: string }
+  updates: {
+    outbound_sync_status: "pending" | "success" | "failed" | "none";
+    last_outbound_synced_at?: string;
+    status_sumber?: SourceStatusCategory;
+  }
 ): Promise<void> {
   try {
     const latestJob = await getLatestOutboundJobByProtestId(protestId);
@@ -498,6 +503,9 @@ export async function processOutboundJob(
     // HTTP 200 or 204: Success
     if (response.status === 200 || response.status === 204) {
       const now = new Date().toISOString();
+      const confirmedStatusSumber: SourceStatusCategory = mapSCCStatusToExcelStatus(
+        sanitizedPayload.fields?.["STATUS KEJADIAN"]
+      );
       await updateOutboundJob(job.id, {
         status: "success",
         last_error: null,
@@ -505,10 +513,11 @@ export async function processOutboundJob(
         locked_at: null
       });
 
-      // Update protest record only if this job is still the latest job for this protest
+      // Update protest record (including confirmed Excel status_sumber) only if this job is still the latest job for this protest
       await updateProtestSyncStatusIfLatestJob(job.protest_id, job.id, {
         outbound_sync_status: "success",
-        last_outbound_synced_at: now
+        last_outbound_synced_at: now,
+        status_sumber: confirmedStatusSumber
       });
 
       logQueueDiagnostic({

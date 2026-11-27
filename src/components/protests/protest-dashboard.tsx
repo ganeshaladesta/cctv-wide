@@ -336,11 +336,12 @@ export function ProtestDashboard({
             const res = await fetch(`/api/protests/${id}/sync-status`, { cache: "no-store" });
             const json = await res.json();
             if (res.ok && json.success && json.data) {
+              const nextSyncStatus = json.data.status || "none";
               setRecordSyncStates((prev) => ({
                 ...prev,
                 [id]: {
                   ...prev[id],
-                  status: json.data.status || "none",
+                  status: nextSyncStatus,
                   last_error: json.data.last_error || null,
                   job_id: json.data.job_id || null,
                   attempts: json.data.attempts ?? 0,
@@ -348,6 +349,22 @@ export function ProtestDashboard({
                   retrying: false
                 }
               }));
+
+              // Update status_sumber on the card ONLY after Excel confirms outbound sync success
+              if (nextSyncStatus === "success" && json.data.status_sumber) {
+                setEvents((prev) =>
+                  prev.map((ev) =>
+                    ev.id === id
+                      ? {
+                          ...ev,
+                          outbound_sync_status: "success",
+                          status_sumber: json.data.status_sumber
+                        }
+                      : ev
+                  )
+                );
+                fetchStats();
+              }
             }
           } catch {}
         })

@@ -99,6 +99,7 @@ export async function GET(request: NextRequest, { params }: Params) {
         protest_id: protest.id,
         kode_unras: protest.kode_unras,
         status: job ? job.status : (protest.outbound_sync_status || "none"),
+        status_sumber: protest.status_sumber || null,
         attempts: job ? job.attempts : 0,
         max_attempts: job ? job.max_attempts : 5,
         last_error: safeError,
