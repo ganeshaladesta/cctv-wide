@@ -448,13 +448,21 @@ function createBIOfficePopupHtml(
 
   return `
     <div class="scc-bi-popup-root p-3 text-left font-sans text-white w-full box-border overflow-hidden" style="width: min(300px, calc(100vw - 32px)); max-width: 300px; box-sizing: border-box;">
-      <div class="flex items-center justify-between gap-2 pb-2 mb-2 border-b border-[#1E293B] pr-6">
-        <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border shrink-0 ${typeBadgeClass}">
-          ${office.office_type}
-        </span>
-        <span class="font-mono text-[10px] text-blue-400 font-bold truncate max-w-[120px]" title="${escapeHtml(office.office_id || office.id)}">
-          ${escapeHtml(office.office_id || office.id)}
-        </span>
+      <div class="grid grid-cols-[minmax(0,1fr)_36px] items-start gap-2.5 pb-2 mb-2 border-b border-[#1E293B]" style="display: grid; grid-template-columns: minmax(0, 1fr) 36px; gap: 10px; align-items: start;">
+        <div class="min-w-0 flex flex-col gap-1">
+          <div class="flex items-center gap-1.5 flex-wrap">
+            <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border shrink-0 ${typeBadgeClass}">
+              ${office.office_type}
+            </span>
+          </div>
+          <div class="flex items-center gap-1.5 min-w-0">
+            <span class="text-[9px] font-semibold uppercase tracking-wider text-slate-400 shrink-0">ID:</span>
+            <span class="font-mono text-[10px] text-blue-300 bg-blue-500/10 border border-blue-500/25 px-1.5 py-0.5 rounded font-bold truncate max-w-full" title="${escapeHtml(office.office_id || office.id)}">
+              ${escapeHtml(office.office_id || office.id)}
+            </span>
+          </div>
+        </div>
+        <div class="w-9 h-9 shrink-0 pointer-events-none" style="width: 36px; height: 36px;" aria-hidden="true"></div>
       </div>
 
       <h4 class="text-xs sm:text-[13px] font-bold text-white leading-snug mb-1 break-words">
@@ -556,20 +564,32 @@ function createProtestPopupHtml(
     `;
   }
 
+  const displayUnrasId = escapeHtml(p.kode_unras || p.id_kejadian);
+
   return `
     <div class="scc-protest-popup-root p-3.5 text-left font-sans text-white w-full box-border overflow-hidden" style="width: min(360px, calc(100vw - 40px)); max-width: 360px; box-sizing: border-box;">
-      <div class="flex items-center justify-between gap-2 pb-2 mb-2 border-b border-[#1E293B]">
-        <div class="flex items-center gap-1.5 flex-wrap">
-          <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${sBadge.bg}">
-            ${sBadge.label}
-          </span>
-          <span class="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider ${uBadge.bg}">
-            ${uBadge.label}
-          </span>
+      <div class="scc-protest-popup-header grid grid-cols-[minmax(0,1fr)_36px] items-start gap-2.5 pb-2.5 mb-2.5 border-b border-[#1E293B]" style="display: grid; grid-template-columns: minmax(0, 1fr) 36px; gap: 10px; align-items: start;">
+        <div class="min-w-0 flex flex-col gap-1.5">
+          <div class="flex items-center gap-1.5 flex-wrap">
+            <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider shrink-0 ${sBadge.bg}">
+              ${sBadge.label}
+            </span>
+            <span class="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider shrink-0 ${uBadge.bg}">
+              ${uBadge.label}
+            </span>
+          </div>
+          <div class="flex items-center gap-1.5 min-w-0">
+            <span class="text-[9px] font-semibold uppercase tracking-wider text-[#98A4B8] shrink-0">ID UNRAS:</span>
+            <span
+              data-testid="protest-popup-unras-id"
+              class="font-mono text-[11px] text-blue-300 bg-blue-500/10 border border-blue-500/25 px-2 py-0.5 rounded-md font-bold truncate max-w-full"
+              title="${displayUnrasId}"
+            >
+              ${displayUnrasId}
+            </span>
+          </div>
         </div>
-        <span class="font-mono text-[10px] text-[#98A4B8] font-bold truncate max-w-[130px]" title="${escapeHtml(p.kode_unras || p.id_kejadian)}">
-          ${escapeHtml(p.kode_unras || p.id_kejadian)}
-        </span>
+        <div class="w-9 h-9 shrink-0 pointer-events-none" style="width: 36px; height: 36px;" aria-hidden="true"></div>
       </div>
 
       <h4 class="text-xs sm:text-[13px] font-bold text-white leading-snug mb-2.5 break-words line-clamp-3">
@@ -928,6 +948,33 @@ export default function InteractiveMap({
 
     L.control.zoom({ position: "bottomright" }).addTo(map);
 
+    // Promote popupPane out of mapPane's CSS transform stacking context directly into .leaflet-container
+    // so the UNRAS detail card (z-index: 50) stacks above map filters (25-35) and Tactical HUD (30),
+    // while mapPane (z-index: 10) keeps tiles (1) and markers (10) below map filters.
+    const mapPane = map.getPane("mapPane");
+    const popupPane = map.getPane("popupPane");
+    const leafletContainerEl = map.getContainer();
+    let paneTransformObserver: MutationObserver | null = null;
+    const syncPopupPaneTransform = () => {
+      if (!mapPane || !popupPane) return;
+      popupPane.style.transform = mapPane.style.transform;
+      popupPane.classList.toggle("leaflet-zoom-anim", mapPane.classList.contains("leaflet-zoom-anim"));
+      popupPane.classList.toggle("leaflet-pan-anim", mapPane.classList.contains("leaflet-pan-anim"));
+    };
+
+    if (mapPane && popupPane && leafletContainerEl && popupPane.parentElement === mapPane) {
+      leafletContainerEl.appendChild(popupPane);
+      syncPopupPaneTransform();
+      map.on("move zoom viewreset moveend zoomend", syncPopupPaneTransform);
+      if (typeof MutationObserver !== "undefined") {
+        paneTransformObserver = new MutationObserver(syncPopupPaneTransform);
+        paneTransformObserver.observe(mapPane, {
+          attributes: true,
+          attributeFilter: ["style", "class"]
+        });
+      }
+    }
+
     // Official OpenStreetMap tile layer without any API key or CARTO dependency
     L.tileLayer(OSM_TILE_URL, {
       attribution: OSM_ATTRIBUTION,
@@ -1002,6 +1049,8 @@ export default function InteractiveMap({
     return () => {
       window.removeEventListener("resize", handleWinResize);
       resizeObs?.disconnect();
+      paneTransformObserver?.disconnect();
+      map.off("move zoom viewreset moveend zoomend", syncPopupPaneTransform);
       clusterGroup.clearLayers();
       plainGroup.clearLayers();
       protestGroup.clearLayers();
@@ -1546,18 +1595,17 @@ export default function InteractiveMap({
         darkFilter ? "osm-dark-tiles" : ""
       }`}
     >
-      {/* Map Canvas (z-index: 0) */}
+      {/* Map Canvas (no isolated stacking context on .leaflet-container so popupPane z-50 interleaves above controls z-25..35) */}
       <div
         ref={mapContainerRef}
-        style={{ zIndex: 0 }}
-        className="w-full h-full min-h-[420px] sm:min-h-[540px] z-0"
+        className="w-full h-full min-h-[420px] sm:min-h-[540px]"
       />
 
-      {/* Responsive Top Overlay Controls (z-index: 20 inside isolated map container) */}
+      {/* Responsive Top Overlay Controls (Layer 3: z-index: 25 inside isolated map container, below UNRAS detail card at z-index: 50) */}
       <div
         data-testid="map-controls-bar"
-        style={{ zIndex: 20 }}
-        className="absolute top-2.5 inset-x-2.5 z-[20] flex flex-wrap items-center justify-between gap-1.5 pointer-events-none"
+        style={{ zIndex: 25 }}
+        className="absolute top-2.5 inset-x-2.5 z-[25] flex flex-wrap items-center justify-between gap-1.5 pointer-events-none"
       >
         {/* Left: Tactical Map Layers & Radius Controls */}
         <div className="flex flex-wrap items-center gap-1.5 pointer-events-auto max-w-full">
@@ -1619,7 +1667,7 @@ export default function InteractiveMap({
             {isLayerMenuOpen && (
               <div
                 data-testid="layer-visibility-menu"
-                className="absolute top-full left-0 mt-1.5 w-64 bg-[#090C12]/98 backdrop-blur-xl border border-[var(--border-default)] rounded-xl shadow-2xl p-2.5 z-[60] space-y-2 text-xs"
+                className="absolute top-full left-0 mt-1.5 w-64 bg-[#090C12]/98 backdrop-blur-xl border border-[var(--border-default)] rounded-xl shadow-2xl p-2.5 z-[35] space-y-2 text-xs"
                 onClick={(e) => e.stopPropagation()}
               >
                 <div className="flex items-center justify-between pb-1.5 border-b border-[var(--border-subtle)]">

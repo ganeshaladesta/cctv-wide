@@ -57,14 +57,23 @@
   --duration-entrance: 440ms;
   --ease-standard: cubic-bezier(0.22, 1, 0.36, 1);
 
-  /* Strictly Isolated Z-Index Hierarchy */
+  /* Strictly Isolated Z-Index Hierarchy
+   * 1. Modal/dialog overlays: 9998 - 9999
+   * 2. UNRAS detail card & map popups: 45 - 50
+   * 3. Map filters (25), Tactical HUD (30), Filter dropdowns (35)
+   * 4. Markers and clusters: 10
+   * 5. Map tiles and base map: 0 - 1
+   */
   --z-background: 0;
   --z-base: 0;
   --z-app-shell: 1;
   --z-map-tiles: 0;
   --z-map-markers: 10;
-  --z-map-controls: 100;
-  --z-map-preview: 120;
+  --z-map-controls: 25;
+  --z-tactical-hud: 30;
+  --z-map-filter-dropdown: 35;
+  --z-map-preview: 45;
+  --z-map-detail-card: 50;
   --z-sticky-header: 200;
   --z-filter-toolbar: 300;
   --z-toolbar: 300;
@@ -233,26 +242,32 @@
   }
 }
 
-/* Isolated Map Stacking Context — Prevents any Leaflet pane or control from escaping z-index: 0 */
+/* Isolated Map Stacking Context — Keeps entire map below app modals (9999) while allowing child layers to interleave */
 .map-container {
   position: relative;
   isolation: isolate;
   z-index: var(--z-map-tiles, 0);
 }
 
-/* Leaflet Dark Theme & Strict Stacking Hierarchy Overrides */
+/* Leaflet Dark Theme & Strict 5-Tier Stacking Hierarchy Overrides
+ * NOTE: .leaflet-container MUST NOT set isolation: isolate or a numeric z-index,
+ * so that .leaflet-popup-pane (z-index: 50) stacks above sibling React map filters (25-35) and Tactical HUD (30),
+ * while .leaflet-map-pane (z-index: 10) keeps tiles (1) and markers (10) below map filters.
+ */
 .leaflet-container {
   position: relative !important;
-  isolation: isolate !important;
-  z-index: var(--z-map-tiles, 0) !important;
+  isolation: auto !important;
+  z-index: auto !important;
   background: var(--bg-primary) !important;
   font-family: inherit;
 }
 
-.leaflet-map-pane,
-.leaflet-pane,
+.leaflet-map-pane {
+  z-index: var(--z-map-markers, 10) !important;
+}
+
 .leaflet-tile-pane {
-  z-index: var(--z-map-tiles, 0) !important;
+  z-index: 1 !important;
 }
 
 .leaflet-overlay-pane,
@@ -261,15 +276,26 @@
   z-index: var(--z-map-markers, 10) !important;
 }
 
-.leaflet-tooltip-pane,
-.leaflet-popup-pane {
+.leaflet-tooltip-pane {
   z-index: 15 !important;
+}
+
+.leaflet-popup-pane {
+  z-index: var(--z-map-detail-card, 50) !important;
+  pointer-events: none !important;
+}
+
+.leaflet-popup-pane .leaflet-popup,
+.leaflet-fade-anim .leaflet-popup-pane .leaflet-popup,
+.leaflet-fade-anim .leaflet-map-pane .leaflet-popup {
+  opacity: 1 !important;
+  pointer-events: auto !important;
 }
 
 .leaflet-top,
 .leaflet-bottom,
 .leaflet-control {
-  z-index: var(--z-map-controls, 20) !important;
+  z-index: 20 !important;
 }
 
 .leaflet-bar a {
@@ -378,27 +404,33 @@
   box-sizing: border-box !important;
 }
 
-/* Close button positioning and styling */
+/* Close button positioning and styling — Dedicated 36x36px accessible hit area at top-right */
 .leaflet-container a.leaflet-popup-close-button {
-  top: 8px !important;
-  right: 8px !important;
+  top: 10px !important;
+  right: 10px !important;
   color: #94a3b8 !important;
-  font-size: 16px !important;
+  background: rgba(15, 23, 42, 0.85) !important;
+  border: 1px solid rgba(226, 232, 240, 0.16) !important;
+  font-size: 18px !important;
+  line-height: 1 !important;
   font-family: ui-sans-serif, system-ui, sans-serif !important;
   padding: 0 !important;
-  width: 20px !important;
-  height: 20px !important;
+  width: 36px !important;
+  height: 36px !important;
+  min-width: 36px !important;
+  min-height: 36px !important;
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
-  border-radius: 6px !important;
+  border-radius: 10px !important;
   transition: all 0.15s ease !important;
   z-index: 30 !important;
 }
 
 .leaflet-container a.leaflet-popup-close-button:hover {
   color: #ffffff !important;
-  background: rgba(255, 255, 255, 0.12) !important;
+  background: rgba(59, 130, 246, 0.25) !important;
+  border-color: rgba(96, 165, 250, 0.45) !important;
 }
 
 /* Mobile responsive constraints with safe 16px margins */
