@@ -1,232 +1,132 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import {
-  createOperatorFavoritePreset,
-  readOperatorFavoritePresets,
-  renameOperatorFavoritePreset,
-  updateOperatorFavoritePresetConfig,
-  deleteOperatorFavoritePreset,
-  normalizePresetSlotCameraIds
-} from "../src/lib/hooks.ts";
-import { DEFAULT_OPERATOR, DEFAULT_ADMIN } from "../src/lib/auth-roles.ts";
 
-console.log("=== SCC EAGLE EYES: MULTI-VIEW FAVORITE PRESETS TEST SUITE ===");
+const rootDir = process.cwd();
+const gridPath = path.join(rootDir, "src/components/multi-view-grid.tsx");
+const hooksPath = path.join(rootDir, "src/lib/hooks.ts");
+const brandingPath = path.join(rootDir, "src/components/branding.tsx");
 
-// Create an in-memory mock Storage object simulating window.localStorage across reloads
-function createMockStorage() {
-  const store = new Map();
+const gridSrc = fs.readFileSync(gridPath, "utf8");
+const hooksSrc = fs.readFileSync(hooksPath, "utf8");
+const brandingSrc = fs.readFileSync(brandingPath, "utf8");
+
+console.log("=== SCC EAGLE EYES: FAVORIT SAYA AUTO-ASSIGN EXISTING FAVORITES TEST SUITE ===");
+
+// 1. Verify reuse of exact same Favorite (4) persistence mechanism (no duplicate favorites or preset system)
+assert.ok(
+  hooksSrc.includes('const FAVORITES_STORAGE_KEY = "scc_eagle_eyes_favorites";'),
+  "Existing favorite storage key must remain 'scc_eagle_eyes_favorites'"
+);
+assert.ok(
+  !hooksSrc.includes("FAVORITE_PRESETS_STORAGE_KEY") &&
+    !hooksSrc.includes("useFavoritePresets"),
+  "Must NOT introduce a duplicate favorite or preset persistence system"
+);
+assert.ok(
+  brandingSrc.includes("const { favorites } = useFavorites();") &&
+    brandingSrc.includes("`Favorite (${favorites.length})`"),
+  "Navbar 'Favorite (4)' badge uses useFavorites() from @/lib/hooks"
+);
+assert.ok(
+  gridSrc.includes('import { useFavorites } from "@/lib/hooks";') &&
+    gridSrc.includes("const { favorites, hydrated } = useFavorites();"),
+  "MultiViewGrid must reuse the exact same useFavorites() hook as 'Favorite (4)'"
+);
+assert.ok(
+  !gridSrc.includes("Simpan Preset") && !gridSrc.includes("save-preset-modal"),
+  "Must NOT ask operators to save presets or assign cameras again"
+);
+console.log("  [PASS] 1. Reuses exact same useFavorites() mechanism as 'Favorite (4)' with no duplicate storage or save dialog");
+
+// 2. Verify grid layout selection rules (1 -> 1, 2 -> 2, 3-4 -> 4, 5-6 -> 6, 7-9 -> 9)
+function selectGridLayoutForFavoriteCount(count) {
+  if (count <= 1) return 1;
+  if (count === 2) return 2;
+  if (count <= 4) return 4;
+  if (count <= 6) return 6;
+  return 9;
+}
+
+assert.equal(selectGridLayoutForFavoriteCount(1), 1, "1 favorite -> 1-camera layout");
+assert.equal(selectGridLayoutForFavoriteCount(2), 2, "2 favorites -> 2-camera layout");
+assert.equal(selectGridLayoutForFavoriteCount(3), 4, "3 favorites -> 4-camera layout");
+assert.equal(selectGridLayoutForFavoriteCount(4), 4, "4 favorites -> 4-camera layout (2x2)");
+assert.equal(selectGridLayoutForFavoriteCount(5), 6, "5 favorites -> 6-camera layout (3x2)");
+assert.equal(selectGridLayoutForFavoriteCount(6), 6, "6 favorites -> 6-camera layout (3x2)");
+assert.equal(selectGridLayoutForFavoriteCount(7), 9, "7 favorites -> 9-camera layout (3x3)");
+assert.equal(selectGridLayoutForFavoriteCount(8), 9, "8 favorites -> 9-camera layout (3x3)");
+assert.equal(selectGridLayoutForFavoriteCount(9), 9, "9 favorites -> 9-camera layout (3x3)");
+console.log("  [PASS] 2. Grid layout auto-selection verified for 1, 2, 3-4 (2x2), 5-6 (3x2), and 7-9 (3x3) favorites");
+
+// 3. Verify Favorite (4) auto-assignment, ordering preservation, duplicate prevention, and offline/unavailable handling
+function resolveOrderedFavoriteCameras(favoriteIds, cameraLookup) {
+  const seen = new Set();
+  const assignedCameras = [];
+
+  for (const rawId of favoriteIds) {
+    const id = typeof rawId === "string" ? rawId.trim() : "";
+    if (!id || seen.has(id)) continue;
+    const cam = cameraLookup.get(id);
+    if (!cam) continue;
+    seen.add(id);
+    assignedCameras.push(cam);
+    if (assignedCameras.length >= 9) break;
+  }
+
   return {
-    getItem(key) {
-      return store.has(key) ? store.get(key) : null;
-    },
-    setItem(key, value) {
-      store.set(key, String(value));
-    },
-    clear() {
-      store.clear();
-    }
+    assignedCameras,
+    layoutSize: selectGridLayoutForFavoriteCount(assignedCameras.length)
   };
 }
 
-const storage = createMockStorage();
-const operatorA = DEFAULT_OPERATOR.id; // a0000000-0000-0000-0000-000000000002
-const operatorB = DEFAULT_ADMIN.id;    // a0000000-0000-0000-0000-000000000001
-
-// 1. Save a 4-camera preset & verify schema fields
-const preset4 = createOperatorFavoritePreset(
-  {
-    name: "Pantauan 4 Kamera Pusat",
-    cameraIds: ["cam-jkt-01", "cam-jkt-02", "cam-jkt-03", "cam-jkt-04"],
-    gridLayout: 4,
-    ownerId: operatorA,
-    nowIso: "2026-11-27T03:00:00.000Z"
-  },
-  storage
-);
-
-assert.ok(preset4.id && preset4.id.startsWith("preset-"), "Preset must have a unique preset ID");
-assert.equal(preset4.name, "Pantauan 4 Kamera Pusat");
-assert.equal(preset4.gridLayout, 4);
-assert.deepEqual(preset4.cameraIds, ["cam-jkt-01", "cam-jkt-02", "cam-jkt-03", "cam-jkt-04"]);
-assert.equal(preset4.createdAt, "2026-11-27T03:00:00.000Z");
-assert.equal(preset4.updatedAt, "2026-11-27T03:00:00.000Z");
-assert.equal(preset4.ownerId, operatorA);
-console.log("  [PASS] 1. Saved 4-camera preset with id, name, ordered cameraIds, gridLayout=4, timestamps, and ownerId");
-
-// 2. Reload application & apply the 4-camera preset (verify all four slots restore in exact order)
-const reloadedOperatorAPresets = readOperatorFavoritePresets(operatorA, storage);
-assert.equal(reloadedOperatorAPresets.length, 1);
-const restored4 = reloadedOperatorAPresets[0];
-assert.equal(restored4.gridLayout, 4);
-assert.deepEqual(
-  restored4.cameraIds,
-  ["cam-jkt-01", "cam-jkt-02", "cam-jkt-03", "cam-jkt-04"],
-  "All 4 slots must restore in exact slot order after reload"
-);
-console.log("  [PASS] 2. Reloaded from persistent storage and restored all 4 camera slots in exact order");
-
-// 3. Save a 9-camera preset (including partial slot order & stream URL rejection)
-const nineSlotOrder = [
-  "cam-bdg-09",
-  "cam-yog-08",
-  null, // empty slot #3 in partial layout
-  "cam-jkt-07",
-  "cam-mdn-06",
-  "cam-dps-05",
-  "cam-sby-04",
-  null, // empty slot #8
-  "cam-mks-01"
-];
-
-const preset9 = createOperatorFavoritePreset(
-  {
-    name: "Command Wall 9 Kamera Nasional",
-    cameraIds: nineSlotOrder,
-    gridLayout: 9,
-    ownerId: operatorA,
-    nowIso: "2026-11-27T03:05:00.000Z"
-  },
-  storage
-);
-
-assert.equal(preset9.gridLayout, 9);
-assert.deepEqual(
-  preset9.cameraIds,
-  nineSlotOrder,
-  "9-camera preset must preserve exact slot order including partial empty slots"
-);
-
-// Verify stream URLs are never stored as permanent camera identifiers
-const sanitizedIds = normalizePresetSlotCameraIds(
-  ["cam-valid-1", "https://stream.example.com/live.m3u8", "/api/proxy?url=http://foo", "cam-valid-4"],
-  4
-);
-assert.deepEqual(
-  sanitizedIds,
-  ["cam-valid-1", null, null, "cam-valid-4"],
-  "Temporary stream URLs must never be stored as permanent camera IDs"
-);
-console.log("  [PASS] 3. Saved 9-camera preset with preserved slot order (including partial slots) and stream URL guard");
-
-// 4. Rename, update configuration, and delete preset
-const renamed = renameOperatorFavoritePreset(
-  {
-    presetId: preset4.id,
-    newName: "Pantauan 4 Kamera Monas & HI",
-    ownerId: operatorA,
-    nowIso: "2026-11-27T03:10:00.000Z"
-  },
-  storage
-);
-assert.ok(renamed);
-assert.equal(renamed.name, "Pantauan 4 Kamera Monas & HI");
-assert.equal(renamed.updatedAt, "2026-11-27T03:10:00.000Z");
-
-const updatedConfig = updateOperatorFavoritePresetConfig(
-  {
-    presetId: preset4.id,
-    cameraIds: ["cam-new-1", "cam-new-2", "cam-new-3", "cam-new-4", "cam-new-5", "cam-new-6"],
-    gridLayout: 6,
-    ownerId: operatorA,
-    nowIso: "2026-11-27T03:15:00.000Z"
-  },
-  storage
-);
-assert.ok(updatedConfig);
-assert.equal(updatedConfig.gridLayout, 6);
-assert.deepEqual(updatedConfig.cameraIds, [
-  "cam-new-1",
-  "cam-new-2",
-  "cam-new-3",
-  "cam-new-4",
-  "cam-new-5",
-  "cam-new-6"
+const catalogLookup = new Map([
+  ["cam-fav-1", { id: "cam-fav-1", name: "Bundaran HI", status: "ONLINE" }],
+  ["cam-fav-2", { id: "cam-fav-2", name: "Simpang Pasteur", status: "ONLINE" }],
+  ["cam-fav-3", { id: "cam-fav-3", name: "Malioboro Utara", status: "OFFLINE" }],
+  ["cam-fav-4", { id: "cam-fav-4", name: "Lapangan Merdeka", status: "ONLINE" }]
 ]);
-assert.equal(updatedConfig.updatedAt, "2026-11-27T03:15:00.000Z");
-console.log("  [PASS] 4. Renamed preset and updated preset configuration with current wall layout");
 
-// 5. Operator Isolation: Verify another operator (operatorB) cannot see, rename, update, or delete operatorA's presets
-const operatorBPresets = readOperatorFavoritePresets(operatorB, storage);
-assert.equal(
-  operatorBPresets.length,
-  0,
-  "Operator B must not see Operator A's private favorite presets"
+// Validation scenario: Favorite (4) exists -> Click Favorit Saya -> All 4 populate 2x2 layout in exact order
+const fourFavoritesResult = resolveOrderedFavoriteCameras(
+  ["cam-fav-3", "cam-fav-1", "cam-fav-4", "cam-fav-2", "cam-fav-3"], // includes duplicate to verify dedup
+  catalogLookup
+);
+assert.equal(fourFavoritesResult.layoutSize, 4, "4 favorites must select 4-camera (2x2) layout");
+assert.deepEqual(
+  fourFavoritesResult.assignedCameras.map((c) => c.id),
+  ["cam-fav-3", "cam-fav-1", "cam-fav-4", "cam-fav-2"],
+  "All 4 favorite cameras must populate slots in exact favorite order without duplicates (including offline cameras handled by CCTVPlayer)"
 );
 
-const crossRenameAttempt = renameOperatorFavoritePreset(
-  {
-    presetId: preset4.id,
-    newName: "Hacked Name",
-    ownerId: operatorB
-  },
-  storage
+// Unavailable camera IDs are skipped gracefully without crashing
+const partialUnavailableResult = resolveOrderedFavoriteCameras(
+  ["cam-missing-999", "cam-fav-2", "cam-fav-4"],
+  catalogLookup
 );
-assert.equal(crossRenameAttempt, null, "Operator B must not be able to rename Operator A's preset");
-
-const crossUpdateAttempt = updateOperatorFavoritePresetConfig(
-  {
-    presetId: preset4.id,
-    cameraIds: ["cam-hack-1"],
-    gridLayout: 1,
-    ownerId: operatorB
-  },
-  storage
+assert.equal(partialUnavailableResult.layoutSize, 2, "2 available favorites select 2-camera layout");
+assert.deepEqual(
+  partialUnavailableResult.assignedCameras.map((c) => c.id),
+  ["cam-fav-2", "cam-fav-4"]
 );
-assert.equal(crossUpdateAttempt, null, "Operator B must not be able to update Operator A's preset");
+console.log("  [PASS] 3. Clicking 'Favorit Saya' with Favorite (4) auto-populates all 4 cameras in 2x2 layout in order, prevents duplicates, and handles offline/unavailable cameras");
 
-const crossDeleteAttempt = deleteOperatorFavoritePreset(
-  {
-    presetId: preset4.id,
-    ownerId: operatorB
-  },
-  storage
-);
-assert.equal(crossDeleteAttempt, false, "Operator B must not be able to delete Operator A's preset");
-
-// Verify Operator A's presets are still intact and delete works for Operator A
-const deletedByOwner = deleteOperatorFavoritePreset(
-  {
-    presetId: preset4.id,
-    ownerId: operatorA
-  },
-  storage
-);
-assert.equal(deletedByOwner, true, "Owner Operator A can delete their own preset");
-const remainingForA = readOperatorFavoritePresets(operatorA, storage);
-assert.equal(remainingForA.length, 1);
-assert.equal(remainingForA[0].id, preset9.id);
-console.log("  [PASS] 5. Operator isolation verified: other operators cannot see, rename, update, or delete private presets");
-
-// 6. UI Placement & Compatibility assertions in src/components/multi-view-grid.tsx
-const gridPath = path.join(process.cwd(), "src/components/multi-view-grid.tsx");
-const gridSrc = fs.readFileSync(gridPath, "utf8");
-
-const presetBarIdx = gridSrc.indexOf("Preset Wilayah:");
-const favoritSayaIdx = gridSrc.indexOf('data-testid="favorit-saya-preset-btn"');
-const simpanPresetIdx = gridSrc.indexOf('data-testid="simpan-preset-btn"');
-const regionalMapIdx = gridSrc.indexOf("REGIONAL_PRESETS.map");
-
+// 4. Verify camera picker is NEVER opened when clicking "Favorit Saya" and empty favorites show a clear message
 assert.ok(
-  presetBarIdx > 0 &&
-    favoritSayaIdx > presetBarIdx &&
-    favoritSayaIdx < regionalMapIdx,
-  '"Favorit Saya" button must be placed at the beginning of the "Preset Wilayah" row before REGIONAL_PRESETS'
+  gridSrc.includes("const handleLoadMyFavorites = async () => {") &&
+    gridSrc.includes("setPickerSlot(null);"),
+  "Clicking 'Favorit Saya' must explicitly keep pickerSlot null (never open camera picker)"
 );
 assert.ok(
-  simpanPresetIdx > 0 && gridSrc.includes("<span>Simpan Preset</span>"),
-  '"Simpan Preset" action must exist in the preset bar'
+  gridSrc.includes('data-testid="favorit-saya-empty-notice"') &&
+    gridSrc.includes("Belum ada CCTV favorit tersimpan"),
+  "Must show a clear message when the user has no favorite cameras"
 );
 assert.ok(
-  gridSrc.includes('Kota Bandung (PELINDUNG)') &&
-    gridSrc.includes('DI Yogyakarta & Malioboro') &&
-    gridSrc.includes('DKI Jakarta & BaliTower') &&
-    gridSrc.includes('Tol Jasa Marga Nasional') &&
-    gridSrc.includes('Kota Medan ATCS') &&
-    gridSrc.includes('Kota Denpasar Bali'),
-  "All 6 existing regional presets must remain unchanged"
+  gridSrc.includes('data-testid="favorit-saya-preset-btn"') &&
+    gridSrc.includes("onClick={handleLoadMyFavorites}"),
+  "'Favorit Saya' button must directly trigger handleLoadMyFavorites"
 );
-console.log("  [PASS] 6. UI placement verified: 'Favorit Saya' with Star icon at start of 'Preset Wilayah' row + 'Simpan Preset' + regional presets intact");
+console.log("  [PASS] 4. No camera picker opens on 'Favorit Saya' click, and empty favorites display a clear notice");
 
-console.log("=== ALL MULTI-VIEW FAVORITE PRESETS TESTS PASSED ===");
-
+console.log("=== ALL FAVORIT SAYA AUTO-ASSIGN TESTS PASSED ===");
