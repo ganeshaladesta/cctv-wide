@@ -2339,15 +2339,17 @@ class ProtestDataStore {
         continue;
       }
 
-      const existing = this.getProtestByIdLocal(rec.id_kejadian);
+      const existing =
+        (rec.kode_unras ? this.getProtestByIdLocal(rec.kode_unras) : null) ||
+        this.getProtestByIdLocal(rec.id_kejadian);
 
       if (existing) {
-        // FULL OVERWRITE FOR MATCHED RECORD
+        // FULL OVERWRITE FOR MATCHED RECORD (Strictly preserving immutable existing.id_kejadian and existing.kode_unras)
         const updates: Partial<ProtestEvent> = {
           ...rec,
           id: existing.id,
           id_kejadian: existing.id_kejadian,
-          kode_unras: existing.kode_unras
+          kode_unras: existing.kode_unras || rec.kode_unras
         };
         if ((rec as any).redaksi !== undefined) {
           updates.redaksi = (rec as any).redaksi;
@@ -2363,7 +2365,7 @@ class ProtestDataStore {
       const newEvent: ProtestEvent = {
         id,
         id_kejadian: rec.id_kejadian,
-        kode_unras: rec.kode_unras || `UNR-${Date.now()}`,
+        kode_unras: rec.kode_unras || "",
         tanggal: rec.tanggal,
         waktu_mulai: rec.waktu_mulai || null,
         waktu_selesai: rec.waktu_selesai || null,

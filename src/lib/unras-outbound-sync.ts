@@ -38,9 +38,81 @@ export interface OutboundSyncFields {
 export interface OutboundSyncPayload {
   origin: "scc";
   event_type: "unras.updated";
+  key_column: "ID UNRAS";
+  key_value: string;
   id_unras: string;
-  id_kejadian: string;
+  kode_unras: string;
   fields: OutboundSyncFields;
+}
+
+/**
+ * Columns that are strictly read-only/immutable in Excel and MUST NEVER be included
+ * in any outbound Power Automate update payload or field mapping.
+ */
+export const FORBIDDEN_OUTBOUND_EXCEL_KEYS = [
+  "ID KEJADIAN",
+  "id_kejadian",
+  "ID_KEJADIAN",
+  "idKejadian",
+  "ID UNRAS",
+  "ID_UNRAS",
+  "KODE UNRAS",
+  "KODE_UNRAS",
+  "BATAS",
+  "batas",
+  "Batas"
+] as const;
+
+/**
+ * Resolves the authoritative Excel `ID UNRAS` lookup key strictly from `event.kode_unras`.
+ * CRITICAL RULE:
+ * - `ID KEJADIAN` (`event.id_kejadian`) MUST NEVER be used as a fallback identity for outbound Excel.
+ * - If `kode_unras` is empty or was synthetically copied from a `KEJ-...` fallback ID, returns `""`.
+ */
+export function resolveOutboundIdUnras(event: Pick<ProtestEvent, "kode_unras" | "id_kejadian">): string {
+  const rawKode = typeof event.kode_unras === "string" ? event.kode_unras.trim() : "";
+  if (!rawKode || rawKode === "-" || rawKode === "--") {
+    return "";
+  }
+  // Prohibit synthetic 16-hex SHA-256 fallback IDs generated when ID UNRAS was missing in Excel
+  if (/^KEJ-\d{8}-[0-9A-F]{16}$/i.test(rawKode)) {
+    return "";
+  }
+  return rawKode;
+}
+
+/**
+ * Strips any forbidden/immutable Excel columns (`ID KEJADIAN`, `BATAS`, `ID UNRAS`) from
+ * an outbound payload's `fields` object and top-level structure before transmission.
+ */
+export function sanitizeOutboundPayload(payload: OutboundSyncPayload): OutboundSyncPayload {
+  const cleanFields: Record<string, any> = { ...(payload.fields || {}) };
+  for (const key of Object.keys(cleanFields)) {
+    const upper = key.trim().toUpperCase().replace(/[\s_-]+/g, " ");
+    if (
+      upper === "ID KEJADIAN" ||
+      upper === "IDKEJADIAN" ||
+      upper === "ID UNRAS" ||
+      upper === "IDUNRAS" ||
+      upper === "KODE UNRAS" ||
+      upper === "KODEUNRAS" ||
+      upper === "BATAS"
+    ) {
+      delete cleanFields[key];
+    }
+  }
+
+  const idUnras = typeof payload.id_unras === "string" ? payload.id_unras.trim() : "";
+  const sanitized: OutboundSyncPayload = {
+    origin: "scc",
+    event_type: "unras.updated",
+    key_column: "ID UNRAS",
+    key_value: idUnras,
+    id_unras: idUnras,
+    kode_unras: idUnras,
+    fields: cleanFields as OutboundSyncFields
+  };
+  return sanitized;
 }
 
 export interface OutboundSyncResult {
@@ -171,12 +243,15 @@ export function buildOutboundPayload(event: ProtestEvent): OutboundSyncPayload {
 
   // Wilayah / KP: prefer explicit kp_kpw, fallback to wilayah_hukum, default KPBI
   const kp = event.kp_kpw || (event.provinsi === "DKI Jakarta" ? "KPBI" : "KPwDN");
+  const idUnras = resolveOutboundIdUnras(event);
 
-  return {
+  return sanitizeOutboundPayload({
     origin: "scc",
     event_type: "unras.updated",
-    id_unras: event.kode_unras || "",
-    id_kejadian: event.id_kejadian || "",
+    key_column: "ID UNRAS",
+    key_value: idUnras,
+    id_unras: idUnras,
+    kode_unras: idUnras,
     fields: {
       "URUTAN BULAN": event.urutan_bulan ?? null,
       "TAHUN": event.tahun ?? null,
@@ -210,7 +285,7 @@ export function buildOutboundPayload(event: ProtestEvent): OutboundSyncPayload {
       "JARAK LOKASI UNRAS": event.jarak_lokasi_unras ?? null,
       "REDAKSI": editorial
     }
-  };
+  });
 }
 
 /**
@@ -352,7 +427,7 @@ export async function dispatchOutboundSync(
           await recordOutboundSyncLog({
             status: "success",
             kode_unras: payload.id_unras,
-            id_kejadian: payload.id_kejadian,
+            id_kejadian: event.id_kejadian || "",
             durationMs,
             records_updated: 1
           });
@@ -497,7 +572,7 @@ export async function dispatchOutboundSync(
     await recordOutboundSyncLog({
       status: "failed",
       kode_unras: payload.id_unras,
-      id_kejadian: payload.id_kejadian,
+      id_kejadian: event.id_kejadian || "",
       durationMs,
       error_details: lastError
     });

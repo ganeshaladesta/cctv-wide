@@ -143,8 +143,11 @@ test("3. Outbound Payload Contract & BATAS Column Safety", () => {
   // Contract verification
   assert.equal(payload.origin, "scc");
   assert.equal(payload.event_type, "unras.updated");
+  assert.equal(payload.key_column, "ID UNRAS");
+  assert.equal(payload.key_value, "U9999");
   assert.equal(payload.id_unras, "U9999", "id_unras is the matching key for ID UNRAS");
-  assert.equal(payload.id_kejadian, "KEJ-20261125-001");
+  assert.equal(payload.kode_unras, "U9999");
+  assert.equal("id_kejadian" in payload, false, "id_kejadian must NEVER be included in outbound payload");
   assert.equal(payload.fields["ESTIMASI JUMLAH MASSA"], 750, "Prefer verified actual crowd size");
 
   // Location Contract
@@ -265,7 +268,10 @@ test("6. Outbound HTTP Dispatch with Mock Power Automate Server (200, 404, 409)"
     assert.equal(receivedRequests.length, 1);
     assert.equal(receivedRequests[0].body.origin, "scc");
     assert.equal(receivedRequests[0].body.id_unras, "U-DISPATCH-99");
-    assert.equal(receivedRequests[0].body.id_kejadian, "KEJ-DISPATCH-001");
+    assert.equal(receivedRequests[0].body.key_column, "ID UNRAS");
+    assert.equal(receivedRequests[0].body.key_value, "U-DISPATCH-99");
+    assert.equal("id_kejadian" in receivedRequests[0].body, false, "id_kejadian must never be sent to Power Automate");
+    assert.equal("ID KEJADIAN" in receivedRequests[0].body.fields, false, "ID KEJADIAN must never be in fields");
     assert.equal(receivedRequests[0].body.fields["LOKASI"], "Jakarta Pusat");
     assert.equal(receivedRequests[0].body.fields["LOKASI UNRAS"], "Gedung BI");
 

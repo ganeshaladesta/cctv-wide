@@ -448,7 +448,11 @@ export function extractInboundMappedUpdates(
     updates.event_datetime = timeParsedIso;
   }
 
-  updates.raw_source_payload = row;
+  // Strictly preserve raw source row without mutating or filling ID KEJADIAN,
+  // and ensure id_kejadian / kode_unras are NEVER part of inbound update fields.
+  updates.raw_source_payload = { ...row };
+  delete (updates as any).id_kejadian;
+  delete (updates as any).kode_unras;
 
   return updates;
 }
@@ -1044,23 +1048,22 @@ async function processSyncCore(
       const cleanDateCompact = eventDateWib.replace(/-/g, "");
 
       // Step 2: Resolve Identifiers
+      // Rule: ID UNRAS (kode_unras) is the primary identity. ID KEJADIAN from Excel is immutable and read-only.
+      // Never copy ID KEJADIAN into kode_unras as a fallback identity.
       const rawIdKejadian = getField(row, "ID KEJADIAN", "id_kejadian", "ID_KEJADIAN", "idKejadian");
       const rawKodeUnras = getField(row, "ID UNRAS", "KODE_UNRAS", "id_unras", "kode_unras", "KODE UNRAS", "kodeUnras");
 
       let idKejadian = "";
-      let kodeUnras = "";
+      let kodeUnras = isValidKodeUnras(rawKodeUnras) ? String(rawKodeUnras).trim() : "";
 
       if (isValidIdKejadian(rawIdKejadian)) {
-        idKejadian = rawIdKejadian.trim();
-        kodeUnras = isValidKodeUnras(rawKodeUnras) ? rawKodeUnras.trim() : idKejadian;
-      } else if (isValidKodeUnras(rawKodeUnras)) {
-        // Safe deterministic identifier strategy when ID KEJADIAN is empty in Excel:
-        // KEJ-YYYYMMDD-{ID_UNRAS} (e.g. KEJ-20261120-U1473)
-        kodeUnras = rawKodeUnras.trim();
+        idKejadian = String(rawIdKejadian).trim();
+      } else if (kodeUnras) {
+        // Internal DB row key when Excel ID KEJADIAN is empty (Excel row's ID KEJADIAN itself stays empty and is never sent back to Excel)
         idKejadian = `KEJ-${cleanDateCompact}-${kodeUnras}`;
       } else {
         // Both ID KEJADIAN and ID UNRAS / KODE_UNRAS are missing or invalid (e.g. malformed "KEJ-20261123-").
-        // Generate deterministic fallback identifier using SHA-256 hash.
+        // Generate deterministic internal DB row key using SHA-256 hash.
         const lokasiRaw = getField(row, "LOKASI", "lokasi");
         const aliansiRaw = getField(row, "ORGANISASI", "aliansi", "organisasi_kelompok", "organisasi");
         const isuRaw = getField(row, "ISU", "tuntutan", "isu_tuntutan", "isu");
@@ -1072,20 +1075,32 @@ async function processSyncCore(
           continue;
         }
         idKejadian = fallbackId;
-        kodeUnras = fallbackId;
       }
 
-      // Extract complete mapped updates using field presence checks for full overwrite
+      const cleanKodeForLookup = kodeUnras
+        ? kodeUnras.toUpperCase().replace(/[^A-Z0-9]/g, "")
+        : "";
+
+      // Extract complete mapped updates using field presence checks for full overwrite (never mutates id_kejadian)
       const mappedUpdates = extractInboundMappedUpdates(row, eventDateWib, timeParsed.iso);
 
       // Rolling window boundary check: event_datetime >= period_start && event_datetime < period_end
       // Half-open interval [startMs, endMs)
       if (timeParsed.epochMs < startMs) {
         // Task 10: Ensure older registered incidents can receive full updates even if their event date is outside the rolling 7-day window
+        // Prioritize ID UNRAS (kode_unras) lookup first
         let canonicalId: string | null = null;
-        if (idKejadian && cachedRegistryKeys.has(`ID:${idKejadian}`)) {
+        if (cleanKodeForLookup && cachedRegistryKeys.has(`UNRAS:${cleanKodeForLookup}`)) {
+          canonicalId = cachedRegistryKeys.get(`UNRAS:${cleanKodeForLookup}`)!;
+        } else if (cleanKodeForLookup && cachedRegistryKeys.has(`SRC:${cleanKodeForLookup}`)) {
+          canonicalId = cachedRegistryKeys.get(`SRC:${cleanKodeForLookup}`)!;
+        } else if (kodeUnras) {
+          const inDbByKode = await protestStore.getProtestById(kodeUnras);
+          if (inDbByKode) canonicalId = inDbByKode.id_kejadian;
+        }
+        if (!canonicalId && idKejadian && cachedRegistryKeys.has(`ID:${idKejadian}`)) {
           canonicalId = cachedRegistryKeys.get(`ID:${idKejadian}`)!;
-        } else if (idKejadian) {
+        } else if (!canonicalId && idKejadian) {
           const inDb = await protestStore.getProtestById(idKejadian);
           if (inDb) canonicalId = inDb.id_kejadian;
         }
@@ -1102,7 +1117,7 @@ async function processSyncCore(
           } else {
             skipped++;
           }
-          errors.push(`[ID: ${idKejadian}] Rekor lama (${timeParsed.iso}) di luar jendela terdaftar di sistem: Data diperbarui (FULL OVERWRITE).`);
+          errors.push(`[ID: ${kodeUnras || idKejadian}] Rekor lama (${timeParsed.iso}) di luar jendela terdaftar di sistem: Data diperbarui (FULL OVERWRITE).`);
           continue;
         }
 
@@ -1120,13 +1135,15 @@ async function processSyncCore(
       if (!oldestEventDate || eventDateWib < oldestEventDate) oldestEventDate = eventDateWib;
       if (!newestEventDate || eventDateWib > newestEventDate) newestEventDate = eventDateWib;
 
-      // In-payload duplicate check: process first occurrence, skip subsequent occurrences
-      if (seenPayloadIds.has(idKejadian)) {
+      // In-payload duplicate check: prioritize ID UNRAS (kode_unras) as the primary duplicate detection key
+      const payloadDedupKey = cleanKodeForLookup ? `UNRAS:${cleanKodeForLookup}` : `ID:${idKejadian}`;
+      if (seenPayloadIds.has(payloadDedupKey) || seenPayloadIds.has(`ID:${idKejadian}`)) {
         skipped++;
-        errors.push(`[ID: ${idKejadian}] Dilewati: Duplikasi ID kejadian berulang di dalam payload batch yang sama (kejadian pertama telah diproses).`);
+        errors.push(`[ID: ${kodeUnras || idKejadian}] Dilewati: Duplikasi identitas berulang di dalam payload batch yang sama (kejadian pertama telah diproses).`);
         continue;
       }
-      seenPayloadIds.add(idKejadian);
+      seenPayloadIds.add(payloadDedupKey);
+      seenPayloadIds.add(`ID:${idKejadian}`);
 
       // Step 3: Extract core fields with flexible field normalization
       const lokasi = String(getField(row, "LOKASI", "lokasi") || "Lokasi Belum Ditentukan").trim();

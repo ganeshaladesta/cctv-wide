@@ -18,7 +18,9 @@ import { ProtestEvent, UnrasOutboundJob } from "./types/protests";
 import {
   buildOutboundPayload,
   OutboundSyncPayload,
-  OutboundSyncResult
+  OutboundSyncResult,
+  resolveOutboundIdUnras,
+  sanitizeOutboundPayload
 } from "./unras-outbound-sync";
 
 export const DEFAULT_OUTBOUND_HTTP_TIMEOUT_MS = 50000; // 50s timeout to accommodate ~40s Power Automate Excel processing within Vercel 60s maxDuration
@@ -147,8 +149,8 @@ export async function enqueueOutboundSync(
     };
   }
 
-  // 2. Validate matching key (ID UNRAS)
-  const idUnras = (event.kode_unras || "").trim();
+  // 2. Validate matching key (ID UNRAS strictly from kode_unras; ID KEJADIAN is NEVER permitted as fallback)
+  const idUnras = resolveOutboundIdUnras(event);
   if (!idUnras) {
     logQueueDiagnostic({
       correlation_id: correlationId,
@@ -158,11 +160,11 @@ export async function enqueueOutboundSync(
       id_unras: null,
       result: "skipped",
       duration_ms: Date.now() - startTime,
-      error: "Event missing kode_unras (ID UNRAS) required for Excel row lookup."
+      error: "Event missing valid kode_unras (ID UNRAS) required for Excel row lookup. ID KEJADIAN cannot be used as fallback identity."
     });
     return {
       queued: false,
-      reason: "Event missing kode_unras (ID UNRAS) required for Excel row lookup.",
+      reason: "Event missing valid kode_unras (ID UNRAS) required for Excel row lookup. ID KEJADIAN cannot be used as fallback identity.",
       duration_ms: Date.now() - startTime
     };
   }
@@ -440,6 +442,37 @@ export async function processOutboundJob(
     };
   }
 
+  const validKey = resolveOutboundIdUnras({
+    kode_unras: job.kode_unras,
+    id_kejadian: job.id_kejadian || ""
+  });
+  if (!validKey) {
+    const errorMsg = "Outbound job rejected: kode_unras (ID UNRAS) is missing or invalid. ID KEJADIAN cannot be used as fallback identity.";
+    await updateOutboundJob(job.id, {
+      status: "failed",
+      last_error: errorMsg,
+      processed_at: new Date().toISOString(),
+      locked_at: null
+    });
+    await updateProtestSyncStatusIfLatestJob(job.protest_id, job.id, {
+      outbound_sync_status: "failed"
+    });
+    return {
+      success: false,
+      status: "failed",
+      error: errorMsg,
+      duration_ms: Date.now() - startTime
+    };
+  }
+
+  const sanitizedPayload = sanitizeOutboundPayload({
+    ...(job.payload as OutboundSyncPayload),
+    id_unras: validKey,
+    kode_unras: validKey,
+    key_column: "ID UNRAS",
+    key_value: validKey
+  });
+
   const controller = new AbortController();
   // 50s default timeout: comfortably accommodates Power Automate execution (~40s) within Vercel 60s maxDuration
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -451,11 +484,11 @@ export async function processOutboundJob(
         "Content-Type": "application/json",
         "X-Sync-Origin": "scc",
         "X-Sync-Event": "unras.updated",
-        "X-Sync-Key": job.kode_unras,
+        "X-Sync-Key": validKey,
         "X-Job-Id": job.id,
         "X-Correlation-Id": correlationId
       },
-      body: JSON.stringify(job.payload),
+      body: JSON.stringify(sanitizedPayload),
       signal: controller.signal
     });
 

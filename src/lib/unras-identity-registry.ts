@@ -225,17 +225,61 @@ export function classifyCandidate(
 
   // ---------------------------------------------------------------------------
   // Strict ID-Based Resolution:
-  // Excel ID UNRAS is the ONLY identity key for inbound synchronization.
+  // Excel ID UNRAS (kode_unras) is the PRIMARY identity key for synchronization.
+  // Differences in ID KEJADIAN MUST NEVER cause a duplicate record when ID UNRAS matches.
   // Fuzzy heuristics (organization similarity, issue similarity, generic location)
   // are permanently disabled per business rules.
   // ---------------------------------------------------------------------------
   const rawKode = candidate.kode_unras ? String(candidate.kode_unras).trim() : "";
-  const cleanKode = rawKode.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const cleanKode = rawKode && !/^KEJ-\d{8}-[0-9A-F]{16}$/i.test(rawKode)
+    ? rawKode.toUpperCase().replace(/[^A-Z0-9]/g, "")
+    : "";
   const unrasKey = cleanKode ? `UNRAS:${cleanKode}` : null;
   const srcKey = cleanKode ? `SRC:${cleanKode}` : null;
   const exactIdKey = candidate.id_kejadian ? `ID:${candidate.id_kejadian}` : null;
 
-  // 1. Check exact ID in registry
+  // 1. Primary Identity Check: ID UNRAS (kode_unras) in registry & same-date protests
+  if (unrasKey && existingRegistryKeys.has(unrasKey)) {
+    const canonicalId = existingRegistryKeys.get(unrasKey)!;
+    return {
+      action: "EXISTING",
+      confidence: "confirmed",
+      canonicalId,
+      reason: `ID UNRAS '${candidate.kode_unras}' sudah tercatat di sistem registry identitas`,
+      fingerprints
+    };
+  }
+
+  if (srcKey && existingRegistryKeys.has(srcKey)) {
+    const canonicalId = existingRegistryKeys.get(srcKey)!;
+    return {
+      action: "EXISTING",
+      confidence: "confirmed",
+      canonicalId,
+      reason: `Kunci sumber '${srcKey}' sudah tercatat di sistem registry identitas`,
+      fingerprints
+    };
+  }
+
+  for (const existing of existingProtestsOnDate) {
+    if (cleanKode && existing.kode_unras) {
+      const existRaw = String(existing.kode_unras).trim();
+      const existCleanKode = !/^KEJ-\d{8}-[0-9A-F]{16}$/i.test(existRaw)
+        ? existRaw.toUpperCase().replace(/[^A-Z0-9]/g, "")
+        : "";
+      if (existCleanKode && existCleanKode === cleanKode) {
+        return {
+          action: "EXISTING",
+          confidence: "confirmed",
+          canonicalId: existing.id_kejadian,
+          reason: `ID UNRAS '${candidate.kode_unras}' identik dengan rekor yang sudah tersimpan di database (${existing.id_kejadian})`,
+          fingerprints
+        };
+      }
+    }
+  }
+
+  // 2. Secondary Check: exact ID KEJADIAN in registry (only when ID UNRAS did not match)
   if (exactIdKey && existingRegistryKeys.has(exactIdKey)) {
     const canonicalId = existingRegistryKeys.get(exactIdKey)!;
     return {
@@ -247,7 +291,6 @@ export function classifyCandidate(
     };
   }
 
-  // 2. Cross-check against all existing protests on same date or passed-in list
   for (const existing of existingProtestsOnDate) {
     if (existing.id_kejadian === candidate.id_kejadian) {
       return {
@@ -260,54 +303,7 @@ export function classifyCandidate(
     }
   }
 
-  // 3. Check immutable ID UNRAS in registry
-  // If an existing protest on the same date already has the same kode_unras with a DIFFERENT id_kejadian,
-  // this is a multi-point protest where each point is stored as a distinct record.
-  const hasSiblingPoint = existingProtestsOnDate.some(
-    (p) => p.kode_unras && cleanKode &&
-      String(p.kode_unras).trim().toUpperCase().replace(/[^A-Z0-9]/g, "") === cleanKode &&
-      p.id_kejadian !== candidate.id_kejadian
-  );
-
-  if (!hasSiblingPoint) {
-    if (unrasKey && existingRegistryKeys.has(unrasKey)) {
-      const canonicalId = existingRegistryKeys.get(unrasKey)!;
-      return {
-        action: "EXISTING",
-        confidence: "confirmed",
-        canonicalId,
-        reason: `ID UNRAS '${candidate.kode_unras}' sudah tercatat di sistem registry identitas`,
-        fingerprints
-      };
-    }
-    if (srcKey && existingRegistryKeys.has(srcKey)) {
-      const canonicalId = existingRegistryKeys.get(srcKey)!;
-      return {
-        action: "EXISTING",
-        confidence: "confirmed",
-        canonicalId,
-        reason: `Kunci sumber '${srcKey}' sudah tercatat di sistem registry identitas`,
-        fingerprints
-      };
-    }
-    for (const existing of existingProtestsOnDate) {
-      if (cleanKode && existing.kode_unras) {
-        const existCleanKode = String(existing.kode_unras).trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
-        if (existCleanKode && existCleanKode === cleanKode) {
-          return {
-            action: "EXISTING",
-            confidence: "confirmed",
-            canonicalId: existing.id_kejadian,
-            reason: `ID UNRAS '${candidate.kode_unras}' identik dengan rekor yang sudah tersimpan di database (${existing.id_kejadian})`,
-            fingerprints
-          };
-        }
-      }
-    }
-  }
-
   // Truly New, Independent Incident
-  // Fuzzy duplicate suppression disabled: different ID UNRAS values MUST NEVER be rejected or merged.
   return {
     action: "NEW",
     confidence: "distinct",
