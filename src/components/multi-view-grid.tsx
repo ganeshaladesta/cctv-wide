@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -14,6 +14,8 @@ import {
   Check,
   Star,
   AlertCircle,
+  Maximize,
+  Minimize,
   X
 } from "lucide-react";
 import { Camera } from "@/lib/types";
@@ -43,21 +45,44 @@ const LAYOUT_OPTIONS: Array<{
   size: GridLayoutSize;
   label: string;
   gridClass: string;
+  fullscreenGridClass: string;
 }> = [
-  { size: 1, label: "1 Kamera", gridClass: "grid-cols-1" },
-  { size: 2, label: "2 Kamera", gridClass: "grid-cols-1 md:grid-cols-2" },
-  { size: 4, label: "4 Kamera (2×2)", gridClass: "grid-cols-1 md:grid-cols-2" },
+  {
+    size: 1,
+    label: "1 Kamera",
+    gridClass: "grid-cols-1",
+    fullscreenGridClass: "grid-cols-1 grid-rows-1"
+  },
+  {
+    size: 2,
+    label: "2 Kamera",
+    gridClass: "grid-cols-1 md:grid-cols-2",
+    fullscreenGridClass: "grid-cols-1 md:grid-cols-2 md:grid-rows-1"
+  },
+  {
+    size: 4,
+    label: "4 Kamera (2×2)",
+    gridClass: "grid-cols-1 md:grid-cols-2",
+    fullscreenGridClass: "grid-cols-1 sm:grid-cols-2 sm:grid-rows-2"
+  },
   {
     size: 6,
     label: "6 Kamera (3×2)",
-    gridClass: "grid-cols-1 md:grid-cols-2 xl:grid-cols-3"
+    gridClass: "grid-cols-1 md:grid-cols-2 xl:grid-cols-3",
+    fullscreenGridClass: "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 lg:grid-rows-2"
   },
   {
     size: 9,
     label: "9 Kamera (3×3)",
-    gridClass: "grid-cols-1 md:grid-cols-2 xl:grid-cols-3"
+    gridClass: "grid-cols-1 md:grid-cols-2 xl:grid-cols-3",
+    fullscreenGridClass: "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 lg:grid-rows-3"
   }
 ];
+
+export function getFullscreenGridClass(size: GridLayoutSize): string {
+  const found = LAYOUT_OPTIONS.find((l) => l.size === size);
+  return found ? found.fullscreenGridClass : LAYOUT_OPTIONS[2].fullscreenGridClass;
+}
 
 const REGIONAL_PRESETS: Array<{ label: string; query: string }> = [
   { label: "Kota Bandung (PELINDUNG)", query: "Bandung" },
@@ -156,6 +181,7 @@ export default function MultiViewGrid({
   unrasContext
 }: MultiViewGridProps) {
   const { favorites, hydrated } = useFavorites();
+  const wallContainerRef = useRef<HTMLDivElement | null>(null);
   const [layoutSize, setLayoutSize] = useState<GridLayoutSize>(4);
   const [pickerSlot, setPickerSlot] = useState<number | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
@@ -167,10 +193,120 @@ export default function MultiViewGrid({
   const [loadingFavoritesPreset, setLoadingFavoritesPreset] = useState(false);
   const [isFavoritesPresetActive, setIsFavoritesPresetActive] = useState(false);
   const [favoritesNotice, setFavoritesNotice] = useState<string | null>(null);
+  const [isWallFullscreen, setIsWallFullscreen] = useState(false);
+  const [isFallbackFullscreen, setIsFallbackFullscreen] = useState(false);
+
+  const isEffectiveFullscreen = isWallFullscreen || isFallbackFullscreen;
 
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  // Synchronize UI state with the browser fullscreenchange event
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+
+    const handleFullscreenChange = () => {
+      const container = wallContainerRef.current;
+      const fsElement =
+        document.fullscreenElement ||
+        (document as unknown as { webkitFullscreenElement?: Element | null })
+          .webkitFullscreenElement ||
+        null;
+      const isContainerFullscreen = Boolean(container && fsElement === container);
+      setIsWallFullscreen(isContainerFullscreen);
+      if (isContainerFullscreen) {
+        setIsFallbackFullscreen(false);
+      }
+    };
+
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+      document.removeEventListener("webkitfullscreenchange", handleFullscreenChange);
+    };
+  }, []);
+
+  // Support Escape key and body scroll lock when fallback fullscreen is active
+  useEffect(() => {
+    if (!isFallbackFullscreen || typeof document === "undefined") return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && pickerSlot === null) {
+        e.preventDefault();
+        setIsFallbackFullscreen(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isFallbackFullscreen, pickerSlot]);
+
+  const handleEnterWallFullscreen = useCallback(async () => {
+    const container = wallContainerRef.current;
+    if (!container || typeof document === "undefined") return;
+
+    try {
+      const reqFs =
+        container.requestFullscreen ||
+        (
+          container as unknown as {
+            webkitRequestFullscreen?: () => Promise<void>;
+          }
+        ).webkitRequestFullscreen;
+
+      if (typeof reqFs === "function") {
+        await reqFs.call(container);
+        setIsWallFullscreen(true);
+        setIsFallbackFullscreen(false);
+      } else {
+        // Graceful fallback if Fullscreen API is unavailable in the browser context
+        setIsFallbackFullscreen(true);
+      }
+    } catch {
+      // Handle browser fullscreen rejection gracefully without breaking or reloading streams
+      setIsFallbackFullscreen(true);
+    }
+  }, []);
+
+  const handleExitWallFullscreen = useCallback(async () => {
+    if (typeof document !== "undefined") {
+      const fsElement =
+        document.fullscreenElement ||
+        (document as unknown as { webkitFullscreenElement?: Element | null })
+          .webkitFullscreenElement ||
+        null;
+      if (fsElement) {
+        try {
+          const exitFs =
+            document.exitFullscreen ||
+            (
+              document as unknown as {
+                webkitExitFullscreen?: () => Promise<void>;
+              }
+            ).webkitExitFullscreen;
+          if (typeof exitFs === "function") {
+            await exitFs.call(document);
+          }
+        } catch {}
+      }
+    }
+    setIsWallFullscreen(false);
+    setIsFallbackFullscreen(false);
+  }, []);
+
+  const handleToggleWallFullscreen = useCallback(() => {
+    if (isEffectiveFullscreen) {
+      handleExitWallFullscreen();
+    } else {
+      handleEnterWallFullscreen();
+    }
+  }, [isEffectiveFullscreen, handleExitWallFullscreen, handleEnterWallFullscreen]);
 
   // In UNRAS monitoring mode, auto-tune optimal layout size according to camera count
   useEffect(() => {
@@ -556,9 +692,18 @@ export default function MultiViewGrid({
   );
 
   return (
-    <div className="space-y-4">
-      {/* UNRAS Dedicated Workspace Banner */}
-      {unrasContext && (
+    <div
+      ref={wallContainerRef}
+      data-testid="multiview-command-wall-container"
+      data-fullscreen={isEffectiveFullscreen ? "true" : "false"}
+      className={
+        isEffectiveFullscreen
+          ? "fixed inset-0 z-[9500] w-screen h-screen bg-[#06080D] p-2.5 sm:p-3.5 flex flex-col gap-2.5 overflow-hidden"
+          : "space-y-4"
+      }
+    >
+      {/* UNRAS Dedicated Workspace Banner (hidden in dedicated fullscreen wall mode) */}
+      {unrasContext && !isEffectiveFullscreen && (
         <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-950/60 via-[#111622] to-indigo-950/50 border border-blue-500/40 shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2 mb-1.5">
@@ -605,7 +750,11 @@ export default function MultiViewGrid({
       )}
 
       {/* Control Header */}
-      <div className="p-3.5 sm:p-4 rounded-2xl ee-surface flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+      <div
+        className={`rounded-2xl ee-surface flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 shrink-0 ${
+          isEffectiveFullscreen ? "px-3.5 py-2" : "p-3.5 sm:p-4"
+        }`}
+      >
         <div className="flex items-start sm:items-center gap-2.5 min-w-0">
           <div className="p-2 rounded-xl bg-[#3B82F6]/15 border border-[#3B82F6]/35 text-[#60A5FA] shrink-0">
             <Grid className="w-5 h-5" />
@@ -619,15 +768,17 @@ export default function MultiViewGrid({
                 {unrasContext ? "UNRAS SCOPED" : "REAL-TIME • MULTI-STREAM"}
               </span>
             </div>
-            <p className="text-xs text-[#98A4B8]">
-              {unrasContext
-                ? `Monitoring terisolasi khusus aksi: ${unrasContext.event.lokasi} • ${cameras.length} kamera aktif`
-                : "Pantau 1, 2, 4, 6, atau 9 kamera CCTV secara simultan dengan lazy-loading otomatis."}
-            </p>
+            {!isEffectiveFullscreen && (
+              <p className="text-xs text-[#98A4B8]">
+                {unrasContext
+                  ? `Monitoring terisolasi khusus aksi: ${unrasContext.event.lokasi} • ${cameras.length} kamera aktif`
+                  : "Pantau 1, 2, 4, 6, atau 9 kamera CCTV secara simultan dengan lazy-loading otomatis."}
+              </p>
+            )}
           </div>
         </div>
 
-        {/* Layout Selector Buttons (1, 2, 4, 6, 9) */}
+        {/* Layout Selector Buttons (1, 2, 4, 6, 9) + Share Wall + Fullscreen Toggle */}
         <div className="flex flex-wrap items-center gap-1.5">
           {LAYOUT_OPTIONS.map((opt) => (
             <button
@@ -662,6 +813,32 @@ export default function MultiViewGrid({
             )}
           </button>
 
+          <button
+            type="button"
+            data-testid="multiview-fullscreen-toggle-btn"
+            onClick={handleToggleWallFullscreen}
+            title={isEffectiveFullscreen ? "Keluar Fullscreen" : "Masuk Fullscreen"}
+            aria-label={isEffectiveFullscreen ? "Keluar Fullscreen" : "Masuk Fullscreen"}
+            aria-pressed={isEffectiveFullscreen}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-colors ${
+              isEffectiveFullscreen
+                ? "bg-blue-600 hover:bg-blue-500 text-white border-blue-400/60 shadow-sm shadow-blue-500/20"
+                : "bg-[#161C2B] hover:bg-[#1C2436] text-[#E2E8F0] hover:text-white border-[var(--border-default)]"
+            }`}
+          >
+            {isEffectiveFullscreen ? (
+              <>
+                <Minimize className="w-3.5 h-3.5 text-white shrink-0" />
+                <span>Keluar Fullscreen</span>
+              </>
+            ) : (
+              <>
+                <Maximize className="w-3.5 h-3.5 text-[#60A5FA] shrink-0" />
+                <span>Fullscreen</span>
+              </>
+            )}
+          </button>
+
           {cameras.length > 0 && (
             <button
               type="button"
@@ -678,8 +855,8 @@ export default function MultiViewGrid({
         </div>
       </div>
 
-      {/* Empty / Unavailable Favorites Notice */}
-      {favoritesNotice && (
+      {/* Empty / Unavailable Favorites Notice (hidden in fullscreen mode) */}
+      {favoritesNotice && !isEffectiveFullscreen && (
         <div
           data-testid="favorit-saya-empty-notice"
           className="px-3.5 py-2.5 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-200 text-xs flex items-center justify-between gap-2"
@@ -699,43 +876,55 @@ export default function MultiViewGrid({
         </div>
       )}
 
-      {/* Quick Presets Bar: "Favorit Saya" at the beginning of "Preset Wilayah" row */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-1">
-        <span className="inline-flex items-center gap-1 text-xs font-medium text-[#98A4B8] shrink-0">
-          <Sparkles className="w-3.5 h-3.5 text-[#60A5FA]" />
-          Preset Wilayah:
-        </span>
-
-        {/* Dedicated "Favorit Saya" button that auto-assigns existing favorite cameras */}
-        <button
-          type="button"
-          data-testid="favorit-saya-preset-btn"
-          disabled={loadingFavoritesPreset}
-          onClick={handleLoadMyFavorites}
-          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full border text-xs font-semibold shrink-0 transition-colors ${
-            isFavoritesPresetActive
-              ? "bg-amber-500/20 border-amber-400/60 text-amber-200 shadow-sm shadow-amber-500/10"
-              : "bg-[#141A29] hover:bg-[#1A2235] border-amber-500/40 text-amber-300 hover:text-white"
-          }`}
+      {/* Quick Presets Bar: hidden when dedicated Fullscreen Mode is active */}
+      {!isEffectiveFullscreen && (
+        <div
+          data-testid="multiview-regional-presets-bar"
+          className="flex items-center gap-2 overflow-x-auto pb-1"
         >
-          <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400 shrink-0" />
-          <span>Favorit Saya ({favorites.length})</span>
-        </button>
+          <span className="inline-flex items-center gap-1 text-xs font-medium text-[#98A4B8] shrink-0">
+            <Sparkles className="w-3.5 h-3.5 text-[#60A5FA]" />
+            Preset Wilayah:
+          </span>
 
-        {REGIONAL_PRESETS.map((preset) => (
+          {/* Dedicated "Favorit Saya" button that auto-assigns existing favorite cameras */}
           <button
-            key={preset.label}
             type="button"
-            onClick={() => loadPreset(preset.query)}
-            className="px-3 py-1 rounded-full bg-[#111622] hover:bg-[#161C2B] border border-[var(--border-default)] hover:border-[var(--border-accent)] text-xs text-[#E2E8F0] hover:text-white shrink-0 transition-colors"
+            data-testid="favorit-saya-preset-btn"
+            disabled={loadingFavoritesPreset}
+            onClick={handleLoadMyFavorites}
+            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full border text-xs font-semibold shrink-0 transition-colors ${
+              isFavoritesPresetActive
+                ? "bg-amber-500/20 border-amber-400/60 text-amber-200 shadow-sm shadow-amber-500/10"
+                : "bg-[#141A29] hover:bg-[#1A2235] border-amber-500/40 text-amber-300 hover:text-white"
+            }`}
           >
-            {preset.label}
+            <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400 shrink-0" />
+            <span>Favorit Saya ({favorites.length})</span>
           </button>
-        ))}
-      </div>
+
+          {REGIONAL_PRESETS.map((preset) => (
+            <button
+              key={preset.label}
+              type="button"
+              onClick={() => loadPreset(preset.query)}
+              className="px-3 py-1 rounded-full bg-[#111622] hover:bg-[#161C2B] border border-[var(--border-default)] hover:border-[var(--border-accent)] text-xs text-[#E2E8F0] hover:text-white shrink-0 transition-colors"
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Responsive Camera Grid (ProgramsCard entrance without transforming active video players) */}
-      <div className={`grid gap-3 ${currentLayout.gridClass}`}>
+      <div
+        data-testid="multiview-camera-grid"
+        className={`grid gap-2.5 sm:gap-3 ${
+          isEffectiveFullscreen
+            ? `flex-1 min-h-0 overflow-y-auto lg:overflow-hidden ${currentLayout.fullscreenGridClass}`
+            : currentLayout.gridClass
+        }`}
+      >
         {slots.map((cam, idx) => (
           <ProgramsCard
             key={cam ? `${cam.id}-${idx}` : `empty-slot-${idx}`}
@@ -743,7 +932,9 @@ export default function MultiViewGrid({
             enableHoverLift={!cam}
             enableShimmer={!cam}
             className={`relative rounded-2xl overflow-hidden ee-surface hover:border-[var(--border-strong)] flex flex-col min-w-0 ${
-              layoutSize === 1
+              isEffectiveFullscreen
+                ? "h-full min-h-[190px]"
+                : layoutSize === 1
                 ? "h-[360px] sm:h-[550px]"
                 : layoutSize === 2
                 ? "h-[280px] sm:h-[390px]"
@@ -769,7 +960,12 @@ export default function MultiViewGrid({
                     />
                     <button
                       type="button"
-                      onClick={() => onSelectDetail(cam)}
+                      onClick={() => {
+                        if (isWallFullscreen) {
+                          handleExitWallFullscreen();
+                        }
+                        onSelectDetail(cam);
+                      }}
                       className="px-2 py-0.5 rounded-md bg-[#111622] hover:bg-[#1C2436] text-[10px] font-medium text-[#E2E8F0] border border-[var(--border-default)] transition-colors"
                     >
                       Detail
@@ -839,9 +1035,14 @@ export default function MultiViewGrid({
         ))}
       </div>
 
-      {/* Portaled Camera Slot Picker Modal (z-index: 900/1000 above Navbar & Map) */}
+      {/* Portaled Camera Slot Picker Modal (renders inside wallContainerRef during native fullscreen so empty slots remain usable) */}
       {mounted && typeof document !== "undefined"
-        ? createPortal(pickerModalContent, document.body)
+        ? createPortal(
+            pickerModalContent,
+            isWallFullscreen && wallContainerRef.current
+              ? wallContainerRef.current
+              : document.body
+          )
         : pickerModalContent}
     </div>
   );
