@@ -174,6 +174,19 @@ export function resolveOrderedFavoriteCameras(
   };
 }
 
+// Module-scoped session state so the picker search query persists across modal open/close cycles,
+// slot switches, and component mount/unmount cycles within the active session (starts empty on a fresh session).
+let sessionPickerSearchQuery = "";
+
+export function getPersistedPickerSearchQuery(): string {
+  return sessionPickerSearchQuery;
+}
+
+export function setPersistedPickerSearchQuery(query: string): string {
+  sessionPickerSearchQuery = query;
+  return sessionPickerSearchQuery;
+}
+
 export default function MultiViewGrid({
   cameras,
   onSetCameras,
@@ -184,7 +197,7 @@ export default function MultiViewGrid({
   const wallContainerRef = useRef<HTMLDivElement | null>(null);
   const [layoutSize, setLayoutSize] = useState<GridLayoutSize>(4);
   const [pickerSlot, setPickerSlot] = useState<number | null>(null);
-  const [searchTerm, setSearchTerm] = useState("");
+  const [searchTerm, setSearchTerm] = useState<string>(() => sessionPickerSearchQuery);
   const [searchResults, setSearchResults] = useState<Camera[]>([]);
   const [favoriteCameraPool, setFavoriteCameraPool] = useState<Camera[]>([]);
   const [searching, setSearching] = useState(false);
@@ -384,6 +397,7 @@ export default function MultiViewGrid({
   }, [favoriteIdsKey, hydrated, pickerSlot]);
 
   const handleSearchCameras = async (q: string) => {
+    setPersistedPickerSearchQuery(q);
     setSearchTerm(q);
     setSearching(true);
     try {
@@ -401,10 +415,14 @@ export default function MultiViewGrid({
     }
   };
 
+  const handleClearPickerSearch = () => {
+    handleSearchCameras("");
+  };
+
   const openPickerForSlot = (slotIdx: number) => {
     setPickerSlot(slotIdx);
-    setSearchTerm("");
-    handleSearchCameras("");
+    // Preserve the active search keyword across open/close cycles and slot switches
+    handleSearchCameras(searchTerm);
   };
 
   const { favoriteItems, regularItems } = useMemo(
@@ -615,7 +633,7 @@ export default function MultiViewGrid({
             </div>
 
             <div className="p-3 border-b border-[var(--border-subtle)]">
-              <div className="relative">
+              <div className="relative flex items-center">
                 <Search className="w-4 h-4 text-[#98A4B8] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <input
                   type="text"
@@ -623,8 +641,20 @@ export default function MultiViewGrid({
                   value={searchTerm}
                   onChange={(e) => handleSearchCameras(e.target.value)}
                   placeholder="Cari nama kamera, jalan, kota, atau provinsi (contoh: Malioboro, Pasteur, Medan, Tol)..."
-                  className="w-full pl-9 pr-4 py-2 rounded-xl ee-input text-xs placeholder-[#657287]"
+                  className="w-full pl-9 pr-9 py-2 rounded-xl ee-input text-xs placeholder-[#657287]"
                 />
+                {searchTerm.length > 0 && (
+                  <button
+                    type="button"
+                    data-testid="picker-search-clear-btn"
+                    onClick={handleClearPickerSearch}
+                    aria-label="Hapus pencarian kamera"
+                    title="Hapus pencarian"
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 rounded-md text-[#98A4B8] hover:text-white hover:bg-white/10 transition-colors"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
             </div>
 
